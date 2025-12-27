@@ -25,7 +25,8 @@ provider "registry.opentofu.org/bpg/proxmox" {
 }
 
 provider "registry.opentofu.org/hashicorp/local" {
-  version = "2.6.1"
+  version     = "2.6.1"
+  constraints = ">= 2.6.1"
   hashes = [
     "h1:+XfQ7VmNtYMp0eOnoQH6cZpSMk12IP1X6tEkMoMGQ/A=",
     "zh:0416d7bf0b459a995cf48f202af7b7ffa252def7d23386fc05b34f67347a22ba",
