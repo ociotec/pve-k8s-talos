@@ -1,0 +1,36 @@
+# OpenTofu/Terraform state files
+*.tfstate
+*.tfstate.*
+
+# Crash log files
+crash.log
+
+# OpenTofu/Terraform variable files
+*.tfvars
+*.tfvars.json
+
+# Sensitive files
+.terraformrc
+terraform.rc
+
+# Directory for OpenTofu/Terraform modules and plugins
+.terraform/
+
+# Override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Plan output
+*.tfplan
+
+# Other files
+patches/network-*.yaml
+.envrc
+kubeconfig
+talosconfig
+talos.tf
+vms_constants.tf
+vms_list.tf
+vms_resources.tf

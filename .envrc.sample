@@ -1,0 +1,9 @@
+#!/bin/bash
+export PROXMOX_VE_ENDPOINT="https://<your-proxmox-ve-ip-address>:8006/"
+# Define PROXMOX_VE_USERNAME + PROXMOX_VE_PASSWORD or preferably use
+# PROXMOX_VE_API_TOKEN for better security practices.
+export PROXMOX_VE_USERNAME="my_username@pam"
+export PROXMOX_VE_PASSWORD="your_password_here"
+export PROXMOX_VE_API_TOKEN="my_username@pam!my_token_name=my_token_value"
+# Set to "true" to skip SSL certificate verification (not recommended for production)
+export PROXMOX_VE_INSECURE="true"

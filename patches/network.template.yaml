@@ -1,0 +1,15 @@
+machine:
+  network:
+    interfaces:
+      # How to select the correct network interface based on its bus path instead of its name.
+      # https://docs.siderolabs.com/talos/v1.9/networking/predictable-interface-names#single-network-interface
+      - deviceSelector:
+          busPath: "0*"
+        addresses:
+          - ${ip}/${cidr}
+        routes:
+          - network: 0.0.0.0/0
+            gateway: ${gateway}
+    nameservers:
+      - ${dns1}
+      - ${dns2}

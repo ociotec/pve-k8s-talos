@@ -1,0 +1,21 @@
+variable "resources" {
+  type = map(object({
+    vcpus  = number
+    memory = number
+    disks  = list(number)
+  }))
+  default = {
+    # These are example values, rename the file to remove
+    # ".sample" and update them to match your environment
+    "controlplane" = {
+      vcpus  = 2
+      memory = 2048
+      disks  = [32]
+    }
+    "worker" = {
+      vcpus  = 4
+      memory = 8192
+      disks  = [32, 128] # Several disks can be defined, first one is used as root disk
+    }
+  }
+}

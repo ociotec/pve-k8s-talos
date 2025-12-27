@@ -1,0 +1,48 @@
+variable "vms" {
+  type = map(object({
+    node_name = string
+    vm_id     = number
+    type      = string
+    ip        = string
+  }))
+  default = {
+    # These are example values, rename the file to remove
+    # ".sample" and update them to match your environment
+    "talos-cp-01" = {
+      node_name = "pve01"
+      vm_id     = 1001
+      type      = "controlplane"
+      ip        = "192.168.1.51"
+    }
+    "talos-cp-02" = {
+      node_name = "pve02"
+      vm_id     = 1002
+      type      = "controlplane"
+      ip        = "192.168.1.52"
+    }
+    "talos-cp-03" = {
+      node_name = "pve03"
+      vm_id     = 1003
+      type      = "controlplane"
+      ip        = "192.168.1.53"
+    }
+    "talos-wk-01" = {
+      node_name = "pve01"
+      vm_id     = 1011
+      type      = "worker"
+      ip        = "192.168.1.61"
+    }
+    "talos-wk-02" = {
+      node_name = "pve02"
+      vm_id     = 1012
+      type      = "worker"
+      ip        = "192.168.1.62"
+    }
+    "talos-wk-03" = {
+      node_name = "pve03"
+      vm_id     = 1013
+      type      = "worker"
+      ip        = "192.168.1.63"
+    }
+  }
+}

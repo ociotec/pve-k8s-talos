@@ -1,0 +1,10 @@
+machine:
+  sysctls:
+    # Disable ASLR (Address Space Layout Randomization)
+    # Possible values:
+    # 0 - ASLR is disabled
+    # 1 - Conservative randomization
+    # 2 - Full randomization (default)
+    # After cluster has been provisioned, this setting can be checked via:
+    #   talosctl -n 192.168.1.61 read /proc/sys/kernel/randomize_va_space
+    kernel.randomize_va_space: "0"
