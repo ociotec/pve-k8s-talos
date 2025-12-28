@@ -27,6 +27,11 @@ locals {
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
   ]
+  rook_toolbox = [
+    for doc in split("\n---\n", file("${path.module}/../manifests/toolbox.yaml")) :
+    yamldecode(doc)
+    if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
+  ]
 
   rook_common_namespace = [
     for m in local.rook_common : m
@@ -61,4 +66,10 @@ resource "kubernetes_manifest" "rook_operator" {
   for_each   = { for i, m in local.rook_operator : i => m }
   manifest   = each.value
   depends_on = [kubernetes_manifest.rook_common]
+}
+
+resource "kubernetes_manifest" "rook_toolbox" {
+  for_each   = { for i, m in local.rook_toolbox : i => m }
+  manifest   = each.value
+  depends_on = [kubernetes_manifest.rook_operator]
 }

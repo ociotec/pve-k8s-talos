@@ -124,19 +124,40 @@ wait_for_cephcluster_ready() {
   local timeout_seconds="${3:-900}"
   local start
   local phase
+  local health
 
   start="$(date +%s)"
   while true; do
     echo -n "."
     phase="$(kubectl -n "${namespace}" get cephcluster "${name}" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
-    if [[ "${phase}" == "Ready" ]]; then
+    health="$(kubectl -n "${namespace}" get cephcluster "${name}" -o jsonpath='{.status.ceph.health}' 2>/dev/null || true)"
+    if [[ "${phase}" == "Ready" && "${health}" == "HEALTH_OK" ]]; then
       echo
-      message "CephCluster ${namespace}/${name} is Ready (phase=Ready)."
+      message "CephCluster ${namespace}/${name} is Ready (phase=Ready, health=HEALTH_OK)."
       break
     fi
     if (( $(date +%s) - start >= timeout_seconds )); then
       echo
-      error "Timed out waiting for CephCluster ${namespace}/${name} to become Ready (last phase: ${phase:-unknown})." >&2
+      error "Timed out waiting for CephCluster ${namespace}/${name} to become Ready (phase=${phase:-unknown}, health=${health:-unknown})." >&2
+      exit 1
+    fi
+    sleep 5
+  done
+}
+
+wait_for_dashboard_cert() {
+  local timeout_seconds="${1:-300}"
+  local start
+
+  start="$(date +%s)"
+  while true; do
+    if kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph config-key get mgr/dashboard/crt 1>/dev/null 2>&1 \
+      && kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph config-key get mgr/dashboard/key 1>/dev/null 2>&1; then
+      message "Ceph dashboard SSL certificate is available."
+      break
+    fi
+    if (( $(date +%s) - start >= timeout_seconds )); then
+      error "Timed out waiting for Ceph dashboard SSL certificate to be available." >&2
       exit 1
     fi
     sleep 5
@@ -198,9 +219,15 @@ else
     wait_for_cephcluster_ready "rook-ceph" "rook-ceph" "900"
   fi
 
+  message "Deploying Rook Ceph CSI storage classes..."
+  tofu -chdir=rook/04-csi init 1>/dev/null
+  tofu -chdir=rook/04-csi apply -auto-approve 1>/dev/null
+  kubectl -n rook-ceph get storageclasses.storage.k8s.io
+
   message "Deploying Rook Ceph dashboard..."
   tofu -chdir=rook/03-dashboard init 1>/dev/null
   tofu -chdir=rook/03-dashboard apply -auto-approve 1>/dev/null
+  wait_for_dashboard_cert "300"
   dashboard_nodeport=$(kubectl -n rook-ceph get svc rook-ceph-mgr-dashboard-external-https -o jsonpath='{.spec.ports[?(@.name=="dashboard")].nodePort}')
   worker_ip=$(first_worker_ip "${PWD}/vms_list.tf")
   message "Rook Ceph Dashboard is available at https://${worker_ip}:${dashboard_nodeport}/"
@@ -218,11 +245,6 @@ else
     error "Dashboard password secret not found yet. Retry: kubectl -n rook-ceph get secret rook-ceph-dashboard-password"
     exit 1
   fi
-
-  message "Deploying Rook Ceph CSI storage classes..."
-  tofu -chdir=rook/04-csi init 1>/dev/null
-  tofu -chdir=rook/04-csi apply -auto-approve 1>/dev/null
-  kubectl -n rook-ceph get storageclasses.storage.k8s.io
 fi
 
 message "Cluster deployed successfully in $(render_elapsed "${deploy_start}")."
