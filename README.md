@@ -21,7 +21,7 @@ brew install direnv
 Then install defined dependencies in `infra&/main.tf` file with:
 
 ```bash
-tofu init
+tofu init -upgrade
 ```
 
 ### Customize your setup
@@ -87,6 +87,124 @@ talosctl stats --nodes 192.168.1.51
 kubectl get nodes
 ```
 
+### Rook Ceph
+
+Rook is split into several plan applies to avoid the CRD plan-time limitation.
+
+#### CRDs + common + operator
+
+First, init & apply CRDs + common + operator from the rook/01 module:
+
+```bash
+tofu -chdir=rook/01-crds-common-operator init
+tofu -chdir=rook/01-crds-common-operator apply -auto-approve
+```
+
+Wait till operator is running in ready state:
+
+```bash
+watch -n1 kubectl get pods -n rook-ceph
+# Something similar to this should be displayed
+NAME                                 READY   STATUS              RESTARTS   AGE
+rook-ceph-operator-f7867cb4b-j9qc4                        1/1     Running     0               30m
+```
+
+#### Operator creates the cluster
+
+Then init & apply the cluster CR in the separate module:
+
+```bash
+tofu -chdir=rook/02-cluster init
+tofu -chdir=rook/02-cluster apply -auto-approve
+```
+
+Wait till operator is running in ready state:
+
+```bash
+watch -n1 kubectl get pods -n rook-ceph
+# Something similar to this should be displayed
+NAME                                                      READY   STATUS      RESTARTS        AGE
+csi-cephfsplugin-bgc24                                    3/3     Running     1 (10m ago)     10m
+csi-cephfsplugin-dk746                                    3/3     Running     1 (10m ago)     10m
+csi-cephfsplugin-fvbpb                                    3/3     Running     1 (10m ago)     10m
+csi-cephfsplugin-provisioner-76f4969f64-dksnv             6/6     Running     4 (9m26s ago)   10m
+csi-cephfsplugin-provisioner-76f4969f64-td64m             6/6     Running     1 (10m ago)     10m
+csi-rbdplugin-4zv88                                       3/3     Running     1 (10m ago)     10m
+csi-rbdplugin-provisioner-7fcf98fc66-cbl6w                6/6     Running     1 (10m ago)     10m
+csi-rbdplugin-provisioner-7fcf98fc66-p4bbn                6/6     Running     4 (9m20s ago)   10m
+csi-rbdplugin-slw2x                                       3/3     Running     1 (10m ago)     10m
+csi-rbdplugin-z96gx                                       3/3     Running     1 (10m ago)     10m
+rook-ceph-crashcollector-talos-g0a-1fy-6c4d7765b9-wgqw7   1/1     Running     0               9m23s
+rook-ceph-crashcollector-talos-lhn-rw4-6765469886-px7n8   1/1     Running     0               8m29s
+rook-ceph-crashcollector-talos-t5y-zub-6ff5989786-rw7jm   1/1     Running     0               8m30s
+rook-ceph-exporter-talos-g0a-1fy-85f85dbd97-7cgjj         1/1     Running     0               9m23s
+rook-ceph-exporter-talos-lhn-rw4-7c7fff48bb-dqwv6         1/1     Running     0               8m26s
+rook-ceph-exporter-talos-t5y-zub-84fbcc7594-f7m2t         1/1     Running     0               8m27s
+rook-ceph-mgr-a-57f77966b9-7xjk7                          3/3     Running     0               9m20s
+rook-ceph-mgr-b-67bd5d7648-j67zm                          3/3     Running     0               9m19s
+rook-ceph-mon-a-5f4b4f54db-b9nrz                          2/2     Running     0               10m
+rook-ceph-mon-b-9455f46b6-9lbbd                           2/2     Running     0               10m
+rook-ceph-mon-c-64d8f5665d-8wfxk                          2/2     Running     0               9m47s
+rook-ceph-operator-f7867cb4b-j9qc4                        1/1     Running     0               31m
+rook-ceph-osd-0-f96ff4b47-dgsdm                           2/2     Running     0               7m21s
+rook-ceph-osd-1-5bf66dfdc8-8zg8n                          2/2     Running     0               6m57s
+rook-ceph-osd-2-7dd7c8cf97-gmfm5                          2/2     Running     0               6m30s
+rook-ceph-osd-prepare-talos-g0a-1fy-vjq5l                 0/1     Completed   0               7m31s
+rook-ceph-osd-prepare-talos-lhn-rw4-mvqtz                 0/1     Completed   0               7m28s
+rook-ceph-osd-prepare-talos-t5y-zub-wsg42                 0/1     Completed   0               7m25s
+```
+
+#### Ceph dashboard
+
+In order to visualize Ceph web dashboard, init & apply this separate module:
+
+```bash
+tofu -chdir=rook/03-dashboard init
+tofu -chdir=rook/03-dashboard apply -auto-approve
+```
+
+A node port service is created to access the web dashboard, to know which TCP port is used, just list the service:
+
+```bash
+kubectl -n rook-ceph get svc rook-ceph-mgr-dashboard-external-https
+# Something similar to this should be displayed
+NAME                                     TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)          AGE
+rook-ceph-mgr-dashboard-external-https   NodePort   10.96.145.137   <none>        8443:32390/TCP   88s
+# The port in this k8s cluster was 32390
+```
+
+Default `admin` user password is generated and created as a secret, to display it just run:
+
+```bash
+kubectl -n rook-ceph get secret rook-ceph-dashboard-password -o jsonpath="{['data']['password']}" | base64 --decode && echo
+```
+
+#### k8s CSI creation
+
+In order to install k8s CSI providers based on:
+
+- CephFS: Ceph File System - file based PVCs for multiple pod access.
+- RBD: RADOS Block Device - block PVCs for only one pod access.
+
+Init & apply this separate module:
+
+```bash
+tofu -chdir=rook/04-csi init
+tofu -chdir=rook/04-csi apply -auto-approve
+```
+
+CSIs are created for all types and for erasure coded (EC) and replica modes:
+
+```bash
+kubectl -n rook-ceph get storageclasses.storage.k8s.io
+# Something similar to this should be displayed
+NAME                      PROVISIONER                     RECLAIMPOLICY   VOLUMEBINDINGMODE   ALLOWVOLUMEEXPANSION   AGE
+rook-ceph-block-ec        rook-ceph.rbd.csi.ceph.com      Delete          Immediate           true                   9s
+rook-ceph-block-replica   rook-ceph.rbd.csi.ceph.com      Delete          Immediate           true                   9s
+rook-cephfs-ec            rook-ceph.cephfs.csi.ceph.com   Delete          Immediate           true                   10m
+rook-cephfs-replica       rook-ceph.cephfs.csi.ceph.com   Delete          Immediate           true                   10m
+```
+
 ### Destroy the infrastructre
 
 If you want to programmatically destroy the plan:
@@ -95,15 +213,17 @@ If you want to programmatically destroy the plan:
 tofu destroy -auto-approve -refresh=false
 ```
 
-## Reset all
+## Eaasy deployment
 
-In order to make easier the development of this repo an utility script [`scripts/reset.sh`](scripts/reset.sh) has been created to reset full infrastructure.
+In order to make easier the development of this repo an utility script [`scripts/deploy.sh`](scripts/deploy.sh) has been created to deploy full infrastructure from scratch following all described steps.
 
-:warning: **Use with caution** due to the VMs cluster will be removed.
+:warning: **Use with caution** due to the VMs cluster will be removed if option `-d` or `--destroy` is passed.
 
 ```bash
-./scripts/reset.sh
+./scripts/deploy.sh
 ```
+
+Run with `-h` or `--help` to see help documentation.
 
 ## References
 
