@@ -237,6 +237,68 @@ kubectl apply -f portainer/portainer.yaml
 
 Access the web on HTTPS port `30779` for instance: `https://<any-worker-IP>:30779/`, on first access you will need to create `admin` user password.
 
+### MetalLB & NGINX ingress controller
+
+Just apply the MetalLB manifest:
+
+```bash
+# First we create MetalLB infra
+kubectl apply -f k8s-net/metallb-native.yaml
+# Check till all pods are running
+kubectl -n metallb-system get pods
+# Something similar to this should be displayed
+NAME                          READY   STATUS    RESTARTS   AGE
+controller-66bdd896c6-qsjbp   1/1     Running   0          20m
+speaker-7clgh                 1/1     Running   0          20m
+speaker-7thk5                 1/1     Running   0          20m
+speaker-8ldr4                 1/1     Running   0          20m
+speaker-9mnhw                 1/1     Running   0          20m
+speaker-jdkws                 1/1     Running   0          20m
+speaker-npnvm                 1/1     Running   0          20m
+speaker-smv26                 1/1     Running   0          20m
+speaker-t4qbt                 1/1     Running   0          20m
+```
+
+Edit the IP pool manifest to assign a dedicated & free IP addresses pool on your local network (i.e. from `192.168.1.70` to `192.168.1.79`):
+
+```bash
+kubectl apply -f k8s-net/metallb-pool.yaml
+```
+
+Finally create the NGINX ingress controller:
+
+```bash
+kubectl apply -f k8s-net/ingress-nginx-controller.yaml
+```
+
+To check if it's working we could setup a basic web service to check if local IP address is assgined and it works:
+
+```bash
+# Create a whoami deployment & expose it on port 80
+kubectl create deployment whoami --image=traefik/whoami
+kubectl expose deployment whoami --port 80
+# Update the service to LoadBalancer type
+kubectl patch svc whoami -p '{"spec":{"type":"LoadBalancer"}}'
+# Check if it gets an external IP address of the dedicated pool
+kubectl get svc whoami
+# Something similar to this should be displayed
+NAME     TYPE           CLUSTER-IP     EXTERNAL-IP    PORT(S)        AGE
+whoami   LoadBalancer   10.102.8.197   192.168.1.71   80:31213/TCP   19m
+# Access via CURL to the service on the external IP
+curl http://192.168.1.71
+# Something similar to this should be displayed
+Hostname: whoami-5cbdff98fc-5lrqp
+IP: 127.0.0.1
+IP: ::1
+IP: 10.244.6.16
+IP: fe80::bc29:2aff:fee2:1f1c
+RemoteAddr: 10.244.3.0:12411
+GET / HTTP/1.1
+Host: 192.168.1.71
+User-Agent: curl/8.7.1
+Accept: */*
+```
+
 ## References
 
 ### OpenTofu
