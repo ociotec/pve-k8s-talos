@@ -213,7 +213,7 @@ If you want to programmatically destroy the plan:
 tofu destroy -auto-approve -refresh=false
 ```
 
-## Eaasy deployment
+## Easy deployment
 
 In order to make easier the development of this repo an utility script [`scripts/deploy.sh`](scripts/deploy.sh) has been created to deploy full infrastructure from scratch following all described steps.
 
@@ -224,6 +224,18 @@ In order to make easier the development of this repo an utility script [`scripts
 ```
 
 Run with `-h` or `--help` to see help documentation.
+
+## Other things
+
+### Portainer
+
+Just apply its manifest (it's already updated to use Rook Ceph block Erasure Coded CSI):
+
+```bash
+kubectl apply -f portainer/portainer.yaml
+```
+
+Access the web on HTTPS port `30779` for instance: `https://<any-worker-IP>:30779/`, on first access you will need to create `admin` user password.
 
 ## References
 
