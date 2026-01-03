@@ -209,7 +209,7 @@ rook-cephfs-replica       rook-ceph.cephfs.csi.ceph.com   Delete          Immedi
 
 ### MetalLB, NGINX ingress controller & certificate manager
 
-Define your constants in [`k8s-net/constants.tf`](k8s-net/constants.tf): domain, CA organization, MetalLB pool range, and the fixed ingress IP.
+Define your constants in `k8s-net/constants.tf`: domain, CA organization, MetalLB pool range, and the fixed ingress IP.
 The MetalLB pool and ingress service are rendered from templates using those values.
 Do not apply `k8s-net/metallb-pool.yaml` or `k8s-net/ingress-nginx-controller.yaml` directly; OpenTofu renders them with your constants.
 
