@@ -34,3 +34,6 @@ talos.tf
 vms_constants.tf
 vms_list.tf
 vms_resources.tf
+k8s-net/*.key
+k8s-net/*.pem
+k8s-net/constants.tf

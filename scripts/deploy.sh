@@ -9,14 +9,16 @@ Deploys the Talos + Rook Ceph stack. By default it skips the destructive
 destroy step and only applies.
 
 Options:
-  -d, --destroy   Destroy the cluster first (dangerous).
-  -c, --skip-ceph Skip all Rook Ceph steps (operator, cluster, dashboard, CSI).
-  -h, --help      Show this help message.
+  -d, --destroy       Destroy the cluster first (dangerous).
+  -c, --skip-ceph     Skip all Rook Ceph steps (operator, cluster, dashboard, CSI).
+  -n, --skip-k8s-net  Skip k8s networking and ingress (k8s-net) steps (ingress, MetalLB, cert-manager, Portainer).
+  -h, --help          Show this help message.
 USAGE
 }
 
 destroy_first=false
 skip_ceph=false
+skip_k8s_net=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -26,6 +28,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     -c|--skip-ceph)
       skip_ceph=true
+      shift
+      ;;
+    -n|--skip-k8s-net)
+      skip_k8s_net=true
       shift
       ;;
     -h|--help)
@@ -47,6 +53,11 @@ function message() {
 function error() {
   echo -e "\033[31m[$(date +'%Y-%m-%d %H:%M:%S')] $1\033[0m"
 }
+
+URL_FMT_START="\033[1m\033[3m\033[4m"
+URL_FMT_END="\033[24m\033[23m\033[22m"
+DATA_FMT_START="\033[1m\033[3m"
+DATA_FMT_END="\033[23m\033[22m"
 
 start_timer() {
   date +%s
@@ -230,7 +241,7 @@ else
   wait_for_dashboard_cert "300"
   dashboard_nodeport=$(kubectl -n rook-ceph get svc rook-ceph-mgr-dashboard-external-https -o jsonpath='{.spec.ports[?(@.name=="dashboard")].nodePort}')
   worker_ip=$(first_worker_ip "${PWD}/vms_list.tf")
-  message "Rook Ceph Dashboard is available at https://${worker_ip}:${dashboard_nodeport}/"
+  message "Rook Ceph Dashboard is available at ${URL_FMT_START}https://${worker_ip}:${dashboard_nodeport}/${URL_FMT_END}"
   dashboard_password=""
   for _ in {1..12}; do
     if kubectl -n rook-ceph get secret rook-ceph-dashboard-password 1>/dev/null 2>&1; then
@@ -240,11 +251,23 @@ else
     sleep 5
   done
   if [[ -n "${dashboard_password}" ]]; then
-    message "Login with username 'admin' and the following password: ${dashboard_password}"
+    message "Login with username '${DATA_FMT_START}admin${DATA_FMT_END}' and the following password: ${DATA_FMT_START}${dashboard_password}${DATA_FMT_END}"
   else
     error "Dashboard password secret not found yet. Retry: kubectl -n rook-ceph get secret rook-ceph-dashboard-password"
     exit 1
   fi
+fi
+
+if [[ "${skip_k8s_net}" == "true" ]]; then
+  message "Skipping k8s networking and ingress (k8s-net) steps."
+else
+  message "Deploying k8s networking and ingress (k8s-net)..."
+  tofu -chdir=k8s-net init 1>/dev/null
+  tofu -chdir=k8s-net apply -auto-approve 1>/dev/null
+  portainer_url="$(tofu -chdir=k8s-net output -raw portainer_url)"
+  rook_dashboard_url="$(tofu -chdir=k8s-net output -raw rook_ceph_dashboard_url)"
+  message "Portainer URL: ${URL_FMT_START}${portainer_url}${URL_FMT_END}"
+  message "Rook Ceph dashboard URL: ${URL_FMT_START}${rook_dashboard_url}${URL_FMT_END}"
 fi
 
 message "Cluster deployed successfully in $(render_elapsed "${deploy_start}")."

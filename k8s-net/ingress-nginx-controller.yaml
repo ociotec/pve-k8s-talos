@@ -344,6 +344,7 @@ metadata:
   name: ingress-nginx-controller
   namespace: ingress-nginx
 spec:
+  loadBalancerIP: ${ingress_lb_ip}
   ipFamilies:
   - IPv4
   ipFamilyPolicy: SingleStack

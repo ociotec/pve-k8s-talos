@@ -30,12 +30,12 @@ metadata:
     app.kubernetes.io/instance: portainer
     app.kubernetes.io/version: "ce-latest-ee-lts"
 spec:
-  storageClassName: "rook-ceph-block-ec"
+  storageClassName: "${portainer_storage}"
   accessModes:
     - "ReadWriteOnce"
   resources:
     requests:
-      storage: "10Gi"
+      storage: "${portainer_size}"
 ---
 # Source: portainer/templates/rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -67,23 +67,20 @@ metadata:
     app.kubernetes.io/instance: portainer
     app.kubernetes.io/version: "ce-latest-ee-lts"
 spec:
-  type: NodePort
+  type: ClusterIP
   ports:
     - port: 9000
       targetPort: 9000
       protocol: TCP
       name: http
-      nodePort: 30777
     - port: 9443
       targetPort: 9443
       protocol: TCP
       name: https
-      nodePort: 30779      
-    - port: 30776
-      targetPort: 30776
+    - port: 8000
+      targetPort: 8000
       protocol: TCP
       name: edge
-      nodePort: 30776
   selector:
     app.kubernetes.io/name: portainer
     app.kubernetes.io/instance: portainer
@@ -115,6 +112,11 @@ spec:
     spec:
       nodeSelector:
         {}
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        seccompProfile:
+          type: RuntimeDefault
       serviceAccountName: portainer-sa-clusteradmin
       volumes:
         - name: "data"
@@ -122,10 +124,17 @@ spec:
             claimName: portainer
       containers:
         - name: portainer
-          image: "portainer/portainer-ce:2.33.6"
+          image: "portainer/portainer-ce:${portainer_image}"
           imagePullPolicy: Always
           args:
           - '--tunnel-port=30776'          
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsUser: 0
+            runAsGroup: 0
           volumeMounts:
             - name: data
               mountPath: /data              
@@ -142,12 +151,48 @@ spec:
           livenessProbe:
             httpGet:
               path: /
-              port: 9443
-              scheme: HTTPS
+              port: 9000
           readinessProbe:
             httpGet:
               path: /
-              port: 9443
-              scheme: HTTPS
+              port: 9000
           resources:
             {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: portainer-cert
+  namespace: portainer
+spec:
+  secretName: portainer-tls
+  issuerRef:
+    name: root-ca
+    kind: ClusterIssuer
+  dnsNames:
+    - ${portainer_hostname}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: portainer
+  namespace: portainer
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - ${portainer_hostname}
+      secretName: portainer-tls
+  rules:
+    - host: ${portainer_hostname}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: portainer
+                port:
+                  number: 9000

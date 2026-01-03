@@ -1,0 +1,38 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: rook-ceph-dashboard-cert
+  namespace: rook-ceph
+spec:
+  secretName: rook-ceph-dashboard-tls
+  issuerRef:
+    name: root-ca
+    kind: ClusterIssuer
+  dnsNames:
+    - ${ceph_hostname}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rook-ceph-dashboard
+  namespace: rook-ceph
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - ${ceph_hostname}
+      secretName: rook-ceph-dashboard-tls
+  rules:
+    - host: ${ceph_hostname}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: rook-ceph-mgr-dashboard-external-https
+                port:
+                  number: 8443

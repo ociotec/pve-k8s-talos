@@ -46,6 +46,8 @@ Now you need to update several files to your current needs. Samples of the files
     - Count of vCPUs.
     - RAM memory in MB.
     - Disk sizes in GB (several could be specified, first is used for root disk).
+- `k8s-net/constants.tf.sample` --> `k8s-net/constants.tf`
+  - Domain, CA organization, MetalLB pool range, and ingress fixed IP.
 
 ### Generate Talos assets
 
@@ -205,6 +207,77 @@ rook-cephfs-ec            rook-ceph.cephfs.csi.ceph.com   Delete          Immedi
 rook-cephfs-replica       rook-ceph.cephfs.csi.ceph.com   Delete          Immediate           true                   10m
 ```
 
+### MetalLB, NGINX ingress controller & certificate manager
+
+Define your constants in [`k8s-net/constants.tf`](k8s-net/constants.tf): domain, CA organization, MetalLB pool range, and the fixed ingress IP.
+The MetalLB pool and ingress service are rendered from templates using those values.
+Do not apply `k8s-net/metallb-pool.yaml` or `k8s-net/ingress-nginx-controller.yaml` directly; OpenTofu renders them with your constants.
+
+To deploy these resources run the following command:
+
+```bash
+tofu -chdir=k8s-net init
+tofu -chdir=k8s-net apply -auto-approve
+```
+
+#### Install the Root CA locally
+
+Install the generated Root CA so your browser and curl trust the `portainer.home.arpa` certificate (replace the domain if you changed it in `k8s-net/constants.tf`):
+
+macOS:
+
+```bash
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain k8s-net/home.arpa.pem
+```
+
+Linux (Debian/Ubuntu):
+
+```bash
+sudo cp k8s-net/home.arpa.pem /usr/local/share/ca-certificates/home.arpa.crt
+sudo update-ca-certificates
+```
+
+Linux (RHEL/CentOS/Fedora):
+
+```bash
+sudo cp k8s-net/home.arpa.pem /etc/pki/ca-trust/source/anchors/home.arpa.crt
+sudo update-ca-trust
+```
+
+Windows (PowerShell, admin):
+
+```powershell
+Import-Certificate -FilePath "C:\\path\\to\\home.arpa.pem" -CertStoreLocation Cert:\\LocalMachine\\Root
+```
+
+#### Portainer
+
+Portainer is installed by OpenTofu as part of `k8s-net`. Access it at (replace the domain if you changed it in `k8s-net/constants.tf`):
+
+```text
+https://portainer.home.arpa
+```
+
+If you don't have internal DNS, add an `/etc/hosts` entry using `ingress_lb_ip` from `k8s-net/constants.tf`:
+
+```bash
+192.168.1.70 portainer.home.arpa
+```
+
+#### Rook Ceph dashboard
+
+The Rook Ceph dashboard is exposed at (replace the domain if you changed it in `k8s-net/constants.tf`):
+
+```text
+https://ceph.home.arpa
+```
+
+If you don't have internal DNS, add an `/etc/hosts` entry using `ingress_lb_ip` from `k8s-net/constants.tf`:
+
+```bash
+192.168.1.70 ceph.home.arpa
+```
+
 ### Destroy the infrastructre
 
 If you want to programmatically destroy the plan:
@@ -224,80 +297,6 @@ In order to make easier the development of this repo an utility script [`scripts
 ```
 
 Run with `-h` or `--help` to see help documentation.
-
-## Other things
-
-### Portainer
-
-Just apply its manifest (it's already updated to use Rook Ceph block Erasure Coded CSI):
-
-```bash
-kubectl apply -f portainer/portainer.yaml
-```
-
-Access the web on HTTPS port `30779` for instance: `https://<any-worker-IP>:30779/`, on first access you will need to create `admin` user password.
-
-### MetalLB & NGINX ingress controller
-
-Just apply the MetalLB manifest:
-
-```bash
-# First we create MetalLB infra
-kubectl apply -f k8s-net/metallb-native.yaml
-# Check till all pods are running
-kubectl -n metallb-system get pods
-# Something similar to this should be displayed
-NAME                          READY   STATUS    RESTARTS   AGE
-controller-66bdd896c6-qsjbp   1/1     Running   0          20m
-speaker-7clgh                 1/1     Running   0          20m
-speaker-7thk5                 1/1     Running   0          20m
-speaker-8ldr4                 1/1     Running   0          20m
-speaker-9mnhw                 1/1     Running   0          20m
-speaker-jdkws                 1/1     Running   0          20m
-speaker-npnvm                 1/1     Running   0          20m
-speaker-smv26                 1/1     Running   0          20m
-speaker-t4qbt                 1/1     Running   0          20m
-```
-
-Edit the IP pool manifest to assign a dedicated & free IP addresses pool on your local network (i.e. from `192.168.1.70` to `192.168.1.79`):
-
-```bash
-kubectl apply -f k8s-net/metallb-pool.yaml
-```
-
-Finally create the NGINX ingress controller:
-
-```bash
-kubectl apply -f k8s-net/ingress-nginx-controller.yaml
-```
-
-To check if it's working we could setup a basic web service to check if local IP address is assgined and it works:
-
-```bash
-# Create a whoami deployment & expose it on port 80
-kubectl create deployment whoami --image=traefik/whoami
-kubectl expose deployment whoami --port 80
-# Update the service to LoadBalancer type
-kubectl patch svc whoami -p '{"spec":{"type":"LoadBalancer"}}'
-# Check if it gets an external IP address of the dedicated pool
-kubectl get svc whoami
-# Something similar to this should be displayed
-NAME     TYPE           CLUSTER-IP     EXTERNAL-IP    PORT(S)        AGE
-whoami   LoadBalancer   10.102.8.197   192.168.1.71   80:31213/TCP   19m
-# Access via CURL to the service on the external IP
-curl http://192.168.1.71
-# Something similar to this should be displayed
-Hostname: whoami-5cbdff98fc-5lrqp
-IP: 127.0.0.1
-IP: ::1
-IP: 10.244.6.16
-IP: fe80::bc29:2aff:fee2:1f1c
-RemoteAddr: 10.244.3.0:12411
-GET / HTTP/1.1
-Host: 192.168.1.71
-User-Agent: curl/8.7.1
-Accept: */*
-```
 
 ## References
 
