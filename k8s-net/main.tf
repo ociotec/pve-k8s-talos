@@ -79,6 +79,14 @@ locals {
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
   ]
+  ingress_nginx_namespace = [
+    for m in local.ingress_nginx : m
+    if try(m.kind, "") == "Namespace"
+  ]
+  ingress_nginx_other = [
+    for m in local.ingress_nginx : m
+    if try(m.kind, "") != "Namespace"
+  ]
   portainer = [
     for doc in split("\n---\n", templatefile("${path.module}/portainer.yaml", {
       portainer_hostname = local.portainer_hostname
@@ -147,14 +155,30 @@ resource "kubernetes_manifest" "metallb_pool" {
 }
 
 resource "kubernetes_manifest" "ingress_nginx" {
-  for_each = { for i, m in local.ingress_nginx : i => m }
+  for_each = { for i, m in local.ingress_nginx_other : i => m }
   manifest = each.value
   computed_fields = [
     "metadata.labels",
     "spec.minReadySeconds",
     "spec.template.metadata.labels",
   ]
-  depends_on = [kubernetes_manifest.metallb_pool]
+  depends_on = [
+    kubernetes_manifest.metallb_pool,
+    kubernetes_manifest.ingress_nginx_namespace,
+  ]
+}
+
+resource "kubernetes_manifest" "ingress_nginx_namespace" {
+  for_each   = { for i, m in local.ingress_nginx_namespace : i => m }
+  manifest   = each.value
+}
+
+resource "null_resource" "ingress_nginx_webhook_ready" {
+  depends_on = [kubernetes_manifest.ingress_nginx]
+
+  provisioner "local-exec" {
+    command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=300s && KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n ingress-nginx wait --for=condition=Ready pod -l app.kubernetes.io/name=ingress-nginx,app.kubernetes.io/component=controller --timeout=300s"
+  }
 }
 
 resource "kubernetes_manifest" "portainer_namespace" {
@@ -173,7 +197,7 @@ resource "kubernetes_manifest" "portainer" {
   ]
   depends_on = [
     kubernetes_manifest.portainer_namespace,
-    kubernetes_manifest.ingress_nginx,
+    null_resource.ingress_nginx_webhook_ready,
     kubernetes_manifest.cert_manager_clusterissuer,
   ]
 }
@@ -185,7 +209,7 @@ resource "kubernetes_manifest" "rook_dashboard" {
     "metadata.labels",
   ]
   depends_on = [
-    kubernetes_manifest.ingress_nginx,
+    null_resource.ingress_nginx_webhook_ready,
     kubernetes_manifest.cert_manager_clusterissuer,
   ]
 }
@@ -286,6 +310,6 @@ resource "null_resource" "metallb_controller_ready" {
   depends_on = [kubernetes_manifest.metallb_native]
 
   provisioner "local-exec" {
-    command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n metallb-system rollout status deploy/controller --timeout=300s"
+    command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n metallb-system rollout status deploy/controller --timeout=300s && KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n metallb-system wait --for=condition=Ready pod -l app=metallb,component=controller --timeout=300s"
   }
 }

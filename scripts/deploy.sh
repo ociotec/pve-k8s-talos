@@ -54,6 +54,13 @@ function error() {
   echo -e "\033[31m[$(date +'%Y-%m-%d %H:%M:%S')] $1\033[0m"
 }
 
+purge_state_dir() {
+  local state_dir="$1"
+  if [[ -d "${state_dir}" ]]; then
+    rm -f "${state_dir}/terraform.tfstate" "${state_dir}/terraform.tfstate.backup"
+  fi
+}
+
 URL_FMT_START="\033[1m\033[3m\033[4m"
 URL_FMT_END="\033[24m\033[23m\033[22m"
 DATA_FMT_START="\033[1m\033[3m"
@@ -202,6 +209,13 @@ if [[ "${destroy_first}" == "true" ]]; then
   message "Destroying Talos cluster VMs..."
   tofu destroy -auto-approve -refresh=false 1>/dev/null
   message "Done."
+  message "Purging local OpenTofu state files..."
+  purge_state_dir "${PWD}"
+  purge_state_dir "${PWD}/k8s-net"
+  purge_state_dir "${PWD}/rook/01-crds-common-operator"
+  purge_state_dir "${PWD}/rook/02-cluster"
+  purge_state_dir "${PWD}/rook/03-dashboard"
+  purge_state_dir "${PWD}/rook/04-csi"
 fi
 
 message "Deploying the Talos cluster (PVE VMs creation, Talos cluster initialization, k8s bootstrapping)..."
@@ -263,6 +277,9 @@ if [[ "${skip_k8s_net}" == "true" ]]; then
 else
   message "Deploying k8s networking and ingress (k8s-net)..."
   tofu -chdir=k8s-net init 1>/dev/null
+  tofu -chdir=k8s-net apply -auto-approve \
+    -target=kubernetes_manifest.cert_manager_crds \
+    -target=kubernetes_manifest.metallb_native_crds 1>/dev/null
   tofu -chdir=k8s-net apply -auto-approve 1>/dev/null
   portainer_url="$(tofu -chdir=k8s-net output -raw portainer_url)"
   rook_dashboard_url="$(tofu -chdir=k8s-net output -raw rook_ceph_dashboard_url)"
