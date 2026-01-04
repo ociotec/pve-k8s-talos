@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 template_path="${repo_root}/patches/network.template.yaml"
+hostname_template_path="${repo_root}/patches/hostname.template.yaml"
 vms_path="${repo_root}/vms_list.tf"
 constants_path="${repo_root}/vms_constants.tf"
 patch_dir="${repo_root}/patches"
@@ -21,6 +22,12 @@ fi
 if [[ ! -r "${template_path}" ]]; then
   echo "Error: template not readable: ${template_path}" >&2
   echo "Fix: ensure the file exists and is readable (git checkout or restore it)." >&2
+  exit 1
+fi
+
+if [[ ! -r "${hostname_template_path}" ]]; then
+  echo "Error: hostname template not readable: ${hostname_template_path}" >&2
+  echo "Fix: ensure patches/hostname.template.yaml exists and is readable." >&2
   exit 1
 fi
 
@@ -100,6 +107,13 @@ if [[ "${template}" != *'${ip}'* || "${template}" != *'${cidr}'* ]]; then
   exit 1
 fi
 
+hostname_template="$(cat "${hostname_template_path}")"
+if [[ "${hostname_template}" != *'${hostname}'* ]]; then
+  echo "Error: hostname template is missing required placeholder (\${hostname})." >&2
+  echo "Fix: restore patches/hostname.template.yaml or add the missing placeholder." >&2
+  exit 1
+fi
+
 # Parse vms_list.tf for vm names and IPs, ignoring commented lines.
 declare -A vm_ips
 while IFS='|' read -r name ip; do
@@ -152,6 +166,11 @@ for name in "${!vm_ips[@]}"; do
   out_path="${patch_dir}/network-${name}.yaml"
   printf "%s\n" "${rendered}" > "${out_path}"
   echo "wrote ${out_path}"
+
+  hostname_rendered="${hostname_template//'${hostname}'/${name}}"
+  hostname_out_path="${patch_dir}/hostname-${name}.yaml"
+  printf "%s\n" "${hostname_rendered}" > "${hostname_out_path}"
+  echo "wrote ${hostname_out_path}"
 done
 
 # Remove stale patch files not present in vms_list.tf.
@@ -159,6 +178,17 @@ for path in "${patch_dir}"/network-*.yaml; do
   [[ -e "${path}" ]] || continue
   base="$(basename "${path}")"
   name="${base#network-}"
+  name="${name%.yaml}"
+  if [[ -z "${vm_ips[${name}]:-}" ]]; then
+    rm -f "${path}"
+    echo "removed ${path}"
+  fi
+done
+
+for path in "${patch_dir}"/hostname-*.yaml; do
+  [[ -e "${path}" ]] || continue
+  base="$(basename "${path}")"
+  name="${base#hostname-}"
   name="${name%.yaml}"
   if [[ -z "${vm_ips[${name}]:-}" ]]; then
     rm -f "${path}"
@@ -281,13 +311,13 @@ worker_data+=$'\n'
 controlplane_locals=""
 for name in "${controlplane_names[@]}"; do
   safe_name="${name//[^a-zA-Z0-9_]/_}"
-  controlplane_locals+="    \"${name}\" = data.talos_machine_configuration.machineconfig_${safe_name}.machine_configuration"$'\n'
+  controlplane_locals+="    \"${name}\" = format(\"%s\\n---\\n%s\\n\", trimspace(join(\"\\\\n---\\\\n\", [for doc in split(\"\\\\n---\\\\n\", data.talos_machine_configuration.machineconfig_${safe_name}.machine_configuration) : doc if !startswith(doc, \"apiVersion: v1alpha1\\\\nkind: HostnameConfig\\\\n\")])), trimspace(file(\"\${path.module}/patches/hostname-${name}.yaml\")))"$'\n'
 done
 
 worker_locals=""
 for name in "${worker_names[@]}"; do
   safe_name="${name//[^a-zA-Z0-9_]/_}"
-  worker_locals+="    \"${name}\" = data.talos_machine_configuration.machineconfig_${safe_name}.machine_configuration"$'\n'
+  worker_locals+="    \"${name}\" = format(\"%s\\n---\\n%s\\n\", trimspace(join(\"\\\\n---\\\\n\", [for doc in split(\"\\\\n---\\\\n\", data.talos_machine_configuration.machineconfig_${safe_name}.machine_configuration) : doc if !startswith(doc, \"apiVersion: v1alpha1\\\\nkind: HostnameConfig\\\\n\")])), trimspace(file(\"\${path.module}/patches/hostname-${name}.yaml\")))"$'\n'
 done
 
 controlplane_locals="${controlplane_locals%$'\n'}"

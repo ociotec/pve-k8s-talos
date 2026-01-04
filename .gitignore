@@ -26,6 +26,7 @@ override.tf.json
 *.tfplan
 
 # Other files
+patches/hostname-*.yaml
 patches/network-*.yaml
 .envrc
 kubeconfig
