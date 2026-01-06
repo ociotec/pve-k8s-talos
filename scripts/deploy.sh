@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=common.sh
+source "${script_dir}/common.sh"
+
 usage() {
   cat <<'USAGE'
 Usage: deploy.sh [options]
@@ -12,6 +16,7 @@ Options:
   -d, --destroy       Destroy the cluster first (dangerous).
   -c, --skip-ceph     Skip all Rook Ceph steps (operator, cluster, dashboard, CSI).
   -n, --skip-k8s-net  Skip k8s networking and ingress (k8s-net) steps (ingress, MetalLB, cert-manager, Portainer).
+  -m, --skip-monitoring  Skip monitoring stack (Prometheus, Loki, Grafana).
   -h, --help          Show this help message.
 USAGE
 }
@@ -19,6 +24,7 @@ USAGE
 destroy_first=false
 skip_ceph=false
 skip_k8s_net=false
+skip_monitoring=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -34,6 +40,10 @@ while [[ $# -gt 0 ]]; do
       skip_k8s_net=true
       shift
       ;;
+    -m|--skip-monitoring)
+      skip_monitoring=true
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -46,14 +56,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-function message() {
-  echo -e "\033[34m[$(date +'%Y-%m-%d %H:%M:%S')] $1\033[0m"
-}
-
-function error() {
-  echo -e "\033[31m[$(date +'%Y-%m-%d %H:%M:%S')] $1\033[0m"
-}
-
 purge_state_dir() {
   local state_dir="$1"
   if [[ -d "${state_dir}" ]]; then
@@ -65,35 +67,6 @@ URL_FMT_START="\033[1m\033[3m\033[4m"
 URL_FMT_END="\033[24m\033[23m\033[22m"
 DATA_FMT_START="\033[1m\033[3m"
 DATA_FMT_END="\033[23m\033[22m"
-
-start_timer() {
-  date +%s
-}
-
-render_elapsed() {
-  local start="$1"
-  local end
-  local elapsed
-  local hours
-  local minutes
-  local seconds
-  local output
-
-  end="$(date +%s)"
-  elapsed=$((end - start))
-  hours=$((elapsed / 3600))
-  minutes=$(((elapsed % 3600) / 60))
-  seconds=$((elapsed % 60))
-
-  if (( hours > 0 )); then
-    output="$(printf "%dh %d' %02d''" "${hours}" "${minutes}" "${seconds}")"
-  elif (( minutes > 0 )); then
-    output="$(printf "%d' %02d''" "${minutes}" "${seconds}")"
-  else
-    output="$(printf "%d''" "${seconds}")"
-  fi
-  printf "%s" "${output}"
-}
 
 wait_for_pods_ready() {
   local namespace="$1"
@@ -216,6 +189,7 @@ if [[ "${destroy_first}" == "true" ]]; then
   purge_state_dir "${PWD}/rook/02-cluster"
   purge_state_dir "${PWD}/rook/03-dashboard"
   purge_state_dir "${PWD}/rook/04-csi"
+  purge_state_dir "${PWD}/monitoring"
 fi
 
 message "Deploying the Talos cluster (PVE VMs creation, Talos cluster initialization, k8s bootstrapping)..."
@@ -285,6 +259,24 @@ else
   rook_dashboard_url="$(tofu -chdir=k8s-net output -raw rook_ceph_dashboard_url)"
   message "Portainer URL: ${URL_FMT_START}${portainer_url}${URL_FMT_END}"
   message "Rook Ceph dashboard URL: ${URL_FMT_START}${rook_dashboard_url}${URL_FMT_END}"
+fi
+
+if [[ "${skip_k8s_net}" == "true" || "${skip_monitoring}" == "true" ]]; then
+  message "Skipping monitoring stack."
+else
+  message "Deploying monitoring stack..."
+  tofu -chdir=monitoring init 1>/dev/null
+  tofu -chdir=monitoring apply -auto-approve 1>/dev/null
+  message "Restarting Grafana to reload provisioned dashboards..."
+  kubectl -n monitoring rollout restart deploy/grafana 1>/dev/null
+  grafana_url="$(tofu -chdir=monitoring output -raw grafana_url)"
+  prometheus_url="$(tofu -chdir=monitoring output -raw prometheus_url)"
+  grafana_user="$(tofu -chdir=monitoring output -raw grafana_admin_user)"
+  grafana_password="$(tofu -chdir=monitoring output -raw grafana_admin_password)"
+  message "Grafana URL: ${URL_FMT_START}${grafana_url}${URL_FMT_END}"
+  message "Prometheus URL: ${URL_FMT_START}${prometheus_url}${URL_FMT_END}"
+  message "Grafana admin user: ${DATA_FMT_START}${grafana_user}${DATA_FMT_END}"
+  message "Grafana admin password: ${DATA_FMT_START}${grafana_password}${DATA_FMT_END}"
 fi
 
 message "Cluster deployed successfully in $(render_elapsed "${deploy_start}")."

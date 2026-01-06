@@ -302,7 +302,7 @@ resource "null_resource" "cert_manager_webhook_ready" {
   depends_on = [kubernetes_manifest.cert_manager]
 
   provisioner "local-exec" {
-    command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n cert-manager rollout status deploy/cert-manager-webhook --timeout=300s"
+    command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n cert-manager rollout status deploy/cert-manager-webhook --timeout=300s && KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n cert-manager wait --for=condition=Available deploy/cert-manager-cainjector --timeout=300s && KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl wait --for=condition=Established crd/clusterissuers.cert-manager.io --timeout=300s && KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl get validatingwebhookconfiguration cert-manager-webhook -o jsonpath='{.webhooks[0].clientConfig.caBundle}' | rg -q '.'"
   }
 }
 
@@ -310,6 +310,6 @@ resource "null_resource" "metallb_controller_ready" {
   depends_on = [kubernetes_manifest.metallb_native]
 
   provisioner "local-exec" {
-    command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n metallb-system rollout status deploy/controller --timeout=300s && KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n metallb-system wait --for=condition=Ready pod -l app=metallb,component=controller --timeout=300s"
+    command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n metallb-system rollout status deploy/controller --timeout=300s && KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n metallb-system wait --for=condition=Ready pod -l app=metallb,component=controller --timeout=300s && KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n metallb-system get endpoints metallb-webhook-service -o jsonpath='{.subsets[0].addresses[0].ip}' | rg -q '.'"
   }
 }

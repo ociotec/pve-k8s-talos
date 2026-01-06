@@ -9,7 +9,6 @@ locals {
   metallb_pool_end   = "192.168.1.79"
   ingress_lb_ip      = "192.168.1.70"
 
-  whoami_hostname    = "whoami.${local.domain}"
   portainer_hostname = "portainer.${local.domain}"
   ceph_hostname      = "ceph.${local.domain}"
 

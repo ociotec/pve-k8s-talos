@@ -1,0 +1,209 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "K8s Pod/Container resources (CPU & Memory) with Requests/Limits from Prometheus (kube-state-metrics + cAdvisor/kubelet).",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "min": 0, "unit": "cores" }, "overrides": [] },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (namespace,pod,container) (rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\",pod=~\"$pod\",container=~\"$container\",container!=\"\",container!=\"POD\"}[5m]))",
+          "legendFormat": "CPU usage {{namespace}}/{{pod}}/{{container}}",
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by (namespace,pod,container) (kube_pod_container_resource_requests{namespace=~\"$namespace\",pod=~\"$pod\",container=~\"$container\",resource=\"cpu\"})",
+          "legendFormat": "CPU request {{namespace}}/{{pod}}/{{container}}",
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by (namespace,pod,container) (kube_pod_container_resource_limits{namespace=~\"$namespace\",pod=~\"$pod\",container=~\"$container\",resource=\"cpu\"})",
+          "legendFormat": "CPU limit {{namespace}}/{{pod}}/{{container}}",
+          "refId": "C"
+        }
+      ],
+      "title": "CPU (cores): usage vs requests/limits",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "min": 0, "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * (sum by (namespace,pod,container) (rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\",pod=~\"$pod\",container=~\"$container\",container!=\"\",container!=\"POD\"}[5m])) / clamp_min(sum by (namespace,pod,container) (kube_pod_container_resource_requests{namespace=~\"$namespace\",pod=~\"$pod\",container=~\"$container\",resource=\"cpu\"}), 0.001))",
+          "legendFormat": "%CPU vs request {{namespace}}/{{pod}}/{{container}}",
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "100 * (sum by (namespace,pod,container) (rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\",pod=~\"$pod\",container=~\"$container\",container!=\"\",container!=\"POD\"}[5m])) / clamp_min(sum by (namespace,pod,container) (kube_pod_container_resource_limits{namespace=~\"$namespace\",pod=~\"$pod\",container=~\"$container\",resource=\"cpu\"}), 0.001))",
+          "legendFormat": "%CPU vs limit {{namespace}}/{{pod}}/{{container}}",
+          "refId": "B"
+        }
+      ],
+      "title": "CPU (%): usage vs request/limit",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "min": 0, "unit": "bytes" }, "overrides": [] },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 10 },
+      "id": 3,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (namespace,pod,container) ((container_memory_working_set_bytes{namespace=~\"$namespace\",pod=~\"$pod\",container=~\"$container\",container!=\"\",container!=\"POD\"}) or (container_memory_usage_bytes{namespace=~\"$namespace\",pod=~\"$pod\",container=~\"$container\",container!=\"\",container!=\"POD\"}))",
+          "legendFormat": "Mem usage {{namespace}}/{{pod}}/{{container}}",
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by (namespace,pod,container) (kube_pod_container_resource_requests{namespace=~\"$namespace\",pod=~\"$pod\",container=~\"$container\",resource=\"memory\"})",
+          "legendFormat": "Mem request {{namespace}}/{{pod}}/{{container}}",
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by (namespace,pod,container) (kube_pod_container_resource_limits{namespace=~\"$namespace\",pod=~\"$pod\",container=~\"$container\",resource=\"memory\"})",
+          "legendFormat": "Mem limit {{namespace}}/{{pod}}/{{container}}",
+          "refId": "C"
+        }
+      ],
+      "title": "Memory (bytes): usage vs requests/limits",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "min": 0, "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 10 },
+      "id": 4,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * (sum by (namespace,pod,container) ((container_memory_working_set_bytes{namespace=~\"$namespace\",pod=~\"$pod\",container=~\"$container\",container!=\"\",container!=\"POD\"}) or (container_memory_usage_bytes{namespace=~\"$namespace\",pod=~\"$pod\",container=~\"$container\",container!=\"\",container!=\"POD\"})) / clamp_min(sum by (namespace,pod,container) (kube_pod_container_resource_requests{namespace=~\"$namespace\",pod=~\"$pod\",container=~\"$container\",resource=\"memory\"}), 1))",
+          "legendFormat": "%Mem vs request {{namespace}}/{{pod}}/{{container}}",
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "100 * (sum by (namespace,pod,container) ((container_memory_working_set_bytes{namespace=~\"$namespace\",pod=~\"$pod\",container=~\"$container\",container!=\"\",container!=\"POD\"}) or (container_memory_usage_bytes{namespace=~\"$namespace\",pod=~\"$pod\",container=~\"$container\",container!=\"\",container!=\"POD\"})) / clamp_min(sum by (namespace,pod,container) (kube_pod_container_resource_limits{namespace=~\"$namespace\",pod=~\"$pod\",container=~\"$container\",resource=\"memory\"}), 1))",
+          "legendFormat": "%Mem vs limit {{namespace}}/{{pod}}/{{container}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Memory (%): usage vs request/limit",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["kubernetes", "prometheus", "kube-state-metrics", "cadvisor"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "Prometheus", "value": "Prometheus" },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "type": "datasource"
+      },
+      {
+        "allValue": ".*",
+        "current": { "selected": false, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "definition": "label_values(kube_pod_info, namespace)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Namespace",
+        "multi": true,
+        "name": "namespace",
+        "query": { "query": "label_values(kube_pod_info, namespace)", "refId": "A" },
+        "refresh": 2,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": { "selected": false, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "definition": "label_values(kube_pod_info{namespace=~\"$namespace\"}, pod)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Pod",
+        "multi": true,
+        "name": "pod",
+        "query": { "query": "label_values(kube_pod_info{namespace=~\"$namespace\"}, pod)", "refId": "A" },
+        "refresh": 2,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": { "selected": false, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "definition": "label_values(kube_pod_container_info{namespace=~\"$namespace\",pod=~\"$pod\"}, container)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Container",
+        "multi": true,
+        "name": "container",
+        "query": { "query": "label_values(kube_pod_container_info{namespace=~\"$namespace\",pod=~\"$pod\"}, container)", "refId": "A" },
+        "refresh": 2,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {
+    "refresh_intervals": ["5s", "10s", "30s", "1m", "5m", "15m", "30m", "1h"],
+    "time_options": ["5m", "15m", "1h", "6h", "12h", "24h", "2d", "7d", "30d"]
+  },
+  "timezone": "",
+  "title": "K8s: CPU & memory (usage / requests / limits)",
+  "version": 1
+}
