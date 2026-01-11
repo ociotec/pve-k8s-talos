@@ -82,8 +82,8 @@ tofu apply -auto-approve
 To get Talos & k8s config (automatically generated on plan apply) on default paths just run:
 
 ```bash
-tofu output -raw talosconfig > ~/.talos/config
-tofu output -raw kubeconfig > ~/.kube/config
+tofu output -raw talosconfig |> ~/.talos/config
+tofu output -raw kubeconfig |> ~/.kube/config
 ```
 
 Now you can run Talos & k8s commands:
@@ -109,7 +109,7 @@ tofu -chdir=rook/01-crds-common-operator apply -auto-approve
 Wait till operator is running in ready state:
 
 ```bash
-watch -n1 kubectl get pods -n rook-ceph
+kubectl get pods -n rook-ceph -w
 # Something similar to this should be displayed
 NAME                                 READY   STATUS              RESTARTS   AGE
 rook-ceph-operator-f7867cb4b-j9qc4                        1/1     Running     0               30m
@@ -127,7 +127,7 @@ tofu -chdir=rook/02-cluster apply -auto-approve
 Wait till operator is running in ready state:
 
 ```bash
-watch -n1 kubectl get pods -n rook-ceph
+kubectl get pods -n rook-ceph -w
 # Something similar to this should be displayed
 NAME                                                      READY   STATUS      RESTARTS        AGE
 csi-cephfsplugin-bgc24                                    3/3     Running     1 (10m ago)     10m
