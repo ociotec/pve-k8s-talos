@@ -53,7 +53,11 @@ resource "proxmox_virtual_environment_vm" "create_pve_vms" {
     }
     dns {
       domain  = "local"
-      servers = [var.constants["network"]["dns1"], var.constants["network"]["dns2"]]
+      servers = [
+        for server in split(",", var.constants["network"]["dns_servers"]) :
+        trimspace(server)
+        if trimspace(server) != ""
+      ]
     }
   }
 }

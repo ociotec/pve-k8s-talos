@@ -35,6 +35,7 @@ Now you need to update several files to your current needs. Samples of the files
   - Talos ISO path on PVE node.
   - Optional datastore ID for VM disks and cloud-init (defaults to `local-lvm`).
   - Network settings (except IP address that is configured later).
+  - DNS servers (comma-separated list, at least one required).
   - Optional VLAN tag for all VMs (leave empty to disable).
   - Optional NTP servers (comma-separated list, leave empty to disable).
   - Talos version and factory image ID (used to render `patches/qemu.yaml`).

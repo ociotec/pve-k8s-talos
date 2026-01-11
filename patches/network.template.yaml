@@ -10,8 +10,6 @@ machine:
         routes:
           - network: 0.0.0.0/0
             gateway: ${gateway}
-    nameservers:
-      - ${dns1}
-      - ${dns2}
+    nameservers: [${dns_servers_section}]
   time:
     servers: [${ntp_servers_section}]

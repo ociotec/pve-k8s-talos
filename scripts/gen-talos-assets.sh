@@ -95,15 +95,14 @@ fi
 # Read network constants from vms_constants.tf.
 net_size="$(awk -F'"' '/"net_size"/ { print $4; exit }' "${constants_path}")"
 gateway="$(awk -F'"' '/"gateway"/ { print $4; exit }' "${constants_path}")"
-dns1="$(awk -F'"' '/"dns1"/ { print $4; exit }' "${constants_path}")"
-dns2="$(awk -F'"' '/"dns2"/ { print $4; exit }' "${constants_path}")"
+dns_servers="$(awk -F'"' '/"dns_servers"/ { print $4; exit }' "${constants_path}")"
 ntp_servers="$(awk -F'"' '/"ntp_servers"/ { print $4; exit }' "${constants_path}")"
 talos_version="$(awk -F'"' '/"version"/ { print $4; exit }' "${constants_path}")"
 talos_factory_image_id="$(awk -F'"' '/"factory_image_id"/ { print $4; exit }' "${constants_path}")"
 
-if [[ -z "${net_size}" || -z "${gateway}" || -z "${dns1}" || -z "${dns2}" ]]; then
+if [[ -z "${net_size}" || -z "${gateway}" || -z "${dns_servers}" ]]; then
   echo "Error: missing network constants in vms_constants.tf." >&2
-  echo "Fix: ensure net_size, gateway, dns1, dns2 exist under var.constants[\"network\"]." >&2
+  echo "Fix: ensure net_size, gateway, dns_servers exist under var.constants[\"network\"]." >&2
   exit 1
 fi
 
@@ -127,6 +126,23 @@ hostname_template="$(cat "${hostname_template_path}")"
 if [[ "${hostname_template}" != *'${hostname}'* ]]; then
   echo "Error: hostname template is missing required placeholder (\${hostname})." >&2
   echo "Fix: restore patches/hostname.template.yaml or add the missing placeholder." >&2
+  exit 1
+fi
+
+dns_servers_section=""
+IFS=',' read -ra dns_list <<< "${dns_servers}"
+for server in "${dns_list[@]}"; do
+  server="${server#"${server%%[![:space:]]*}"}"
+  server="${server%"${server##*[![:space:]]}"}"
+  if [[ -n "${server}" ]]; then
+    if [[ -n "${dns_servers_section}" ]]; then
+      dns_servers_section+=", "
+    fi
+    dns_servers_section+="${server}"
+  fi
+done
+if [[ -z "${dns_servers_section}" ]]; then
+  echo "Error: dns_servers must contain at least one entry." >&2
   exit 1
 fi
 
@@ -206,8 +222,7 @@ for name in "${!vm_ips[@]}"; do
   rendered="${rendered//'${ip}'/${ip}}"
   rendered="${rendered//'${cidr}'/${net_size}}"
   rendered="${rendered//'${gateway}'/${gateway}}"
-  rendered="${rendered//'${dns1}'/${dns1}}"
-  rendered="${rendered//'${dns2}'/${dns2}}"
+  rendered="${rendered//'${dns_servers_section}'/${dns_servers_section}}"
   rendered="${rendered//'${ntp_servers_section}'/${ntp_servers_section}}"
   out_path="${patch_dir}/network-${name}.yaml"
   printf "%s\n" "${rendered}" > "${out_path}"
