@@ -1,11 +1,3 @@
-locals {
-  vm_hotplug = [
-    for v in split(",", try(var.constants["vm"]["hotplug"], "")) :
-    trimspace(v)
-    if trimspace(v) != ""
-  ]
-}
-
 resource "proxmox_virtual_environment_vm" "create_pve_vms" {
   for_each = var.vms
 
@@ -15,8 +7,6 @@ resource "proxmox_virtual_environment_vm" "create_pve_vms" {
   stop_on_destroy = true # Stop VM before destroying if QEMU is not deployed
   started         = true # Do or do not start VM after creation
   pool_id         = "kubernetes"
-  hotplug         = length(local.vm_hotplug) > 0 ? local.vm_hotplug : null
-
   agent {
     enabled = true
     trim    = true

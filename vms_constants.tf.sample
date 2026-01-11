@@ -6,8 +6,6 @@ variable "constants" {
     "vm" = {
       "iso_path"     = "ceph-fs:iso/talos-v1.12.0-nocloud-amd64-with-qemu-guest-agent.iso"
       "datastore_id" = "local-lvm"
-      # Comma-separated list, leave empty to disable & use Proxmox default settings
-      "hotplug"      = "disk,network,usb,cpu,memory"
     }
     "network" = {
       "net_size" = "24"
