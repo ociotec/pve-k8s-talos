@@ -22,8 +22,9 @@ resource "proxmox_virtual_environment_vm" "create_pve_vms" {
     dedicated = var.resources[each.value.type].memory # Memory in MB
   }
   network_device {
-    bridge = "vmbr0"
-    model  = "virtio"
+    bridge  = "vmbr0"
+    model   = "virtio"
+    vlan_id = var.constants["network"]["vlan_tag"] != "" ? tonumber(var.constants["network"]["vlan_tag"]) : null
   }
   dynamic "disk" {
     for_each = var.resources[each.value.type].disks

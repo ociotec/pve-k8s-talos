@@ -11,6 +11,7 @@ variable "constants" {
       "gateway"  = "192.168.1.1"
       "dns1"     = "80.58.61.250"
       "dns2"     = "80.58.61.254"
+      "vlan_tag" = "" # Leave empty to disable
     }
     "talos" = {
       "version"      = "v1.12.0"

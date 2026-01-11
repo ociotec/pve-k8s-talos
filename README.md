@@ -34,6 +34,7 @@ Now you need to update several files to your current needs. Samples of the files
 - `vms_constants.tf.sample` --> `vms_constants.tf`
   - Talos ISO path on PVE node.
   - Network settings (except IP address that is configured later).
+  - Optional VLAN tag for all VMs (leave empty to disable).
   - Talos version.
 - `vms_list.tf.sample` --> `vms_list.tf`
   - Map of VMs on PVE with VM name as key:
