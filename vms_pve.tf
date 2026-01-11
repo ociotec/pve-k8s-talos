@@ -29,7 +29,7 @@ resource "proxmox_virtual_environment_vm" "create_pve_vms" {
   dynamic "disk" {
     for_each = var.resources[each.value.type].disks
     content {
-      datastore_id = "local-lvm"
+      datastore_id = var.constants["vm"]["datastore_id"]
       interface    = "scsi${disk.key}"
       size         = disk.value # Size in GB
       ssd          = true
@@ -44,6 +44,7 @@ resource "proxmox_virtual_environment_vm" "create_pve_vms" {
   boot_order = ["scsi0", "sata0"]
 
   initialization {
+    datastore_id = var.constants["vm"]["datastore_id"]
     ip_config {
       ipv4 {
         address = "${each.value.ip}/${var.constants["network"]["net_size"]}"

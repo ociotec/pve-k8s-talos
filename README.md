@@ -33,6 +33,7 @@ Now you need to update several files to your current needs. Samples of the files
   - Define all required PVE environment variables to allow OpenTofu to access your PVE nodes, it's prererred to use API token authentication as described at sample file.
 - `vms_constants.tf.sample` --> `vms_constants.tf`
   - Talos ISO path on PVE node.
+  - Datastore ID for VM disks and cloud-init.
   - Network settings (except IP address that is configured later).
   - Optional VLAN tag for all VMs (leave empty to disable).
   - Talos version.
