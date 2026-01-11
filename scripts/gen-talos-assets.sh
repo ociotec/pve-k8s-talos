@@ -4,6 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 template_path="${repo_root}/patches/network.template.yaml"
 hostname_template_path="${repo_root}/patches/hostname.template.yaml"
+qemu_template_path="${repo_root}/patches/qemu.template.yaml"
 vms_path="${repo_root}/vms_list.tf"
 constants_path="${repo_root}/vms_constants.tf"
 patch_dir="${repo_root}/patches"
@@ -28,6 +29,12 @@ fi
 if [[ ! -r "${hostname_template_path}" ]]; then
   echo "Error: hostname template not readable: ${hostname_template_path}" >&2
   echo "Fix: ensure patches/hostname.template.yaml exists and is readable." >&2
+  exit 1
+fi
+
+if [[ ! -r "${qemu_template_path}" ]]; then
+  echo "Error: qemu template not readable: ${qemu_template_path}" >&2
+  echo "Fix: ensure patches/qemu.template.yaml exists and is readable." >&2
   exit 1
 fi
 
@@ -90,10 +97,18 @@ net_size="$(awk -F'"' '/"net_size"/ { print $4; exit }' "${constants_path}")"
 gateway="$(awk -F'"' '/"gateway"/ { print $4; exit }' "${constants_path}")"
 dns1="$(awk -F'"' '/"dns1"/ { print $4; exit }' "${constants_path}")"
 dns2="$(awk -F'"' '/"dns2"/ { print $4; exit }' "${constants_path}")"
+talos_version="$(awk -F'"' '/"version"/ { print $4; exit }' "${constants_path}")"
+talos_factory_image_id="$(awk -F'"' '/"factory_image_id"/ { print $4; exit }' "${constants_path}")"
 
 if [[ -z "${net_size}" || -z "${gateway}" || -z "${dns1}" || -z "${dns2}" ]]; then
   echo "Error: missing network constants in vms_constants.tf." >&2
   echo "Fix: ensure net_size, gateway, dns1, dns2 exist under var.constants[\"network\"]." >&2
+  exit 1
+fi
+
+if [[ -z "${talos_version}" || -z "${talos_factory_image_id}" ]]; then
+  echo "Error: missing Talos constants in vms_constants.tf." >&2
+  echo "Fix: ensure version and factory_image_id exist under var.constants[\"talos\"]." >&2
   exit 1
 fi
 
@@ -113,6 +128,20 @@ if [[ "${hostname_template}" != *'${hostname}'* ]]; then
   echo "Fix: restore patches/hostname.template.yaml or add the missing placeholder." >&2
   exit 1
 fi
+
+qemu_template="$(cat "${qemu_template_path}")"
+if [[ "${qemu_template}" != *'${talos_version}'* || "${qemu_template}" != *'${talos_factory_image_id}'* ]]; then
+  echo "Error: qemu template is missing required placeholders (\${talos_version}, \${talos_factory_image_id})." >&2
+  echo "Fix: restore patches/qemu.template.yaml or add the missing placeholders." >&2
+  exit 1
+fi
+
+qemu_rendered="${qemu_template}"
+qemu_rendered="${qemu_rendered//'${talos_version}'/${talos_version}}"
+qemu_rendered="${qemu_rendered//'${talos_factory_image_id}'/${talos_factory_image_id}}"
+qemu_out_path="${patch_dir}/qemu.yaml"
+printf "%s\n" "${qemu_rendered}" > "${qemu_out_path}"
+echo "wrote ${qemu_out_path}"
 
 # Parse vms_list.tf for vm names and IPs, ignoring commented lines.
 declare -A vm_ips

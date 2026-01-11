@@ -1,0 +1,3 @@
+machine:
+  install:
+    image: factory.talos.dev/metal-installer/${talos_factory_image_id}:${talos_version}
