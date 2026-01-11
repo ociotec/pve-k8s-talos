@@ -13,3 +13,5 @@ machine:
     nameservers:
       - ${dns1}
       - ${dns2}
+  time:
+    servers: [${ntp_servers_section}]
