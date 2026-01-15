@@ -27,8 +27,9 @@ override.tf.json
 
 # Other files
 patches/hostname-*.yaml
-patches/network-*.yaml
+patches/machine-*.yaml
 .envrc
+.DS_Store
 kubeconfig
 talosconfig
 talos.tf

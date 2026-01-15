@@ -175,6 +175,47 @@ first_worker_ip() {
   ' "$1"
 }
 
+disk_by_id_prefix() {
+  awk -F'"' '/"disk_by_id_prefix"/ { print $4; exit }' "$1"
+}
+
+validate_disk_by_id_prefix() {
+  local worker_ip="$1"
+  local prefix="$2"
+  local timeout_seconds="${3:-120}"
+  local start
+  local output
+
+  if [[ -z "${prefix}" ]]; then
+    error "Missing vm.disk_by_id_prefix in vms_constants.tf." >&2
+    exit 1
+  fi
+
+  if ! command -v talosctl >/dev/null 2>&1; then
+    error "talosctl is required to validate vm.disk_by_id_prefix." >&2
+    exit 1
+  fi
+
+  start="$(date +%s)"
+  while true; do
+    if output="$(talosctl -n "${worker_ip}" ls /dev/disk/by-id 2>/dev/null)"; then
+      if printf '%s\n' "${output}" | grep -q "${prefix}[0-9]\\+"; then
+        return 0
+      fi
+      error "vm.disk_by_id_prefix (${prefix}) not found on ${worker_ip}." >&2
+      error "Fix: run 'talosctl -n ${worker_ip} ls /dev/disk/by-id' and look for ${prefix}0." >&2
+      exit 1
+    fi
+
+    if (( $(date +%s) - start >= timeout_seconds )); then
+      error "Timed out waiting to validate vm.disk_by_id_prefix on ${worker_ip}." >&2
+      error "Fix: ensure Talos is up, then verify /dev/disk/by-id contains ${prefix}0." >&2
+      exit 1
+    fi
+    sleep 5
+  done
+}
+
 deploy_start="$(start_timer)"
 
 tofu init -upgrade 1>/dev/null
@@ -195,8 +236,30 @@ fi
 message "Deploying the Talos cluster (PVE VMs creation, Talos cluster initialization, k8s bootstrapping)..."
 ./scripts/gen-talos-assets.sh
 tofu apply -auto-approve 1>/dev/null
-cp talosconfig ~/.talos/config
-cp kubeconfig ~/.kube/config
+mkdir -p ~/.talos ~/.kube
+if ! tofu output -raw talosconfig > ~/.talos/config 2>/dev/null; then
+  if [[ -f talosconfig ]]; then
+    cp talosconfig ~/.talos/config
+  else
+    error "Failed to write talosconfig from tofu outputs." >&2
+    exit 1
+  fi
+fi
+if ! tofu output -raw kubeconfig > ~/.kube/config 2>/dev/null; then
+  if [[ -f kubeconfig ]]; then
+    cp kubeconfig ~/.kube/config
+  else
+    error "Failed to write kubeconfig from tofu outputs." >&2
+    exit 1
+  fi
+fi
+worker_ip=$(first_worker_ip "${PWD}/vms_list.tf")
+if [[ -z "${worker_ip}" ]]; then
+  error "Failed to determine the first worker name/IP from vms_list.tf." >&2
+  exit 1
+fi
+prefix_value=$(disk_by_id_prefix "${PWD}/vms_constants.tf")
+validate_disk_by_id_prefix "${worker_ip}" "${prefix_value}"
 message "k8s cluster is up and running. Current nodes:"
 kubectl get nodes
 

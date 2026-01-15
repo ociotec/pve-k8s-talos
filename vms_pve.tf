@@ -30,7 +30,7 @@ resource "proxmox_virtual_environment_vm" "create_pve_vms" {
     content {
       datastore_id = var.constants["vm"]["datastore_id"]
       interface    = "scsi${disk.key}"
-      size         = disk.value # Size in GB
+      size         = disk.value.size # Size in GB
       ssd          = true
       discard      = "on"
       cache        = "writethrough"

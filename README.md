@@ -34,6 +34,7 @@ Now you need to update several files to your current needs. Samples of the files
 - `vms_constants.tf.sample` --> `vms_constants.tf`
   - Talos ISO path on PVE node.
   - Optional datastore ID for VM disks and cloud-init (defaults to `local-lvm`).
+  - `vm.disk_by_id_prefix` to build stable `/dev/disk/by-id` device names.
   - Network settings (except IP address that is configured later).
   - DNS servers (comma-separated list, at least one required).
   - Optional VLAN tag for all VMs (leave empty to disable).
@@ -49,7 +50,8 @@ Now you need to update several files to your current needs. Samples of the files
   - Reources for control plane & worker nodes:
     - Count of vCPUs.
     - RAM memory in MB.
-    - Disk sizes in GB (several could be specified, first is used for root disk).
+    - Disks in GB with optional Talos mount points (first disk is used as root).
+    - Mount points must live under `/var` (for example `/var/mnt/kafka` or `/var/lib/kafka`).
 - `k8s-net/constants.tf.sample` --> `k8s-net/constants.tf`
   - Domain, CA organization, MetalLB pool range, and ingress fixed IP.
 - `monitoring/constants.tf.sample` --> `monitoring/constants.tf`
@@ -59,7 +61,7 @@ Shortcut: for a one-command install, jump to [Easy deployment](#easy-deployment)
 
 ### Generate Talos assets
 
-Whenever you change `vms_list.tf`, `vms_constants.tf`, or `patches/network.template.yaml`, regenerate the Talos inputs:
+Whenever you change `vms_list.tf`, `vms_constants.tf`, or `patches/machine.template.yaml`, regenerate the Talos inputs:
 
 ```bash
 ./scripts/gen-talos-assets.sh
@@ -67,13 +69,32 @@ Whenever you change `vms_list.tf`, `vms_constants.tf`, or `patches/network.templ
 
 This script:
 
-- Renders per-VM network patches under `patches/network-*.yaml`
+- Renders per-VM machine patches under `patches/machine-*.yaml`
 - Removes stale patch files for deleted VMs
 - Generates `talos.tf` from several templates:
   - [`templates/talos.template.tf`](templates/talos.template.tf) main Talos template.
   - [`templates/controlplane-data.template.tf`](templates/controlplane-data.template.tf) template for Talos control plane nodes configuration data.
   - [`templates/worker-data.template.tf`](templates/worker-data.template.tf) template for Talos worker nodes configuration data.
   - [`templates/machine-config-locals.template.tf`](templates/machine-config-locals.template.tf) just create convinient local variables for easier Talos Tofu configuration steps.
+
+### Disk by-id prefix
+
+Talos uses `/dev/disk/by-id/${disk_by_id_prefix}N` to map each disk by its index.
+With Proxmox, the `by-id` names typically look like `scsi-0QEMU_QEMU_HARDDISK_drive-scsi0`.
+
+To confirm the correct prefix, run on any worker once Talos is up:
+
+```bash
+talosctl -n <worker-ip> ls /dev/disk/by-id
+```
+
+You should see entries like:
+
+```
+scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
+```
+
+Set `vm.disk_by_id_prefix` to the part before the index (`scsi-0QEMU_QEMU_HARDDISK_drive-scsi` in this example).
 
 ### Create the infrastructre
 

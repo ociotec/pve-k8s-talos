@@ -4,7 +4,7 @@ data "talos_machine_configuration" "machineconfig___SAFE_NAME__" {
   machine_type     = "worker"
   machine_secrets  = talos_machine_secrets.machine_secrets.machine_secrets
   config_patches = [
-    "${path.module}/patches/network-__NAME__.yaml",
+    "${path.module}/patches/machine-__NAME__.yaml",
     "${path.module}/patches/disable-aslr.yaml",
     "${path.module}/patches/qemu.yaml",
   ]

@@ -2,11 +2,12 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-template_path="${repo_root}/patches/network.template.yaml"
+template_path="${repo_root}/patches/machine.template.yaml"
 hostname_template_path="${repo_root}/patches/hostname.template.yaml"
 qemu_template_path="${repo_root}/patches/qemu.template.yaml"
 vms_path="${repo_root}/vms_list.tf"
 constants_path="${repo_root}/vms_constants.tf"
+resources_path="${repo_root}/vms_resources.tf"
 patch_dir="${repo_root}/patches"
 talos_tf_path="${repo_root}/talos.tf"
 talos_template_path="${repo_root}/templates/talos.template.tf"
@@ -47,6 +48,12 @@ fi
 if [[ ! -r "${constants_path}" ]]; then
   echo "Error: constants file not readable: ${constants_path}" >&2
   echo "Fix: ensure vms_constants.tf exists and is readable." >&2
+  exit 1
+fi
+
+if [[ ! -r "${resources_path}" ]]; then
+  echo "Error: resources file not readable: ${resources_path}" >&2
+  echo "Fix: ensure vms_resources.tf exists and is readable." >&2
   exit 1
 fi
 
@@ -99,6 +106,7 @@ dns_servers="$(awk -F'"' '/"dns_servers"/ { print $4; exit }' "${constants_path}
 ntp_servers="$(awk -F'"' '/"ntp_servers"/ { print $4; exit }' "${constants_path}")"
 talos_version="$(awk -F'"' '/"version"/ { print $4; exit }' "${constants_path}")"
 talos_factory_image_id="$(awk -F'"' '/"factory_image_id"/ { print $4; exit }' "${constants_path}")"
+disk_by_id_prefix="$(awk -F'"' '/"disk_by_id_prefix"/ { print $4; exit }' "${constants_path}")"
 
 if [[ -z "${net_size}" || -z "${gateway}" || -z "${dns_servers}" ]]; then
   echo "Error: missing network constants in vms_constants.tf." >&2
@@ -112,13 +120,18 @@ if [[ -z "${talos_version}" || -z "${talos_factory_image_id}" ]]; then
   exit 1
 fi
 
-# Load the static IP patch template.
+if [[ -z "${disk_by_id_prefix}" ]]; then
+  echo "Error: missing disk_by_id_prefix in vms_constants.tf." >&2
+  echo "Fix: set vm.disk_by_id_prefix to match /dev/disk/by-id prefix (for example scsi-0QEMU_QEMU_HARDDISK_drive-scsi)." >&2
+  exit 1
+fi
+# Load the machine patch template.
 template="$(cat "${template_path}")"
 
 # Basic template sanity check.
-if [[ "${template}" != *'${ip}'* || "${template}" != *'${cidr}'* ]]; then
-  echo "Error: template is missing required placeholders (\${ip}, \${cidr})." >&2
-  echo "Fix: restore patches/network.template.yaml or add the missing placeholders." >&2
+if [[ "${template}" != *'${ip}'* || "${template}" != *'${cidr}'* || "${template}" != *'${machine_disks_section}'* ]]; then
+  echo "Error: template is missing required placeholders (\${ip}, \${cidr}, \${machine_disks_section})." >&2
+  echo "Fix: restore patches/machine.template.yaml or add the missing placeholders." >&2
   exit 1
 fi
 
@@ -210,53 +223,6 @@ if [[ ${#vm_ips[@]} -eq 0 ]]; then
   exit 1
 fi
 
-# Render per-VM patch files from the template.
-for name in "${!vm_ips[@]}"; do
-  ip="${vm_ips[${name}]}"
-  if [[ ! "${ip}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
-    echo "Error: invalid IP format for ${name}: ${ip}" >&2
-    echo "Fix: set a valid IPv4 address in vms_list.tf for ${name}." >&2
-    exit 1
-  fi
-  rendered="${template}"
-  rendered="${rendered//'${ip}'/${ip}}"
-  rendered="${rendered//'${cidr}'/${net_size}}"
-  rendered="${rendered//'${gateway}'/${gateway}}"
-  rendered="${rendered//'${dns_servers_section}'/${dns_servers_section}}"
-  rendered="${rendered//'${ntp_servers_section}'/${ntp_servers_section}}"
-  out_path="${patch_dir}/network-${name}.yaml"
-  printf "%s\n" "${rendered}" > "${out_path}"
-  echo "wrote ${out_path}"
-
-  hostname_rendered="${hostname_template//'${hostname}'/${name}}"
-  hostname_out_path="${patch_dir}/hostname-${name}.yaml"
-  printf "%s\n" "${hostname_rendered}" > "${hostname_out_path}"
-  echo "wrote ${hostname_out_path}"
-done
-
-# Remove stale patch files not present in vms_list.tf.
-for path in "${patch_dir}"/network-*.yaml; do
-  [[ -e "${path}" ]] || continue
-  base="$(basename "${path}")"
-  name="${base#network-}"
-  name="${name%.yaml}"
-  if [[ -z "${vm_ips[${name}]:-}" ]]; then
-    rm -f "${path}"
-    echo "removed ${path}"
-  fi
-done
-
-for path in "${patch_dir}"/hostname-*.yaml; do
-  [[ -e "${path}" ]] || continue
-  base="$(basename "${path}")"
-  name="${base#hostname-}"
-  name="${name%.yaml}"
-  if [[ -z "${vm_ips[${name}]:-}" ]]; then
-    rm -f "${path}"
-    echo "removed ${path}"
-  fi
-done
-
 # Build VM role lists from vms_list.tf.
 declare -A vm_types
 controlplane_names=()
@@ -304,6 +270,136 @@ for name in "${!vm_ips[@]}"; do
     echo "Error: VM ${name} has no type in vms_list.tf." >&2
     echo "Fix: add type = \"controlplane\" or type = \"worker\" for ${name}." >&2
     exit 1
+  fi
+done
+
+declare -A disk_mounts
+declare -A disk_counts
+while IFS='|' read -r vm_type size mount; do
+  count="${disk_counts[${vm_type}]:-0}"
+  if [[ -n "${mount}" ]]; then
+    disk_mounts["${vm_type}|${count}"]="${mount}"
+  fi
+  disk_counts["${vm_type}"]=$((count + 1))
+done < <(
+  awk '
+    /^[[:space:]]*#/ { next }
+    match($0, /"[^"]+"[[:space:]]*=[[:space:]]*{/) {
+      current = $0
+      sub(/^[^"]*"/, "", current)
+      sub(/".*/, "", current)
+      in_block = 1
+      next
+    }
+    in_block && match($0, /disks[[:space:]]*=/) { in_disks = 1 }
+    in_block && in_disks {
+      line = $0
+      gsub(/#.*/, "", line)
+      if (line ~ /]/) { in_disks = 0 }
+      if (line ~ /size[[:space:]]*=/) {
+        gsub(/[{}]/, "", line)
+        size = ""
+        mount = ""
+        n = split(line, parts, ",")
+        for (i = 1; i <= n; i++) {
+          part = parts[i]
+          gsub(/^[[:space:]]+/, "", part)
+          gsub(/[[:space:]]+$/, "", part)
+          if (part ~ /^size[[:space:]]*=/) {
+            sub(/^size[[:space:]]*=/, "", part)
+            gsub(/[[:space:]]*/, "", part)
+            size = part
+          }
+          if (part ~ /^mount[[:space:]]*=/) {
+            sub(/^mount[[:space:]]*=/, "", part)
+            gsub(/^[[:space:]]*"/, "", part)
+            gsub(/"[[:space:]]*$/, "", part)
+            mount = part
+          }
+        }
+        if (size != "") {
+          print current "|" size "|" mount
+        }
+      }
+      next
+    }
+    in_block && /}/ { in_block = 0 }
+  ' "${resources_path}"
+)
+
+# Render per-VM machine patch files from the template.
+for name in "${!vm_ips[@]}"; do
+  ip="${vm_ips[${name}]}"
+  if [[ ! "${ip}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+    echo "Error: invalid IP format for ${name}: ${ip}" >&2
+    echo "Fix: set a valid IPv4 address in vms_list.tf for ${name}." >&2
+    exit 1
+  fi
+  vm_type="${vm_types[${name}]}"
+  disks_block=""
+  disk_total="${disk_counts[${vm_type}]:-0}"
+  for ((idx=0; idx<disk_total; idx++)); do
+    mount_path="${disk_mounts[${vm_type}|${idx}]:-}"
+    if [[ -z "${mount_path}" ]]; then
+      continue
+    fi
+    if [[ "${mount_path}" != /var/* ]]; then
+      echo "Error: mount path must be under /var for ${vm_type} disk index ${idx} (got ${mount_path})." >&2
+      echo "Fix: use a /var-based mountpoint like /var/mnt/... or /var/lib/...." >&2
+      exit 1
+    fi
+    device="/dev/disk/by-id/${disk_by_id_prefix}${idx}"
+    disks_block+=$'\n    - device: '"${device}"$'\n      partitions:\n        - mountpoint: '"${mount_path}"$'\n          size: 0 # Use full disk'
+  done
+  if [[ -n "${disks_block}" ]]; then
+    machine_disks_section="${disks_block}"
+  else
+    machine_disks_section=" []"
+  fi
+
+  rendered="${template}"
+  rendered="${rendered//'${ip}'/${ip}}"
+  rendered="${rendered//'${cidr}'/${net_size}}"
+  rendered="${rendered//'${gateway}'/${gateway}}"
+  rendered="${rendered//'${dns_servers_section}'/${dns_servers_section}}"
+  rendered="${rendered//'${ntp_servers_section}'/${ntp_servers_section}}"
+  rendered="${rendered//'${machine_disks_section}'/${machine_disks_section}}"
+  out_path="${patch_dir}/machine-${name}.yaml"
+  printf "%s\n" "${rendered}" > "${out_path}"
+  echo "wrote ${out_path}"
+
+  hostname_rendered="${hostname_template//'${hostname}'/${name}}"
+  hostname_out_path="${patch_dir}/hostname-${name}.yaml"
+  printf "%s\n" "${hostname_rendered}" > "${hostname_out_path}"
+  echo "wrote ${hostname_out_path}"
+done
+
+# Remove stale patch files not present in vms_list.tf.
+for path in "${patch_dir}"/machine-*.yaml; do
+  [[ -e "${path}" ]] || continue
+  base="$(basename "${path}")"
+  name="${base#machine-}"
+  name="${name%.yaml}"
+  if [[ -z "${vm_ips[${name}]:-}" ]]; then
+    rm -f "${path}"
+    echo "removed ${path}"
+  fi
+done
+
+for path in "${patch_dir}"/network-*.yaml; do
+  [[ -e "${path}" ]] || continue
+  rm -f "${path}"
+  echo "removed ${path}"
+done
+
+for path in "${patch_dir}"/hostname-*.yaml; do
+  [[ -e "${path}" ]] || continue
+  base="$(basename "${path}")"
+  name="${base#hostname-}"
+  name="${name%.yaml}"
+  if [[ -z "${vm_ips[${name}]:-}" ]]; then
+    rm -f "${path}"
+    echo "removed ${path}"
   fi
 done
 

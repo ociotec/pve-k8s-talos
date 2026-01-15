@@ -2,7 +2,10 @@ variable "resources" {
   type = map(object({
     vcpus  = number
     memory = number
-    disks  = list(number)
+    disks  = list(object({
+      size  = number
+      mount = optional(string)
+    }))
   }))
   default = {
     # These are example values, rename the file to remove
@@ -10,12 +13,18 @@ variable "resources" {
     "controlplane" = {
       vcpus  = 2
       memory = 2048
-      disks  = [32]
+      disks  = [
+        { size = 32 }, # First disk is used as the root disk
+      ]
     }
     "worker" = {
       vcpus  = 4
       memory = 8192
-      disks  = [32, 128] # Several disks can be defined, first one is used as root disk
+      disks  = [
+        { size = 32 }, # First disk is used as the root disk
+        { size = 128 },
+        { size = 64, mount = "/var/lib/kafka" },
+      ]
     }
   }
 }
