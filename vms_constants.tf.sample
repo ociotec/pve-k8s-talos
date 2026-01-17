@@ -10,7 +10,7 @@ variable "constants" {
       # Example: scsi-0QEMU_QEMU_HARDDISK_drive-scsi
       "disk_by_id_prefix" = "scsi-0QEMU_QEMU_HARDDISK_drive-scsi"
       # Comma-separated list of extra VM tags (example: "prod,ceph,kafka").
-      "tags" = ""
+      "tags" = "talos,k8s,server"
     }
     "network" = {
       "net_size" = "24"
