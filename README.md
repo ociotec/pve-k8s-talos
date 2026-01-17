@@ -34,6 +34,7 @@ Now you need to update several files to your current needs. Samples of the files
 - `vms_constants.tf.sample` --> `vms_constants.tf`
   - Talos ISO path on PVE node.
   - Optional datastore ID for VM disks and cloud-init (defaults to `local-lvm`).
+  - Proxmox pool ID for VM placement (leave empty to disable).
   - `vm.disk_by_id_prefix` to build stable `/dev/disk/by-id` device names.
   - Optional `vm.tags` list (comma-separated) to append extra VM tags.
   - Network settings (except IP address that is configured later).

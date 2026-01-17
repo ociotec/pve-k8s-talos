@@ -6,6 +6,8 @@ variable "constants" {
     "vm" = {
       "iso_path"     = "ceph-fs:iso/talos-v1.12.0-nocloud-amd64-with-qemu-guest-agent.iso"
       "datastore_id" = "local-lvm"
+      # Proxmox pool ID for VM placement (leave empty to disable).
+      "pool_id" = ""
       # Prefix for /dev/disk/by-id (rarely needs changes in typical Proxmox setups).
       # Example: scsi-0QEMU_QEMU_HARDDISK_drive-scsi
       "disk_by_id_prefix" = "scsi-0QEMU_QEMU_HARDDISK_drive-scsi"

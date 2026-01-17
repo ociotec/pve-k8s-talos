@@ -14,7 +14,7 @@ resource "proxmox_virtual_environment_vm" "create_pve_vms" {
   vm_id           = each.value.vm_id
   stop_on_destroy = true # Stop VM before destroying if QEMU is not deployed
   started         = true # Do or do not start VM after creation
-  pool_id         = "kubernetes"
+  pool_id         = var.constants["vm"]["pool_id"] != "" ? var.constants["vm"]["pool_id"] : null
   agent {
     enabled = true
     trim    = true
