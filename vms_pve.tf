@@ -4,6 +4,13 @@ locals {
     trimspace(tag)
     if trimspace(tag) != ""
   ]
+  hotplug_enabled = var.constants["vm"]["hotplug"] != ""
+  hotplug_features = [
+    for feature in split(",", var.constants["vm"]["hotplug"]) :
+    lower(trimspace(feature))
+    if trimspace(feature) != ""
+  ]
+  hotplug_has_mem = contains(local.hotplug_features, "memory")
 }
 
 resource "proxmox_virtual_environment_vm" "create_pve_vms" {
@@ -13,8 +20,8 @@ resource "proxmox_virtual_environment_vm" "create_pve_vms" {
   node_name       = each.value.node_name
   vm_id           = each.value.vm_id
   stop_on_destroy = true # Stop VM before destroying if QEMU is not deployed
-  started         = true # Do or do not start VM after creation
-  pool_id         = var.constants["vm"]["pool_id"] != "" ? var.constants["vm"]["pool_id"] : null
+  started         = false # Start VMs after hotplug is configured
+  pool_id         = var.constants["vm"]["pool"] != "" ? var.constants["vm"]["pool"] : null
   agent {
     enabled = true
     trim    = true
@@ -70,4 +77,55 @@ resource "proxmox_virtual_environment_vm" "create_pve_vms" {
       ]
     }
   }
+}
+
+resource "null_resource" "proxmox_hotplug" {
+  // Runs only when an endpoint is set and hotplug is non-empty.
+  for_each = local.hotplug_enabled ? var.vms : {}
+
+  // Ensure VMs exist before configuring hotplug.
+  depends_on = [proxmox_virtual_environment_vm.create_pve_vms]
+
+  triggers = {
+    node    = each.value.node_name
+    vm_id   = tostring(each.value.vm_id)
+    hotplug = var.constants["vm"]["hotplug"]
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["bash", "-c"]
+    on_failure  = "fail"
+    command = "${path.module}/scripts/pve-api.sh set-hotplug --node ${each.value.node_name} --vmid ${each.value.vm_id} --hotplug ${var.constants["vm"]["hotplug"]}${local.hotplug_has_mem ? " --enable-numa" : ""}"
+  }
+}
+
+resource "null_resource" "proxmox_start_vms" {
+  // Start VMs after hotplug configuration completes.
+  for_each = local.hotplug_enabled ? var.vms : {}
+
+  depends_on = [null_resource.proxmox_hotplug]
+
+  triggers = {
+    node  = each.value.node_name
+    vm_id = tostring(each.value.vm_id)
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["bash", "-c"]
+    on_failure  = "fail"
+    command = "${path.module}/scripts/pve-api.sh start-vm --node ${each.value.node_name} --vmid ${each.value.vm_id}"
+  }
+}
+
+resource "null_resource" "all_vms_ready" {
+  // Final sync point for all VM creation/configuration steps.
+  depends_on = [
+    proxmox_virtual_environment_vm.create_pve_vms,
+    null_resource.proxmox_hotplug,
+    null_resource.proxmox_start_vms,
+  ]
+}
+
+output "all_vms_ready" {
+  value = null_resource.all_vms_ready.id
 }

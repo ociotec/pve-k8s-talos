@@ -4,6 +4,10 @@ terraform {
       source  = "bpg/proxmox"
       version = ">= 0.93.0"
     }
+    null = {
+      source  = "hashicorp/null"
+      version = ">= 3.2.4"
+    }
     talos = {
       source  = "siderolabs/talos"
       version = ">= 0.10.0"

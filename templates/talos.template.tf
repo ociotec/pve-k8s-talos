@@ -12,7 +12,7 @@ __CONTROLPLANE_DATA__
 
 resource "talos_machine_configuration_apply" "controlplane_config_apply" {
   for_each                    = local.controlplane_vms
-  depends_on                  = [proxmox_virtual_environment_vm.create_pve_vms]
+  depends_on                  = [null_resource.all_vms_ready]
   client_configuration        = talos_machine_secrets.machine_secrets.client_configuration
   machine_configuration_input = local.controlplane_machine_config[each.key]
   node                        = each.value.ip
@@ -26,7 +26,7 @@ __MACHINE_CONFIG_LOCALS__
 
 resource "talos_machine_configuration_apply" "worker_config_apply" {
   for_each                    = local.worker_vms
-  depends_on                  = [proxmox_virtual_environment_vm.create_pve_vms]
+  depends_on                  = [null_resource.all_vms_ready]
   client_configuration        = talos_machine_secrets.machine_secrets.client_configuration
   machine_configuration_input = local.worker_machine_config[each.key]
   node                        = each.value.ip

@@ -34,7 +34,8 @@ Now you need to update several files to your current needs. Samples of the files
 - `vms_constants.tf.sample` --> `vms_constants.tf`
   - Talos ISO path on PVE node.
   - Optional datastore ID for VM disks and cloud-init (defaults to `local-lvm`).
-  - Proxmox pool ID for VM placement (leave empty to disable).
+  - Proxmox pool name for VM placement (leave empty to disable).
+  - Optional `vm.hotplug` (comma-separated), defaults to `cpu,memory,disk,network,usb`.
   - `vm.disk_by_id_prefix` to build stable `/dev/disk/by-id` device names.
   - Optional `vm.tags` list (comma-separated) to append extra VM tags.
   - Network settings (except IP address that is configured later).
@@ -98,6 +99,18 @@ scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
 ```
 
 Set `vm.disk_by_id_prefix` to the part before the index (`scsi-0QEMU_QEMU_HARDDISK_drive-scsi` in this example).
+
+### Proxmox hotplug via API
+
+If `vm.hotplug` is non-empty, OpenTofu will call the Proxmox API to set hotplug on each VM.
+Authentication uses environment variables (no files are parsed):
+
+- `PROXMOX_VE_ENDPOINT` (example: `https://pve.example:8006`)
+- `PROXMOX_VE_API_TOKEN` (preferred)
+- or `PROXMOX_VE_USERNAME` + `PROXMOX_VE_PASSWORD`
+- `PROXMOX_VE_INSECURE` (set to `true`/`1` to skip TLS verification)
+
+For password auth, `jq` must be available to parse the login response.
 
 ### Create the infrastructre
 
