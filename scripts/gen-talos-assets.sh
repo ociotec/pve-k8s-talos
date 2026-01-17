@@ -224,18 +224,64 @@ if [[ ${#vm_ips[@]} -eq 0 ]]; then
 fi
 
 # Build VM role lists from vms_list.tf.
-declare -A vm_types
+declare -A vm_resource_types
+declare -A resource_k8s_nodes
 controlplane_names=()
 worker_names=()
-while IFS='|' read -r name role; do
-  if [[ -z "${name}" || -z "${role}" ]]; then
+
+while IFS='|' read -r resource_type k8s_node; do
+  if [[ -z "${resource_type}" || -z "${k8s_node}" ]]; then
     continue
   fi
-  vm_types["${name}"]="${role}"
-  if [[ "${role}" == "controlplane" ]]; then
+  resource_k8s_nodes["${resource_type}"]="${k8s_node}"
+done < <(
+  awk '
+    /^[[:space:]]*#/ { next }
+    match($0, /"[^"]+"[[:space:]]*=[[:space:]]*{/) {
+      name = $0
+      sub(/^[^"]*"/, "", name)
+      sub(/".*/, "", name)
+      in_block = 1
+      k8s = ""
+      next
+    }
+    in_block && match($0, /k8s_node[[:space:]]*=[[:space:]]*"[^"]+"/) {
+      k8s = $0
+      sub(/^[^"]*"/, "", k8s)
+      sub(/".*/, "", k8s)
+    }
+    in_block && /}/ {
+      if (name != "" && k8s != "") {
+        print name "|" k8s
+      }
+      in_block = 0
+    }
+  ' "${resources_path}"
+)
+
+while IFS='|' read -r name resource_type; do
+  if [[ -z "${name}" || -z "${resource_type}" ]]; then
+    continue
+  fi
+  vm_resource_types["${name}"]="${resource_type}"
+  if [[ -v "resource_k8s_nodes[${resource_type}]" ]]; then
+    k8s_node="${resource_k8s_nodes[${resource_type}]}"
+  else
+    k8s_node=""
+  fi
+  if [[ -z "${k8s_node}" ]]; then
+    echo "Error: resource type '${resource_type}' is not defined in vms_resources.tf." >&2
+    echo "Fix: add a resources entry for '${resource_type}' with k8s_node and sizing." >&2
+    exit 1
+  fi
+  if [[ "${k8s_node}" == "controlplane" ]]; then
     controlplane_names+=("${name}")
-  elif [[ "${role}" == "worker" ]]; then
+  elif [[ "${k8s_node}" == "worker" ]]; then
     worker_names+=("${name}")
+  else
+    echo "Error: invalid k8s_node '${k8s_node}' for resource type ${resource_type}." >&2
+    echo "Fix: set k8s_node to 'controlplane' or 'worker' in vms_resources.tf." >&2
+    exit 1
   fi
 done < <(
   awk '
@@ -245,17 +291,20 @@ done < <(
       sub(/^[^"]*"/, "", name)
       sub(/".*/, "", name)
       in_block = 1
+      resource = ""
       next
     }
     in_block && match($0, /type[[:space:]]*=[[:space:]]*"[^"]+"/) {
-      role = $0
-      sub(/^[^"]*"/, "", role)
-      sub(/".*/, "", role)
-      print name "|" role
-      in_block = 0
-      next
+      resource = $0
+      sub(/^[^"]*"/, "", resource)
+      sub(/".*/, "", resource)
     }
-    in_block && /}/ { in_block = 0 }
+    in_block && /}/ {
+      if (resource != "") {
+        print name "|" resource
+      }
+      in_block = 0
+    }
   ' "${vms_path}"
 )
 
@@ -266,9 +315,9 @@ if [[ ${#controlplane_names[@]} -eq 0 || ${#worker_names[@]} -eq 0 ]]; then
 fi
 
 for name in "${!vm_ips[@]}"; do
-  if [[ -z "${vm_types[${name}]:-}" ]]; then
+  if [[ -z "${vm_resource_types[${name}]:-}" ]]; then
     echo "Error: VM ${name} has no type in vms_list.tf." >&2
-    echo "Fix: add type = \"controlplane\" or type = \"worker\" for ${name}." >&2
+    echo "Fix: add type = \"<resource-type>\" for ${name}." >&2
     exit 1
   fi
 done
@@ -335,16 +384,16 @@ for name in "${!vm_ips[@]}"; do
     echo "Fix: set a valid IPv4 address in vms_list.tf for ${name}." >&2
     exit 1
   fi
-  vm_type="${vm_types[${name}]}"
+  resource_type="${vm_resource_types[${name}]}"
   disks_block=""
-  disk_total="${disk_counts[${vm_type}]:-0}"
+  disk_total="${disk_counts[${resource_type}]:-0}"
   for ((idx=0; idx<disk_total; idx++)); do
-    mount_path="${disk_mounts[${vm_type}|${idx}]:-}"
+    mount_path="${disk_mounts[${resource_type}|${idx}]:-}"
     if [[ -z "${mount_path}" ]]; then
       continue
     fi
     if [[ "${mount_path}" != /var/* ]]; then
-      echo "Error: mount path must be under /var for ${vm_type} disk index ${idx} (got ${mount_path})." >&2
+      echo "Error: mount path must be under /var for ${resource_type} disk index ${idx} (got ${mount_path})." >&2
       echo "Fix: use a /var-based mountpoint like /var/mnt/... or /var/lib/...." >&2
       exit 1
     fi

@@ -44,12 +44,13 @@ Now you need to update several files to your current needs. Samples of the files
   - Map of VMs on PVE with VM name as key:
     - PVE node.
     - VM ID.
-    - Type of node: `controlplane` or `worker` node.
+    - Resource type key (must exist in `vms_resources.tf`).
     - IP address.
 - `vms_resources.tf.sample` --> `vms_resources.tf`
-  - Reources for control plane & worker nodes:
+  - Resources per node type referenced by `vms_list.tf`:
     - Count of vCPUs.
     - RAM memory in MB.
+    - `k8s_node` role: `controlplane` or `worker`.
     - Disks in GB with optional Talos mount points (first disk is used as root).
     - Mount points must live under `/var` (for example `/var/mnt/kafka` or `/var/lib/kafka`).
 - `k8s-net/constants.tf.sample` --> `k8s-net/constants.tf`

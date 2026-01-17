@@ -156,10 +156,45 @@ wait_for_dashboard_cert() {
 }
 
 first_worker_ip() {
-  awk '
+  local resources_file="${PWD}/vms_resources.tf"
+  local vms_file="${PWD}/vms_list.tf"
+  local worker_types
+
+  worker_types="$(
+    awk '
+      /^[[:space:]]*#/ { next }
+      match($0, /"[^"]+"[[:space:]]*=[[:space:]]*{/) {
+        name = $0
+        sub(/^[^"]*"/, "", name)
+        sub(/".*/, "", name)
+        in_block = 1
+        k8s = ""
+        next
+      }
+      in_block && match($0, /k8s_node[[:space:]]*=[[:space:]]*"[^"]+"/) {
+        k8s = $0
+        sub(/^[^"]*"/, "", k8s)
+        sub(/".*/, "", k8s)
+      }
+      in_block && /}/ {
+        if (k8s == "worker") { print name }
+        in_block = 0
+      }
+    ' "${resources_file}" | paste -sd, -
+  )"
+
+  awk -v types="${worker_types}" '
+    BEGIN { n = split(types, allowed, ",") }
     /^[[:space:]]*#/ { next }
     match($0, /"[^"]+"[[:space:]]*=[[:space:]]*{/) { in_block=1; is_worker=0; next }
-    in_block && match($0, /type[[:space:]]*=[[:space:]]*"worker"/) { is_worker=1 }
+    in_block && match($0, /type[[:space:]]*=[[:space:]]*"[^"]+"/) {
+      t = $0
+      sub(/^[^"]*"/, "", t)
+      sub(/".*/, "", t)
+      for (i = 1; i <= n; i++) {
+        if (allowed[i] == t) { is_worker=1 }
+      }
+    }
     in_block && match($0, /ip[[:space:]]*=[[:space:]]*"[^"]+"/) {
       if (is_worker) {
         ip = $0
@@ -172,7 +207,7 @@ first_worker_ip() {
       is_worker=0
     }
     in_block && /}/ { in_block=0; is_worker=0 }
-  ' "$1"
+  ' "${vms_file}"
 }
 
 disk_by_id_prefix() {

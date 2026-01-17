@@ -5,6 +5,13 @@ variable "vms" {
     type      = string
     ip        = string
   }))
+  validation {
+    condition = alltrue([
+      for name, vm in var.vms :
+      contains(keys(var.resources), vm.type)
+    ])
+    error_message = "Each vms entry must reference a type that exists in vms_resources.tf."
+  }
   default = {
     # These are example values, rename the file to remove
     # ".sample" and update them to match your environment
