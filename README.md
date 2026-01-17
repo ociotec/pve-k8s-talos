@@ -35,6 +35,7 @@ Now you need to update several files to your current needs. Samples of the files
   - Talos ISO path on PVE node.
   - Optional datastore ID for VM disks and cloud-init (defaults to `local-lvm`).
   - `vm.disk_by_id_prefix` to build stable `/dev/disk/by-id` device names.
+  - Optional `vm.tags` list (comma-separated) to append extra VM tags.
   - Network settings (except IP address that is configured later).
   - DNS servers (comma-separated list, at least one required).
   - Optional VLAN tag for all VMs (leave empty to disable).

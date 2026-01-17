@@ -9,6 +9,8 @@ variable "constants" {
       # Prefix for /dev/disk/by-id (rarely needs changes in typical Proxmox setups).
       # Example: scsi-0QEMU_QEMU_HARDDISK_drive-scsi
       "disk_by_id_prefix" = "scsi-0QEMU_QEMU_HARDDISK_drive-scsi"
+      # Comma-separated list of extra VM tags (example: "prod,ceph,kafka").
+      "tags" = ""
     }
     "network" = {
       "net_size" = "24"

@@ -1,3 +1,11 @@
+locals {
+  extra_vm_tags = [
+    for tag in split(",", var.constants["vm"]["tags"]) :
+    trimspace(tag)
+    if trimspace(tag) != ""
+  ]
+}
+
 resource "proxmox_virtual_environment_vm" "create_pve_vms" {
   for_each = var.vms
 
@@ -11,7 +19,10 @@ resource "proxmox_virtual_environment_vm" "create_pve_vms" {
     enabled = true
     trim    = true
   }
-  tags = ["server", "k8s", "talos", var.resources[each.value.type].k8s_node, each.value.type]
+  tags = distinct(concat(
+    [var.resources[each.value.type].k8s_node, each.value.type],
+    local.extra_vm_tags
+  ))
 
   cpu {
     cores = var.resources[each.value.type].vcpus
