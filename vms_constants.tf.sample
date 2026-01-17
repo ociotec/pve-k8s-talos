@@ -4,27 +4,26 @@ variable "constants" {
     # These are example values, rename the file to remove
     # ".sample" and update them to match your environment
     "vm" = {
-      "iso_path"     = "ceph-fs:iso/talos-v1.12.0-nocloud-amd64-with-qemu-guest-agent.iso"
-      "datastore_id" = "local-lvm"
+      "iso_path"          = "ceph-fs:iso/talos-v1.12.1-nocloud-amd64-with-qemu-guest-agent.iso"
+      "datastore_id"      = "local-lvm"
       # Proxmox pool name for VM placement (leave empty to disable).
-      "pool" = ""
-      # Comma-separated hotplug options (leave empty to disable).
-      # Valid values: cpu,memory,disk,network,usb.
-      "hotplug" = "cpu,memory,disk,network,usb"
+      "pool"              = ""
       # Prefix for /dev/disk/by-id (rarely needs changes in typical Proxmox setups).
       # Example: scsi-0QEMU_QEMU_HARDDISK_drive-scsi
       "disk_by_id_prefix" = "scsi-0QEMU_QEMU_HARDDISK_drive-scsi"
       # Comma-separated list of extra VM tags (example: "prod,ceph,kafka").
-      "tags" = "talos,k8s,server"
+      "tags"              = "talos,k8s,server"
     }
     "network" = {
-      "net_size" = "24"
-      "gateway"  = "192.168.1.1"
-      "dns_servers" = "80.58.61.250,80.58.61.254"
+      "net_size"      = "24"
+      "gateway"       = "192.168.1.1"
+      "dns_servers"   = "80.58.61.250,80.58.61.254"
+      # Proxmox bridge device name (example: vmbr0).
+      "bridge_device" = "vmbr0"
       # Leave empty to disable
-      "vlan_tag" = ""
+      "vlan_tag"      = ""
       # Comma-separated list, leave empty to disable
-      "ntp_servers" = ""
+      "ntp_servers"   = ""
     }
     "talos" = {
       "version"           = "v1.12.0"
