@@ -58,6 +58,7 @@ Now you need to update several files to your current needs. Samples of the files
     - Mount points must live under `/var` (for example `/var/mnt/kafka` or `/var/lib/kafka`).
 - `k8s-net/constants.tf.sample` --> `k8s-net/constants.tf`
   - Domain, CA organization, MetalLB pool range, and ingress fixed IP.
+- `root_ca_crt` and `root_ca_key` paths. A new Root CA is generated only when either file is missing or empty.
 - `monitoring/constants.tf.sample` --> `monitoring/constants.tf`
   - Domain, storage class, sizes, retention, and image versions for Prometheus, Loki, and Grafana.
 

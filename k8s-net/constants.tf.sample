@@ -1,16 +1,19 @@
 locals {
-  domain = "home.arpa"
+  domain                  = "home.arpa"
 
-  root_ca_common_name   = local.domain
-  root_ca_organization  = "My home local network"
-  root_ca_validity_hours = 876000 # 100 years
+  root_ca_common_name     = local.domain
+  root_ca_organization    = "My home local network"
+  root_ca_validity_hours  = 876000 # 100 years
+  # Root CA paths. A new Root CA is generated only when the crt/key files are missing or empty.
+  root_ca_crt             = "./${local.domain}.pem"
+  root_ca_key             = "./${local.domain}.key"
 
-  metallb_pool_start = "192.168.1.70"
-  metallb_pool_end   = "192.168.1.79"
-  ingress_lb_ip      = "192.168.1.70"
+  metallb_pool_start      = "192.168.1.70"
+  metallb_pool_end        = "192.168.1.79"
+  ingress_lb_ip           = "192.168.1.70"
 
-  portainer_hostname = "portainer.${local.domain}"
-  ceph_hostname      = "ceph.${local.domain}"
+  portainer_hostname      = "portainer.${local.domain}"
+  ceph_hostname           = "ceph.${local.domain}"
 
   portainer_image_tag     = "2.33.6"
   portainer_storage_class = "rook-ceph-block-ec"

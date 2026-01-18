@@ -112,6 +112,40 @@ locals {
     for m in local.portainer : m
     if try(m.kind, "") != "Namespace"
   ]
+
+  root_ca_crt_content = try(file(local.root_ca_crt), "")
+  root_ca_key_content = try(file(local.root_ca_key), "")
+
+  root_ca_has_crt = local.root_ca_crt != "" && trimspace(local.root_ca_crt_content) != ""
+  root_ca_has_key = local.root_ca_key != "" && trimspace(local.root_ca_key_content) != ""
+
+  root_ca_use_external = local.root_ca_has_crt && local.root_ca_has_key
+  root_ca_external_ok  = local.root_ca_has_crt == local.root_ca_has_key
+  root_ca_cert_pem     = local.root_ca_use_external ? local.root_ca_crt_content : tls_self_signed_cert.cert_manager_ca[0].cert_pem
+  root_ca_key_pem      = local.root_ca_use_external ? local.root_ca_key_content : tls_private_key.cert_manager_ca[0].private_key_pem
+
+  cert_manager_wait_seconds = 120
+}
+
+moved {
+  from = local_file.cert_manager_ca_cert[0]
+  to   = local_file.cert_manager_ca_cert
+}
+
+moved {
+  from = local_file.cert_manager_ca_key[0]
+  to   = local_file.cert_manager_ca_key
+}
+
+check "root_ca_files" {
+  assert {
+    condition = local.root_ca_external_ok
+    error_message = format(
+      "root_ca_crt and root_ca_key must either both exist with content or both be missing/empty. root_ca_crt=%q root_ca_key=%q",
+      local.root_ca_crt,
+      local.root_ca_key
+    )
+  }
 }
 
 resource "kubernetes_manifest" "cert_manager_crds" {
@@ -215,12 +249,14 @@ resource "kubernetes_manifest" "rook_dashboard" {
 }
 
 resource "tls_private_key" "cert_manager_ca" {
+  count     = local.root_ca_use_external ? 0 : 1
   algorithm = "RSA"
   rsa_bits  = 4096
 }
 
 resource "tls_self_signed_cert" "cert_manager_ca" {
-  private_key_pem       = tls_private_key.cert_manager_ca.private_key_pem
+  count                 = local.root_ca_use_external ? 0 : 1
+  private_key_pem       = tls_private_key.cert_manager_ca[0].private_key_pem
   is_ca_certificate     = true
   validity_period_hours = local.root_ca_validity_hours
 
@@ -240,15 +276,21 @@ resource "tls_self_signed_cert" "cert_manager_ca" {
 }
 
 resource "local_file" "cert_manager_ca_cert" {
-  filename        = "${path.module}/${local.root_ca_common_name}.pem"
-  content         = tls_self_signed_cert.cert_manager_ca.cert_pem
+  filename        = local.root_ca_crt
+  content         = local.root_ca_cert_pem
   file_permission = "0644"
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "local_file" "cert_manager_ca_key" {
-  filename        = "${path.module}/${local.root_ca_common_name}.key"
-  content         = tls_private_key.cert_manager_ca.private_key_pem
+  filename        = local.root_ca_key
+  content         = local.root_ca_key_pem
   file_permission = "0600"
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "kubernetes_secret_v1" "cert_manager_ca" {
@@ -258,8 +300,8 @@ resource "kubernetes_secret_v1" "cert_manager_ca" {
   }
 
   data = {
-    "tls.crt" = tls_self_signed_cert.cert_manager_ca.cert_pem
-    "tls.key" = tls_private_key.cert_manager_ca.private_key_pem
+    "tls.crt" = local.root_ca_cert_pem
+    "tls.key" = local.root_ca_key_pem
   }
 
   type = "kubernetes.io/tls"
@@ -302,7 +344,27 @@ resource "null_resource" "cert_manager_webhook_ready" {
   depends_on = [kubernetes_manifest.cert_manager]
 
   provisioner "local-exec" {
-    command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n cert-manager rollout status deploy/cert-manager-webhook --timeout=300s && KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n cert-manager wait --for=condition=Available deploy/cert-manager-cainjector --timeout=300s && KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl wait --for=condition=Established crd/clusterissuers.cert-manager.io --timeout=300s && KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl get validatingwebhookconfiguration cert-manager-webhook -o jsonpath='{.webhooks[0].clientConfig.caBundle}' | grep -q '.'"
+    command = <<-EOT
+      set -euo pipefail
+      kubeconfig="${abspath("${path.module}/${var.kubeconfig_path}")}"
+
+      KUBECONFIG="$kubeconfig" kubectl -n cert-manager rollout status deploy/cert-manager-webhook --timeout=${local.cert_manager_wait_seconds}s
+      KUBECONFIG="$kubeconfig" kubectl -n cert-manager wait --for=condition=Available deploy/cert-manager-cainjector --timeout=${local.cert_manager_wait_seconds}s
+      KUBECONFIG="$kubeconfig" kubectl wait --for=condition=Established crd/clusterissuers.cert-manager.io --timeout=${local.cert_manager_wait_seconds}s
+
+      deadline=$((SECONDS+${local.cert_manager_wait_seconds}))
+      while true; do
+        if KUBECONFIG="$kubeconfig" kubectl get validatingwebhookconfiguration cert-manager-webhook \
+          -o jsonpath='{.webhooks[0].clientConfig.caBundle}' | grep -q '.'; then
+          break
+        fi
+        if [ "$SECONDS" -ge "$deadline" ]; then
+          echo "Error: cert-manager webhook caBundle not ready after ${local.cert_manager_wait_seconds}s." >&2
+          exit 1
+        fi
+        sleep 5
+      done
+    EOT
   }
 }
 

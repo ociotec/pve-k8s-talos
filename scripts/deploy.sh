@@ -351,7 +351,9 @@ else
   tofu -chdir=k8s-net init 1>/dev/null
   tofu -chdir=k8s-net apply -auto-approve \
     -target=kubernetes_manifest.cert_manager_crds \
-    -target=kubernetes_manifest.metallb_native_crds 1>/dev/null
+    -target=kubernetes_manifest.metallb_native_crds \
+    -target=local_file.cert_manager_ca_cert \
+    -target=local_file.cert_manager_ca_key 1>/dev/null
   tofu -chdir=k8s-net apply -auto-approve 1>/dev/null
   portainer_url="$(tofu -chdir=k8s-net output -raw portainer_url)"
   rook_dashboard_url="$(tofu -chdir=k8s-net output -raw rook_ceph_dashboard_url)"
