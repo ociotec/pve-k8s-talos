@@ -261,27 +261,27 @@ Install the generated Root CA so your browser and curl trust the `portainer.home
 macOS:
 
 ```bash
-sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain k8s-net/home.arpa.pem
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain k8s-net/certs/home.arpa.pem
 ```
 
 Linux (Debian/Ubuntu):
 
 ```bash
-sudo cp k8s-net/home.arpa.pem /usr/local/share/ca-certificates/home.arpa.crt
+sudo cp k8s-net/certs/home.arpa.pem /usr/local/share/ca-certificates/home.arpa.crt
 sudo update-ca-certificates
 ```
 
 Linux (RHEL/CentOS/Fedora):
 
 ```bash
-sudo cp k8s-net/home.arpa.pem /etc/pki/ca-trust/source/anchors/home.arpa.crt
+sudo cp k8s-net/certs/home.arpa.pem /etc/pki/ca-trust/source/anchors/home.arpa.crt
 sudo update-ca-trust
 ```
 
 Windows (PowerShell, admin):
 
 ```powershell
-Import-Certificate -FilePath "C:\\path\\to\\home.arpa.pem" -CertStoreLocation Cert:\\LocalMachine\\Root
+Import-Certificate -FilePath "C:\\path\\to\\certs\\home.arpa.pem" -CertStoreLocation Cert:\\LocalMachine\\Root
 ```
 
 #### Local install of root CA and /etc/hosts

@@ -13,11 +13,11 @@ Deploys the Talos + Rook Ceph stack. By default it skips the destructive
 destroy step and only applies.
 
 Options:
-  -d, --destroy       Destroy the cluster first (dangerous).
-  -c, --skip-ceph     Skip all Rook Ceph steps (operator, cluster, dashboard, CSI).
-  -n, --skip-k8s-net  Skip k8s networking and ingress (k8s-net) steps (ingress, MetalLB, cert-manager, Portainer).
-  -m, --skip-monitoring  Skip monitoring stack (Prometheus, Loki, Grafana).
-  -h, --help          Show this help message.
+  -d, --destroy           Destroy the cluster first (dangerous).
+  -c, --skip-ceph         Skip all Rook Ceph steps (operator, cluster, dashboard, CSI).
+  -n, --skip-k8s-net      Skip k8s networking and ingress (k8s-net) steps (ingress, MetalLB, cert-manager, Portainer).
+  -m, --skip-monitoring   Skip monitoring stack (Prometheus, Loki, Grafana).
+  -h, --help              Show this help message.
 USAGE
 }
 

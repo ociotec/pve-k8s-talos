@@ -125,6 +125,7 @@ locals {
   root_ca_key_pem      = local.root_ca_use_external ? local.root_ca_key_content : tls_private_key.cert_manager_ca[0].private_key_pem
 
   cert_manager_wait_seconds = 120
+  metallb_wait_seconds      = 120
 }
 
 moved {
@@ -351,6 +352,8 @@ resource "null_resource" "cert_manager_webhook_ready" {
       KUBECONFIG="$kubeconfig" kubectl -n cert-manager rollout status deploy/cert-manager-webhook --timeout=${local.cert_manager_wait_seconds}s
       KUBECONFIG="$kubeconfig" kubectl -n cert-manager wait --for=condition=Available deploy/cert-manager-cainjector --timeout=${local.cert_manager_wait_seconds}s
       KUBECONFIG="$kubeconfig" kubectl wait --for=condition=Established crd/clusterissuers.cert-manager.io --timeout=${local.cert_manager_wait_seconds}s
+      KUBECONFIG="$kubeconfig" kubectl -n cert-manager get endpoints cert-manager-webhook \
+        -o jsonpath='{.subsets[0].addresses[0].ip}' | grep -q '.'
 
       deadline=$((SECONDS+${local.cert_manager_wait_seconds}))
       while true; do
@@ -372,6 +375,43 @@ resource "null_resource" "metallb_controller_ready" {
   depends_on = [kubernetes_manifest.metallb_native]
 
   provisioner "local-exec" {
-    command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n metallb-system rollout status deploy/controller --timeout=300s && KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n metallb-system wait --for=condition=Ready pod -l app=metallb,component=controller --timeout=300s && KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n metallb-system get endpoints metallb-webhook-service -o jsonpath='{.subsets[0].addresses[0].ip}' | grep -q '.'"
+    command = <<-EOT
+      set -euo pipefail
+      kubeconfig="${abspath("${path.module}/${var.kubeconfig_path}")}"
+
+      KUBECONFIG="$kubeconfig" kubectl -n metallb-system rollout status deploy/controller --timeout=${local.metallb_wait_seconds}s
+      KUBECONFIG="$kubeconfig" kubectl -n metallb-system wait --for=condition=Ready pod -l app=metallb,component=controller --timeout=${local.metallb_wait_seconds}s
+      KUBECONFIG="$kubeconfig" kubectl -n metallb-system get endpoints metallb-webhook-service \
+        -o jsonpath='{.subsets[0].addresses[0].ip}' | grep -q '.'
+
+      deadline=$((SECONDS+${local.metallb_wait_seconds}))
+      while true; do
+        if KUBECONFIG="$kubeconfig" kubectl apply --dry-run=server -f - >/dev/null <<'EOF'
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: webhook-ready-check
+  namespace: metallb-system
+spec:
+  addresses:
+  - ${local.metallb_pool_start}-${local.metallb_pool_end}
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: webhook-ready-check
+  namespace: metallb-system
+spec: {}
+EOF
+        then
+          break
+        fi
+        if [ "$SECONDS" -ge "$deadline" ]; then
+          echo "Error: MetalLB webhook not ready after ${local.metallb_wait_seconds}s." >&2
+          exit 1
+        fi
+        sleep 5
+      done
+    EOT
   }
 }
