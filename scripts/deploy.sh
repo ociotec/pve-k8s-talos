@@ -278,14 +278,28 @@ message "Deploying the Talos cluster (PVE VMs creation, Talos cluster initializa
 ./scripts/gen-talos-assets.sh
 tofu apply -auto-approve 1>/dev/null
 
-# Ensure kubeconfig and talosconfig exist in project directory
-if ! tofu output -raw talosconfig > talosconfig 2>/dev/null; then
-  error "Failed to write talosconfig from tofu outputs." >&2
-  exit 1
+# Generate kubeconfig and talosconfig only if they don't exist
+# This prevents overwriting files on subsequent runs
+if [[ ! -f talosconfig ]]; then
+  if ! tofu output -raw talosconfig > talosconfig 2>/dev/null; then
+    error "Failed to write talosconfig from tofu outputs." >&2
+    exit 1
+  fi
+  chmod 600 talosconfig
+  message "Generated talosconfig"
+else
+  message "talosconfig already exists, skipping generation"
 fi
-if ! tofu output -raw kubeconfig > kubeconfig 2>/dev/null; then
-  error "Failed to write kubeconfig from tofu outputs." >&2
-  exit 1
+
+if [[ ! -f kubeconfig ]]; then
+  if ! tofu output -raw kubeconfig > kubeconfig 2>/dev/null; then
+    error "Failed to write kubeconfig from tofu outputs." >&2
+    exit 1
+  fi
+  chmod 600 kubeconfig
+  message "Generated kubeconfig"
+else
+  message "kubeconfig already exists, skipping generation"
 fi
 
 # Ensure kubeconfig and talosconfig paths are set for this script session
