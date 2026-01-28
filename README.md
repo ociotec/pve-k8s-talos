@@ -389,6 +389,7 @@ Run with `-h` or `--help` to see help documentation. Common options:
 --destroy         Destroy the cluster first and purge local state files.
 --skip-ceph       Skip Rook Ceph operator/cluster/dashboard/CSI.
 --skip-k8s-net    Skip MetalLB, ingress-nginx, cert-manager, Portainer.
+--skip-portainer  Skip Portainer deployment (only if -n/--skip-k8s-net is not used).
 --skip-monitoring Skip Prometheus/Loki/Grafana stack.
 ```
 

@@ -16,6 +16,7 @@ Options:
   -d, --destroy           Destroy the cluster first (dangerous).
   -c, --skip-ceph         Skip all Rook Ceph steps (operator, cluster, dashboard, CSI).
   -n, --skip-k8s-net      Skip k8s networking and ingress (k8s-net) steps (ingress, MetalLB, cert-manager, Portainer).
+  -p, --skip-portainer    Skip Portainer deployment (only if -n/--skip-k8s-net is not used).
   -m, --skip-monitoring   Skip monitoring stack (Prometheus, Loki, Grafana).
   -h, --help              Show this help message.
 USAGE
@@ -24,6 +25,7 @@ USAGE
 destroy_first=false
 skip_ceph=false
 skip_k8s_net=false
+skip_portainer=false
 skip_monitoring=false
 
 while [[ $# -gt 0 ]]; do
@@ -38,6 +40,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     -n|--skip-k8s-net)
       skip_k8s_net=true
+      shift
+      ;;
+    -p|--skip-portainer)
+      skip_portainer=true
       shift
       ;;
     -m|--skip-monitoring)
@@ -353,12 +359,24 @@ else
     -target=kubernetes_manifest.cert_manager_crds \
     -target=kubernetes_manifest.metallb_native_crds \
     -target=local_file.cert_manager_ca_cert \
-    -target=local_file.cert_manager_ca_key 1>/dev/null
-  tofu -chdir=k8s-net apply -auto-approve 1>/dev/null
-  portainer_url="$(tofu -chdir=k8s-net output -raw portainer_url)"
-  rook_dashboard_url="$(tofu -chdir=k8s-net output -raw rook_ceph_dashboard_url)"
-  message "Portainer URL: ${URL_FMT_START}${portainer_url}${URL_FMT_END}"
-  message "Rook Ceph dashboard URL: ${URL_FMT_START}${rook_dashboard_url}${URL_FMT_END}"
+    -target=local_file.cert_manager_ca_key \
+    -var="skip_portainer=${skip_portainer}" \
+    -var="skip_ceph=${skip_ceph}" 1>/dev/null
+  tofu -chdir=k8s-net apply -auto-approve \
+    -var="skip_portainer=${skip_portainer}" \
+    -var="skip_ceph=${skip_ceph}" 1>/dev/null
+  
+  if [[ "${skip_portainer}" != "true" ]]; then
+    portainer_url="$(tofu -chdir=k8s-net output -raw portainer_url)"
+    message "Portainer URL: ${URL_FMT_START}${portainer_url}${URL_FMT_END}"
+  else
+    message "Skipping Portainer deployment."
+  fi
+  
+  if [[ "${skip_ceph}" != "true" ]]; then
+    rook_dashboard_url="$(tofu -chdir=k8s-net output -raw rook_ceph_dashboard_url)"
+    message "Rook Ceph dashboard URL: ${URL_FMT_START}${rook_dashboard_url}${URL_FMT_END}"
+  fi
 fi
 
 if [[ "${skip_k8s_net}" == "true" || "${skip_monitoring}" == "true" ]]; then

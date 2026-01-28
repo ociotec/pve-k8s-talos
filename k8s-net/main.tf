@@ -25,6 +25,18 @@ variable "kubeconfig_path" {
   description = "Path to the kubeconfig file."
 }
 
+variable "skip_portainer" {
+  type        = bool
+  default     = false
+  description = "Skip Portainer deployment."
+}
+
+variable "skip_ceph" {
+  type        = bool
+  default     = false
+  description = "Skip Rook Ceph dashboard deployment."
+}
+
 provider "kubernetes" {
   config_path = abspath("${path.module}/${var.kubeconfig_path}")
 }
@@ -106,11 +118,11 @@ locals {
   ]
   portainer_namespace = [
     for m in local.portainer : m
-    if try(m.kind, "") == "Namespace"
+    if try(m.kind, "") == "Namespace" && !var.skip_portainer
   ]
   portainer_other = [
     for m in local.portainer : m
-    if try(m.kind, "") != "Namespace"
+    if try(m.kind, "") != "Namespace" && !var.skip_portainer
   ]
 
   root_ca_crt_content = try(file(local.root_ca_crt), "")
@@ -238,7 +250,10 @@ resource "kubernetes_manifest" "portainer" {
 }
 
 resource "kubernetes_manifest" "rook_dashboard" {
-  for_each = { for i, m in local.rook_dashboard : i => m }
+  for_each = {
+    for i, m in local.rook_dashboard : i => m
+    if !var.skip_ceph
+  }
   manifest = each.value
   computed_fields = [
     "metadata.labels",
@@ -333,7 +348,7 @@ resource "kubernetes_manifest" "cert_manager_clusterissuer" {
 
 output "portainer_url" {
   description = "Portainer HTTPS URL."
-  value       = "https://${local.portainer_hostname}"
+  value       = var.skip_portainer ? null : "https://${local.portainer_hostname}"
 }
 
 output "rook_ceph_dashboard_url" {
