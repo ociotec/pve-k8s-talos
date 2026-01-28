@@ -345,6 +345,7 @@ resource "null_resource" "cert_manager_webhook_ready" {
   depends_on = [kubernetes_manifest.cert_manager]
 
   provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
     command = <<-EOT
       set -euo pipefail
       kubeconfig="${abspath("${path.module}/${var.kubeconfig_path}")}"
@@ -375,6 +376,7 @@ resource "null_resource" "metallb_controller_ready" {
   depends_on = [kubernetes_manifest.metallb_native]
 
   provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
     command = <<-EOT
       set -euo pipefail
       kubeconfig="${abspath("${path.module}/${var.kubeconfig_path}")}"
