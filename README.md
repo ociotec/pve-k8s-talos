@@ -103,23 +103,61 @@ Set `vm.disk_by_id_prefix` to the part before the index (`scsi-0QEMU_QEMU_HARDDI
 
 ### Create the infrastructre
 
-Apply the plan:
+The easiest way is to use the provided deployment script:
+
+```bash
+./scripts/deploy.sh
+```
+
+Alternatively, you can apply the plan manually:
 
 ```bash
 tofu apply -auto-approve
 ```
 
-To get Talos & k8s config (automatically generated on plan apply) on default paths just run:
+The deployment script automatically generates `talosconfig` and `kubeconfig` files in the project directory.
+
+**Configuring your environment for future sessions:**
+
+To use the cluster with `talosctl` and `kubectl` in new shell sessions, you have several options:
+
+**Option 1: Set variables in your shell profile (recommended for one-time setup)**
+
+Add these exports to your shell profile (`.bashrc`, `.zshrc`, etc.):
 
 ```bash
-tofu output -raw talosconfig |> ~/.talos/config
-tofu output -raw kubeconfig |> ~/.kube/config
+export TALOSCONFIG="/path/to/pve-k8s-talos/talosconfig"
+export KUBECONFIG="/path/to/pve-k8s-talos/kubeconfig"
 ```
 
-Now you can run Talos & k8s commands:
+Or set them for each session:
 
 ```bash
-talosctl stats --nodes 192.168.1.51
+export TALOSCONFIG="$(pwd)/talosconfig"
+export KUBECONFIG="$(pwd)/kubeconfig"
+```
+
+**Option 2: With direnv (automatic, recommended if you have direnv)**
+
+If you have direnv installed, add these lines to your `.envrc` file in the project directory:
+
+```bash
+export TALOSCONFIG="$(pwd)/talosconfig"
+export KUBECONFIG="$(pwd)/kubeconfig"
+```
+
+Then run:
+
+```bash
+direnv allow
+```
+
+If direnv says `.envrc is blocked`, simply run `direnv allow` to approve it.
+
+**Using the cluster:**
+
+```bash
+talosctl stats --nodes <node-ip>
 kubectl get nodes
 ```
 

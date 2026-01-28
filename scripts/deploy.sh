@@ -277,23 +277,21 @@ fi
 message "Deploying the Talos cluster (PVE VMs creation, Talos cluster initialization, k8s bootstrapping)..."
 ./scripts/gen-talos-assets.sh
 tofu apply -auto-approve 1>/dev/null
-mkdir -p ~/.talos ~/.kube
-if ! tofu output -raw talosconfig > ~/.talos/config 2>/dev/null; then
-  if [[ -f talosconfig ]]; then
-    cp talosconfig ~/.talos/config
-  else
-    error "Failed to write talosconfig from tofu outputs." >&2
-    exit 1
-  fi
+
+# Ensure kubeconfig and talosconfig exist in project directory
+if ! tofu output -raw talosconfig > talosconfig 2>/dev/null; then
+  error "Failed to write talosconfig from tofu outputs." >&2
+  exit 1
 fi
-if ! tofu output -raw kubeconfig > ~/.kube/config 2>/dev/null; then
-  if [[ -f kubeconfig ]]; then
-    cp kubeconfig ~/.kube/config
-  else
-    error "Failed to write kubeconfig from tofu outputs." >&2
-    exit 1
-  fi
+if ! tofu output -raw kubeconfig > kubeconfig 2>/dev/null; then
+  error "Failed to write kubeconfig from tofu outputs." >&2
+  exit 1
 fi
+
+# Ensure kubeconfig and talosconfig paths are set for this script session
+# These are needed for kubectl and talosctl commands below
+export TALOSCONFIG="$(pwd)/talosconfig"
+export KUBECONFIG="$(pwd)/kubeconfig"
 worker_ip=$(first_worker_ip "${PWD}/vms_list.tf")
 if [[ -z "${worker_ip}" ]]; then
   error "Failed to determine the first worker name/IP from vms_list.tf." >&2
@@ -398,3 +396,16 @@ else
 fi
 
 message "Cluster deployed successfully in $(render_elapsed "${deploy_start}")."
+message ""
+message "To use this cluster in future shell sessions with talosctl and kubectl:"
+message ""
+message "Option 1 - Set environment variables for each session:"
+message "  export TALOSCONFIG=\"$(pwd)/talosconfig\""
+message "  export KUBECONFIG=\"$(pwd)/kubeconfig\""
+message ""
+if [[ -f "$(pwd)/.envrc" ]]; then
+  message "Option 2 - Add to your .envrc file (direnv will auto-load):"
+  message "  echo 'export TALOSCONFIG=\"\$(pwd)/talosconfig\"' >> .envrc"
+  message "  echo 'export KUBECONFIG=\"\$(pwd)/kubeconfig\"' >> .envrc"
+  message "  direnv allow"
+fi
