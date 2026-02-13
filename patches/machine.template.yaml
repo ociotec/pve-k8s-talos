@@ -1,5 +1,6 @@
 machine:
   disks: ${machine_disks_section}
+  nodeLabels: ${k8s_node_labels_section}
   network:
     interfaces:
       # How to select the correct network interface based on its bus path instead of its name.

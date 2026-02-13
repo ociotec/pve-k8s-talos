@@ -43,17 +43,20 @@ Now you need to update several files to your current needs. Samples of the files
   - Optional VLAN tag for all VMs (leave empty to disable).
   - Optional NTP servers (comma-separated list, leave empty to disable).
   - Talos version and factory image ID (used to render `patches/qemu.yaml`).
+  - Optional global `constants["k8s"]["labels"]` map applied to all k8s nodes (lowest precedence).
 - `vms_list.tf.sample` --> `vms_list.tf`
   - Map of VMs on PVE with VM name as key:
     - PVE node.
     - VM ID.
     - Resource type key (must exist in `vms_resources.tf`).
     - IP address.
+    - Optional `k8s_labels` map per VM (highest precedence).
 - `vms_resources.tf.sample` --> `vms_resources.tf`
   - Resources per node type referenced by `vms_list.tf`:
     - Count of vCPUs.
     - RAM memory in MB.
     - `k8s_node` role: `controlplane` or `worker`.
+    - Optional `k8s_labels` map per resource type (middle precedence).
     - Disks in GB with optional Talos mount points (first disk is used as root).
     - Mount points must live under `/var` (for example `/var/mnt/kafka` or `/var/lib/kafka`).
 - `k8s-net/constants.tf.sample` --> `k8s-net/constants.tf`
@@ -75,6 +78,7 @@ Whenever you change `vms_list.tf`, `vms_constants.tf`, or `patches/machine.templ
 This script:
 
 - Renders per-VM machine patches under `patches/machine-*.yaml`
+- Merges node labels with precedence: `vms_constants.tf` (`constants["k8s"]["labels"]`) < `vms_resources.tf` (`k8s_labels`) < `vms_list.tf` (`k8s_labels`)
 - Removes stale patch files for deleted VMs
 - Generates `talos.tf` from several templates:
   - [`templates/talos.template.tf`](templates/talos.template.tf) main Talos template.

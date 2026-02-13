@@ -3,6 +3,7 @@ variable "resources" {
     vcpus    = number
     memory   = number
     k8s_node = string
+    k8s_labels = optional(map(string), {})
     disks    = list(object({
       size  = number
       mount = optional(string)
@@ -19,26 +20,29 @@ variable "resources" {
     # These are example values, rename the file to remove
     # ".sample" and update them to match your environment
     "controlplane" = {
-      vcpus    = 2
-      memory   = 2048
-      k8s_node = "controlplane"
+      vcpus      = 2
+      memory     = 2048
+      k8s_node   = "controlplane"
+      k8s_labels = {}
       disks  = [
         { size = 32 }, # First disk is used as the root disk
       ]
     }
     "worker" = {
-      vcpus    = 4
-      memory   = 8192
-      k8s_node = "worker"
+      vcpus      = 4
+      memory     = 8192
+      k8s_node   = "worker"
+      k8s_labels = {}
       disks  = [
         { size = 32 }, # First disk is used as the root disk
         { size = 128 },
       ]
     }
     "worker-kafka" = {
-      vcpus    = 4
-      memory   = 8192
-      k8s_node = "worker"
+      vcpus      = 4
+      memory     = 8192
+      k8s_node   = "worker"
+      k8s_labels = {"kafka" = "yes"}
       disks  = [
         { size = 32 }, # First disk is used as the root disk
         { size = 128 },

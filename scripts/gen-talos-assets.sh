@@ -125,12 +125,20 @@ if [[ -z "${disk_by_id_prefix}" ]]; then
   echo "Fix: set vm.disk_by_id_prefix to match /dev/disk/by-id prefix (for example scsi-0QEMU_QEMU_HARDDISK_drive-scsi)." >&2
   exit 1
 fi
+
+yaml_escape() {
+  local value="${1:-}"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '%s' "${value}"
+}
+
 # Load the machine patch template.
 template="$(cat "${template_path}")"
 
 # Basic template sanity check.
-if [[ "${template}" != *'${ip}'* || "${template}" != *'${cidr}'* || "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* ]]; then
-  echo "Error: template is missing required placeholders (\${ip}, \${cidr}, \${machine_disks_section}, \${kubelet_extra_mounts_section})." >&2
+if [[ "${template}" != *'${ip}'* || "${template}" != *'${cidr}'* || "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${k8s_node_labels_section}'* ]]; then
+  echo "Error: template is missing required placeholders (\${ip}, \${cidr}, \${machine_disks_section}, \${kubelet_extra_mounts_section}, \${k8s_node_labels_section})." >&2
   echo "Fix: restore patches/machine.template.yaml or add the missing placeholders." >&2
   exit 1
 fi
@@ -197,6 +205,20 @@ while IFS='|' read -r name ip; do
   vm_ips["${name}"]="${ip}"
 done < <(
   awk '
+    function emit_pairs(obj_name, raw_line,   line, pair, key, val) {
+      line = raw_line
+      while (match(line, /"[^"]+"[[:space:]]*=[[:space:]]*"[^"]*"/)) {
+        pair = substr(line, RSTART, RLENGTH)
+        key = pair
+        sub(/^[[:space:]]*"/, "", key)
+        sub(/".*/, "", key)
+        sub(/^[^=]*=[[:space:]]*"/, "", pair)
+        val = pair
+        sub(/".*/, "", val)
+        print obj_name "|" key "|" val
+        line = substr(line, RSTART + RLENGTH)
+      }
+    }
     /^[[:space:]]*#/ { next }
     match($0, /"[^"]+"[[:space:]]*=[[:space:]]*{/) {
       name = $0
@@ -236,6 +258,20 @@ while IFS='|' read -r resource_type k8s_node; do
   resource_k8s_nodes["${resource_type}"]="${k8s_node}"
 done < <(
   awk '
+    function emit_pairs(obj_name, raw_line,   line, pair, key, val) {
+      line = raw_line
+      while (match(line, /"[^"]+"[[:space:]]*=[[:space:]]*"[^"]*"/)) {
+        pair = substr(line, RSTART, RLENGTH)
+        key = pair
+        sub(/^[[:space:]]*"/, "", key)
+        sub(/".*/, "", key)
+        sub(/^[^=]*=[[:space:]]*"/, "", pair)
+        val = pair
+        sub(/".*/, "", val)
+        print obj_name "|" key "|" val
+        line = substr(line, RSTART + RLENGTH)
+      }
+    }
     /^[[:space:]]*#/ { next }
     match($0, /"[^"]+"[[:space:]]*=[[:space:]]*{/) {
       name = $0
@@ -257,6 +293,164 @@ done < <(
       in_block = 0
     }
   ' "${resources_path}"
+)
+
+declare -A resource_labels
+while IFS='|' read -r resource_type label_key label_value; do
+  if [[ -z "${resource_type}" || -z "${label_key}" ]]; then
+    continue
+  fi
+  resource_labels["${resource_type}|${label_key}"]="${label_value}"
+done < <(
+  awk '
+    function emit_pairs(obj_name, raw_line,   line, pair, key, val) {
+      line = raw_line
+      while (match(line, /"[^"]+"[[:space:]]*=[[:space:]]*"[^"]*"/)) {
+        pair = substr(line, RSTART, RLENGTH)
+        key = pair
+        sub(/^[[:space:]]*"/, "", key)
+        sub(/".*/, "", key)
+        sub(/^[^=]*=[[:space:]]*"/, "", pair)
+        val = pair
+        sub(/".*/, "", val)
+        print obj_name "|" key "|" val
+        line = substr(line, RSTART + RLENGTH)
+      }
+    }
+    /^[[:space:]]*#/ { next }
+    match($0, /"[^"]+"[[:space:]]*=[[:space:]]*{/) {
+      name = $0
+      sub(/^[^"]*"/, "", name)
+      sub(/".*/, "", name)
+      in_block = 1
+      in_labels = 0
+      next
+    }
+    in_block && match($0, /k8s_labels[[:space:]]*=[[:space:]]*{/) {
+      if ($0 ~ /}/) {
+        emit_pairs(name, $0)
+        in_labels = 0
+      } else {
+        in_labels = 1
+      }
+      next
+    }
+    in_block && in_labels {
+      if ($0 ~ /^[[:space:]]*}/) {
+        in_labels = 0
+        next
+      }
+      emit_pairs(name, $0)
+      next
+    }
+    in_block && /^[[:space:]]*}/ {
+      in_block = 0
+    }
+  ' "${resources_path}"
+)
+
+declare -A vm_labels
+while IFS='|' read -r vm_name label_key label_value; do
+  if [[ -z "${vm_name}" || -z "${label_key}" ]]; then
+    continue
+  fi
+  vm_labels["${vm_name}|${label_key}"]="${label_value}"
+done < <(
+  awk '
+    function emit_pairs(obj_name, raw_line,   line, pair, key, val) {
+      line = raw_line
+      while (match(line, /"[^"]+"[[:space:]]*=[[:space:]]*"[^"]*"/)) {
+        pair = substr(line, RSTART, RLENGTH)
+        key = pair
+        sub(/^[[:space:]]*"/, "", key)
+        sub(/".*/, "", key)
+        sub(/^[^=]*=[[:space:]]*"/, "", pair)
+        val = pair
+        sub(/".*/, "", val)
+        print obj_name "|" key "|" val
+        line = substr(line, RSTART + RLENGTH)
+      }
+    }
+    /^[[:space:]]*#/ { next }
+    match($0, /"[^"]+"[[:space:]]*=[[:space:]]*{/) {
+      name = $0
+      sub(/^[^"]*"/, "", name)
+      sub(/".*/, "", name)
+      in_block = 1
+      in_labels = 0
+      next
+    }
+    in_block && match($0, /k8s_labels[[:space:]]*=[[:space:]]*{/) {
+      if ($0 ~ /}/) {
+        emit_pairs(name, $0)
+        in_labels = 0
+      } else {
+        in_labels = 1
+      }
+      next
+    }
+    in_block && in_labels {
+      if ($0 ~ /^[[:space:]]*}/) {
+        in_labels = 0
+        next
+      }
+      emit_pairs(name, $0)
+      next
+    }
+    in_block && /^[[:space:]]*}/ {
+      in_block = 0
+    }
+  ' "${vms_path}"
+)
+
+declare -A global_k8s_labels
+while IFS='|' read -r label_key label_value; do
+  if [[ -z "${label_key}" ]]; then
+    continue
+  fi
+  global_k8s_labels["${label_key}"]="${label_value}"
+done < <(
+  awk '
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*"?k8s"?[[:space:]]*=[[:space:]]*{/ {
+      in_k8s = 1
+      k8s_depth = 1
+      next
+    }
+    in_k8s && /^[[:space:]]*"?labels"?[[:space:]]*=[[:space:]]*{/ {
+      in_labels = 1
+      labels_depth = 1
+      next
+    }
+    in_k8s && in_labels {
+      if (match($0, /"[^"]+"[[:space:]]*=[[:space:]]*"[^"]*"/)) {
+        line = $0
+        sub(/^[[:space:]]*"/, "", line)
+        key = line
+        sub(/".*/, "", key)
+        sub(/^[^=]*=[[:space:]]*"/, "", line)
+        val = line
+        sub(/".*/, "", val)
+        print key "|" val
+      }
+      opens = gsub(/{/, "{", $0)
+      closes = gsub(/}/, "}", $0)
+      labels_depth += (opens - closes)
+      if (labels_depth <= 0) {
+        in_labels = 0
+      }
+      next
+    }
+    in_k8s {
+      opens = gsub(/{/, "{", $0)
+      closes = gsub(/}/, "}", $0)
+      k8s_depth += (opens - closes)
+      if (k8s_depth <= 0) {
+        in_k8s = 0
+        in_labels = 0
+      }
+    }
+  ' "${constants_path}"
 )
 
 while IFS='|' read -r name resource_type; do
@@ -387,6 +581,11 @@ for name in "${!vm_ips[@]}"; do
   resource_type="${vm_resource_types[${name}]}"
   disks_block=""
   kubelet_mounts_block=""
+  k8s_node_labels_block=""
+  declare -A merged_labels=()
+  for key in "${!global_k8s_labels[@]}"; do
+    merged_labels["${key}"]="${global_k8s_labels[${key}]}"
+  done
   disk_total="${disk_counts[${resource_type}]:-0}"
   for ((idx=0; idx<disk_total; idx++)); do
     mount_path="${disk_mounts[${resource_type}|${idx}]:-}"
@@ -413,6 +612,28 @@ for name in "${!vm_ips[@]}"; do
     kubelet_extra_mounts_section=" []"
   fi
 
+  for key in "${!resource_labels[@]}"; do
+    if [[ "${key}" == "${resource_type}|"* ]]; then
+      label_key="${key#${resource_type}|}"
+      merged_labels["${label_key}"]="${resource_labels[${key}]}"
+    fi
+  done
+  for key in "${!vm_labels[@]}"; do
+    if [[ "${key}" == "${name}|"* ]]; then
+      label_key="${key#${name}|}"
+      merged_labels["${label_key}"]="${vm_labels[${key}]}"
+    fi
+  done
+  if [[ ${#merged_labels[@]} -gt 0 ]]; then
+    while IFS= read -r label_key; do
+      label_value="${merged_labels[${label_key}]}"
+      k8s_node_labels_block+=$'\n    "'"$(yaml_escape "${label_key}")"'": "'"$(yaml_escape "${label_value}")"'"'
+    done < <(printf "%s\n" "${!merged_labels[@]}" | sort)
+    k8s_node_labels_section="${k8s_node_labels_block}"
+  else
+    k8s_node_labels_section=" {}"
+  fi
+
   rendered="${template}"
   rendered="${rendered//'${ip}'/${ip}}"
   rendered="${rendered//'${cidr}'/${net_size}}"
@@ -421,6 +642,7 @@ for name in "${!vm_ips[@]}"; do
   rendered="${rendered//'${ntp_servers_section}'/${ntp_servers_section}}"
   rendered="${rendered//'${machine_disks_section}'/${machine_disks_section}}"
   rendered="${rendered//'${kubelet_extra_mounts_section}'/${kubelet_extra_mounts_section}}"
+  rendered="${rendered//'${k8s_node_labels_section}'/${k8s_node_labels_section}}"
   out_path="${patch_dir}/machine-${name}.yaml"
   printf "%s\n" "${rendered}" > "${out_path}"
   echo "wrote ${out_path}"
