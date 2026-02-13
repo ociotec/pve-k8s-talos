@@ -129,8 +129,8 @@ fi
 template="$(cat "${template_path}")"
 
 # Basic template sanity check.
-if [[ "${template}" != *'${ip}'* || "${template}" != *'${cidr}'* || "${template}" != *'${machine_disks_section}'* ]]; then
-  echo "Error: template is missing required placeholders (\${ip}, \${cidr}, \${machine_disks_section})." >&2
+if [[ "${template}" != *'${ip}'* || "${template}" != *'${cidr}'* || "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* ]]; then
+  echo "Error: template is missing required placeholders (\${ip}, \${cidr}, \${machine_disks_section}, \${kubelet_extra_mounts_section})." >&2
   echo "Fix: restore patches/machine.template.yaml or add the missing placeholders." >&2
   exit 1
 fi
@@ -386,6 +386,7 @@ for name in "${!vm_ips[@]}"; do
   fi
   resource_type="${vm_resource_types[${name}]}"
   disks_block=""
+  kubelet_mounts_block=""
   disk_total="${disk_counts[${resource_type}]:-0}"
   for ((idx=0; idx<disk_total; idx++)); do
     mount_path="${disk_mounts[${resource_type}|${idx}]:-}"
@@ -399,11 +400,17 @@ for name in "${!vm_ips[@]}"; do
     fi
     device="/dev/disk/by-id/${disk_by_id_prefix}${idx}"
     disks_block+=$'\n    - device: '"${device}"$'\n      partitions:\n        - mountpoint: '"${mount_path}"$'\n          size: 0 # Use full disk'
+    kubelet_mounts_block+=$'\n      - destination: '"${mount_path}"$'\n        type: bind\n        source: '"${mount_path}"$'\n        options:\n          - bind\n          - rshared\n          - rw'
   done
   if [[ -n "${disks_block}" ]]; then
     machine_disks_section="${disks_block}"
   else
     machine_disks_section=" []"
+  fi
+  if [[ -n "${kubelet_mounts_block}" ]]; then
+    kubelet_extra_mounts_section="${kubelet_mounts_block}"
+  else
+    kubelet_extra_mounts_section=" []"
   fi
 
   rendered="${template}"
@@ -413,6 +420,7 @@ for name in "${!vm_ips[@]}"; do
   rendered="${rendered//'${dns_servers_section}'/${dns_servers_section}}"
   rendered="${rendered//'${ntp_servers_section}'/${ntp_servers_section}}"
   rendered="${rendered//'${machine_disks_section}'/${machine_disks_section}}"
+  rendered="${rendered//'${kubelet_extra_mounts_section}'/${kubelet_extra_mounts_section}}"
   out_path="${patch_dir}/machine-${name}.yaml"
   printf "%s\n" "${rendered}" > "${out_path}"
   echo "wrote ${out_path}"
