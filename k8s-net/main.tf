@@ -389,6 +389,11 @@ resource "null_resource" "cert_manager_webhook_ready" {
 
 resource "null_resource" "metallb_controller_ready" {
   depends_on = [kubernetes_manifest.metallb_native]
+  # Always re-run webhook readiness checks on each apply. The cluster can be recreated
+  # outside this module state, so relying on null_resource state alone is not enough.
+  triggers = {
+    run_id = timestamp()
+  }
 
   provisioner "local-exec" {
     interpreter = ["/bin/bash", "-c"]
