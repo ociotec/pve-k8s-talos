@@ -38,5 +38,6 @@ vms_list.tf
 vms_resources.tf
 k8s-net/certs/*.key
 k8s-net/certs/*.pem
+k8s-net/certs/*.cer
 k8s-net/constants.tf
 monitoring/constants.tf
