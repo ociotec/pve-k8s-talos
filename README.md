@@ -38,6 +38,7 @@ Now you need to update several files to your current needs. Samples of the files
   - `vm.disk_by_id_prefix` to build stable `/dev/disk/by-id` device names.
   - Optional `vm.tags` list (comma-separated) to append extra VM tags.
   - Network settings (except IP address that is configured later).
+  - Optional `network.disable_ipv6` toggle (`"true"` by default, set to `"false"` to keep IPv6 enabled on Talos nodes).
   - Proxmox bridge device name for all VMs (defaults to `vmbr0`).
   - DNS servers (comma-separated list, at least one required).
   - Optional VLAN tag for all VMs (leave empty to disable).

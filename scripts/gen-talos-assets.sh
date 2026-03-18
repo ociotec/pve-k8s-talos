@@ -104,6 +104,7 @@ net_size="$(awk -F'"' '/"net_size"/ { print $4; exit }' "${constants_path}")"
 gateway="$(awk -F'"' '/"gateway"/ { print $4; exit }' "${constants_path}")"
 dns_servers="$(awk -F'"' '/"dns_servers"/ { print $4; exit }' "${constants_path}")"
 ntp_servers="$(awk -F'"' '/"ntp_servers"/ { print $4; exit }' "${constants_path}")"
+disable_ipv6="$(awk -F'"' '/"disable_ipv6"/ { print $4; exit }' "${constants_path}")"
 talos_version="$(awk -F'"' '/"version"/ { print $4; exit }' "${constants_path}")"
 talos_factory_image_id="$(awk -F'"' '/"factory_image_id"/ { print $4; exit }' "${constants_path}")"
 disk_by_id_prefix="$(awk -F'"' '/"disk_by_id_prefix"/ { print $4; exit }' "${constants_path}")"
@@ -166,6 +167,20 @@ if [[ -z "${dns_servers_section}" ]]; then
   echo "Error: dns_servers must contain at least one entry." >&2
   exit 1
 fi
+
+case "${disable_ipv6,,}" in
+  "" | "true" | "1" | "yes")
+    extra_kernel_args_section=$'\n      - ipv6.disable=1'
+    ;;
+  "false" | "0" | "no")
+    extra_kernel_args_section=" []"
+    ;;
+  *)
+    echo "Error: invalid disable_ipv6 value in vms_constants.tf: ${disable_ipv6}" >&2
+    echo "Fix: set network.disable_ipv6 to true/false, 1/0, or yes/no." >&2
+    exit 1
+    ;;
+esac
 
 ntp_servers_section=""
 if [[ -n "${ntp_servers}" ]]; then
@@ -640,6 +655,7 @@ for name in "${!vm_ips[@]}"; do
   rendered="${rendered//'${gateway}'/${gateway}}"
   rendered="${rendered//'${dns_servers_section}'/${dns_servers_section}}"
   rendered="${rendered//'${ntp_servers_section}'/${ntp_servers_section}}"
+  rendered="${rendered//'${extra_kernel_args_section}'/${extra_kernel_args_section}}"
   rendered="${rendered//'${machine_disks_section}'/${machine_disks_section}}"
   rendered="${rendered//'${kubelet_extra_mounts_section}'/${kubelet_extra_mounts_section}}"
   rendered="${rendered//'${k8s_node_labels_section}'/${k8s_node_labels_section}}"
