@@ -28,6 +28,7 @@ override.tf.json
 # Other files
 patches/hostname-*.yaml
 patches/machine-*.yaml
+patches/qemu.yaml
 .envrc
 .DS_Store
 kubeconfig
