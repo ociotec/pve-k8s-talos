@@ -39,6 +39,7 @@ skip_ceph=false
 skip_k8s_net=false
 skip_portainer=false
 skip_monitoring=false
+gen_talos_args=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -87,6 +88,19 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "${skip_ceph}" == "true" ]]; then
+  gen_talos_args+=(--skip-ceph)
+fi
+if [[ "${skip_k8s_net}" == "true" ]]; then
+  gen_talos_args+=(--skip-k8s-net)
+fi
+if [[ "${skip_portainer}" == "true" ]]; then
+  gen_talos_args+=(--skip-portainer)
+fi
+if [[ "${skip_monitoring}" == "true" ]]; then
+  gen_talos_args+=(--skip-monitoring)
+fi
 
 if [[ "${debug}" == "true" ]]; then
   # Enable verbose tracing and Terraform debug logging for troubleshooting.
@@ -309,7 +323,7 @@ run tofu init -upgrade
 if [[ "${destroy_first}" == "true" ]]; then
   if state_dir_has_state "${PWD}"; then
     message "Regenerating Talos assets required for destroy..."
-    run ./scripts/gen-talos-assets.sh
+    run ./scripts/gen-talos-assets.sh "${gen_talos_args[@]}"
     message "Destroying Talos cluster VMs..."
     run tofu destroy -auto-approve -refresh=false
     message "Done."
@@ -333,7 +347,7 @@ if [[ "${destroy_first}" == "true" ]]; then
 fi
 
 message "Deploying the Talos cluster (PVE VMs creation, Talos cluster initialization, k8s bootstrapping)..."
-./scripts/gen-talos-assets.sh
+./scripts/gen-talos-assets.sh "${gen_talos_args[@]}"
 run tofu apply -auto-approve
 
 # Generate kubeconfig and talosconfig only if they don't exist

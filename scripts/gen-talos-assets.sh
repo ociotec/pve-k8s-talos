@@ -1,6 +1,49 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+skip_ceph=false
+skip_k8s_net=false
+skip_portainer=false
+skip_monitoring=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --skip-ceph)
+      skip_ceph=true
+      shift
+      ;;
+    --skip-k8s-net)
+      skip_k8s_net=true
+      shift
+      ;;
+    --skip-portainer)
+      skip_portainer=true
+      shift
+      ;;
+    --skip-monitoring)
+      skip_monitoring=true
+      shift
+      ;;
+    -h|--help)
+      cat <<'USAGE'
+Usage: gen-talos-assets.sh [options]
+
+Options:
+  --skip-ceph         Exclude Rook Ceph hostnames from generated no_proxy values.
+  --skip-k8s-net      Exclude k8s-net ingress IP/hostnames from generated no_proxy values.
+  --skip-portainer    Exclude Portainer hostname from generated no_proxy values.
+  --skip-monitoring   Exclude monitoring hostnames from generated no_proxy values.
+  -h, --help          Show this help message.
+USAGE
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 template_path="${repo_root}/patches/machine.template.yaml"
 hostname_template_path="${repo_root}/patches/hostname.template.yaml"
@@ -103,11 +146,17 @@ fi
 net_size="$(awk -F'"' '/"net_size"/ { print $4; exit }' "${constants_path}")"
 gateway="$(awk -F'"' '/"gateway"/ { print $4; exit }' "${constants_path}")"
 dns_servers="$(awk -F'"' '/"dns_servers"/ { print $4; exit }' "${constants_path}")"
+kernel_dns_servers_raw="$(awk -F'"' '/"kernel_dns_servers"/ { print $4; exit }' "${constants_path}")"
 ntp_servers="$(awk -F'"' '/"ntp_servers"/ { print $4; exit }' "${constants_path}")"
 disable_ipv6="$(awk -F'"' '/"disable_ipv6"/ { print $4; exit }' "${constants_path}")"
 talos_version="$(awk -F'"' '/"version"/ { print $4; exit }' "${constants_path}")"
 talos_factory_image_id="$(awk -F'"' '/"factory_image_id"/ { print $4; exit }' "${constants_path}")"
+talos_discovery_service_disabled="$(awk -F'"' '/"discovery_service_disabled"/ { print $4; exit }' "${constants_path}")"
 disk_by_id_prefix="$(awk -F'"' '/"disk_by_id_prefix"/ { print $4; exit }' "${constants_path}")"
+proxy_url="$(awk -F'"' '/"proxy_url"/ { print $4; exit }' "${constants_path}")"
+no_proxy_extra="$(awk -F'"' '/"no_proxy_extra"/ { print $4; exit }' "${constants_path}")"
+cert_files_raw="$(awk -F'"' '/"cert_files"/ { print $4; exit }' "${constants_path}")"
+legacy_proxy_ca_path="$(awk -F'"' '/"proxy_ca_path"/ { print $4; exit }' "${constants_path}")"
 
 if [[ -z "${net_size}" || -z "${gateway}" || -z "${dns_servers}" ]]; then
   echo "Error: missing network constants in vms_constants.tf." >&2
@@ -119,6 +168,10 @@ if [[ -z "${talos_version}" || -z "${talos_factory_image_id}" ]]; then
   echo "Error: missing Talos constants in vms_constants.tf." >&2
   echo "Fix: ensure version and factory_image_id exist under var.constants[\"talos\"]." >&2
   exit 1
+fi
+
+if [[ -z "${talos_discovery_service_disabled}" ]]; then
+  talos_discovery_service_disabled="true"
 fi
 
 if [[ -z "${disk_by_id_prefix}" ]]; then
@@ -134,12 +187,141 @@ yaml_escape() {
   printf '%s' "${value}"
 }
 
+trim() {
+  local value="${1:-}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "${value}"
+}
+
+is_ipv4_address() {
+  local ip="$1"
+  local a b c d extra
+  IFS=. read -r a b c d extra <<< "${ip}"
+
+  if [[ -n "${extra:-}" ]]; then
+    return 1
+  fi
+  if [[ ! "${a}" =~ ^[0-9]+$ || ! "${b}" =~ ^[0-9]+$ || ! "${c}" =~ ^[0-9]+$ || ! "${d}" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+  if (( a > 255 || b > 255 || c > 255 || d > 255 )); then
+    return 1
+  fi
+
+  return 0
+}
+
+is_ipv6_address() {
+  local ip="$1"
+  [[ "${ip}" == *:* ]]
+}
+
+proxy_host_from_url() {
+  local url="$1"
+  local remainder
+
+  remainder="${url#*://}"
+  remainder="${remainder%%/*}"
+  remainder="${remainder##*@}"
+
+  if [[ "${remainder}" == \[* ]]; then
+    remainder="${remainder#\[}"
+    printf '%s' "${remainder%%]*}"
+  else
+    printf '%s' "${remainder%%:*}"
+  fi
+}
+
+kernel_ip_value() {
+  local value="$1"
+  if is_ipv6_address "${value}" && [[ "${value}" != \[*\] ]]; then
+    printf '[%s]' "${value}"
+  else
+    printf '%s' "${value}"
+  fi
+}
+
+ipv4_to_int() {
+  local ip="$1"
+  local a b c d
+  IFS=. read -r a b c d <<< "${ip}"
+
+  if [[ ! "${a}" =~ ^[0-9]+$ || ! "${b}" =~ ^[0-9]+$ || ! "${c}" =~ ^[0-9]+$ || ! "${d}" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+  if (( a > 255 || b > 255 || c > 255 || d > 255 )); then
+    return 1
+  fi
+
+  printf '%u\n' "$(( (a << 24) | (b << 16) | (c << 8) | d ))"
+}
+
+int_to_ipv4() {
+  local value="$1"
+  printf '%d.%d.%d.%d\n' \
+    $(( (value >> 24) & 255 )) \
+    $(( (value >> 16) & 255 )) \
+    $(( (value >> 8) & 255 )) \
+    $(( value & 255 ))
+}
+
+network_cidr_from_ip() {
+  local ip="$1"
+  local prefix="$2"
+  local ip_int
+  local host_bits
+  local mask
+  local network
+
+  if [[ ! "${prefix}" =~ ^[0-9]+$ ]] || (( prefix < 0 || prefix > 32 )); then
+    return 1
+  fi
+
+  ip_int="$(ipv4_to_int "${ip}")" || return 1
+  host_bits=$((32 - prefix))
+  if (( host_bits == 32 )); then
+    mask=0
+  else
+    mask=$(( (0xFFFFFFFF << host_bits) & 0xFFFFFFFF ))
+  fi
+  network=$(( ip_int & mask ))
+  printf '%s/%s\n' "$(int_to_ipv4 "${network}")" "${prefix}"
+}
+
+proxy_url="$(trim "${proxy_url}")"
+no_proxy_extra="$(trim "${no_proxy_extra}")"
+kernel_dns_servers_raw="$(trim "${kernel_dns_servers_raw}")"
+cert_files_raw="$(trim "${cert_files_raw}")"
+legacy_proxy_ca_path="$(trim "${legacy_proxy_ca_path}")"
+talos_discovery_service_disabled="$(trim "${talos_discovery_service_disabled}")"
+
+if [[ -n "${proxy_url}" && ! "${proxy_url}" =~ ^https?:// ]]; then
+  echo "Error: network.proxy_url must start with http:// or https:// (got ${proxy_url})." >&2
+  echo "Fix: set proxy_url to a full URL such as http://proxy.example.com:3128." >&2
+  exit 1
+fi
+
+case "${talos_discovery_service_disabled,,}" in
+  "true"|"false")
+    ;;
+  *)
+    echo "Error: talos.discovery_service_disabled must be \"true\" or \"false\" (got ${talos_discovery_service_disabled})." >&2
+    echo "Fix: set talos.discovery_service_disabled to \"true\" or \"false\" in vms_constants.tf." >&2
+    exit 1
+    ;;
+esac
+
+if [[ -z "${cert_files_raw}" && -n "${legacy_proxy_ca_path}" ]]; then
+  cert_files_raw="${legacy_proxy_ca_path}"
+fi
+
 # Load the machine patch template.
 template="$(cat "${template_path}")"
 
 # Basic template sanity check.
-if [[ "${template}" != *'${ip}'* || "${template}" != *'${cidr}'* || "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${k8s_node_labels_section}'* ]]; then
-  echo "Error: template is missing required placeholders (\${ip}, \${cidr}, \${machine_disks_section}, \${kubelet_extra_mounts_section}, \${k8s_node_labels_section})." >&2
+if [[ "${template}" != *'${ip}'* || "${template}" != *'${cidr}'* || "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${k8s_node_labels_section}'* || "${template}" != *'${proxy_env_section}'* || "${template}" != *'${cert_files_section}'* || "${template}" != *'${talos_discovery_service_disabled}'* ]]; then
+  echo "Error: template is missing required placeholders (\${ip}, \${cidr}, \${machine_disks_section}, \${kubelet_extra_mounts_section}, \${k8s_node_labels_section}, \${proxy_env_section}, \${cert_files_section}, \${talos_discovery_service_disabled})." >&2
   echo "Fix: restore patches/machine.template.yaml or add the missing placeholders." >&2
   exit 1
 fi
@@ -152,11 +334,13 @@ if [[ "${hostname_template}" != *'${hostname}'* ]]; then
 fi
 
 dns_servers_section=""
+dns_servers_array=()
 IFS=',' read -ra dns_list <<< "${dns_servers}"
 for server in "${dns_list[@]}"; do
   server="${server#"${server%%[![:space:]]*}"}"
   server="${server%"${server##*[![:space:]]}"}"
   if [[ -n "${server}" ]]; then
+    dns_servers_array+=("${server}")
     if [[ -n "${dns_servers_section}" ]]; then
       dns_servers_section+=", "
     fi
@@ -168,12 +352,12 @@ if [[ -z "${dns_servers_section}" ]]; then
   exit 1
 fi
 
+kernel_args=()
 case "${disable_ipv6,,}" in
   "" | "true" | "1" | "yes")
-    extra_kernel_args_section=$'\n      - ipv6.disable=1'
+    kernel_args+=("ipv6.disable=1")
     ;;
   "false" | "0" | "no")
-    extra_kernel_args_section=" []"
     ;;
   *)
     echo "Error: invalid disable_ipv6 value in vms_constants.tf: ${disable_ipv6}" >&2
@@ -183,12 +367,14 @@ case "${disable_ipv6,,}" in
 esac
 
 ntp_servers_section=""
+ntp_servers_array=()
 if [[ -n "${ntp_servers}" ]]; then
   IFS=',' read -ra ntp_list <<< "${ntp_servers}"
   for server in "${ntp_list[@]}"; do
     server="${server#"${server%%[![:space:]]*}"}"
     server="${server%"${server##*[![:space:]]}"}"
     if [[ -n "${server}" ]]; then
+      ntp_servers_array+=("${server}")
       if [[ -n "${ntp_servers_section}" ]]; then
         ntp_servers_section+=", "
       fi
@@ -258,6 +444,214 @@ if [[ ${#vm_ips[@]} -eq 0 ]]; then
   echo "Error: no VMs found in vms_list.tf." >&2
   echo "Fix: add VM entries or remove commented-only entries." >&2
   exit 1
+fi
+
+proxy_env_section="{}"
+cert_files_section="[]"
+cert_file_paths=()
+no_proxy_value=""
+if [[ -n "${cert_files_raw}" ]]; then
+  IFS=',' read -ra cert_file_entries <<< "${cert_files_raw}"
+  for cert_file_path in "${cert_file_entries[@]}"; do
+    cert_file_path="$(trim "${cert_file_path}")"
+    if [[ -z "${cert_file_path}" ]]; then
+      continue
+    fi
+    if [[ ! -r "${cert_file_path}" ]]; then
+      echo "Error: cert_files entry is not readable: ${cert_file_path}" >&2
+      echo "Fix: point network.cert_files to readable PEM certificate paths, separated by commas." >&2
+      exit 1
+    fi
+    cert_file_paths+=("${cert_file_path}")
+  done
+fi
+
+if [[ -n "${proxy_url}" ]]; then
+  kernel_args+=("talos.environment=http_proxy=${proxy_url}")
+  kernel_args+=("talos.environment=https_proxy=${proxy_url}")
+
+  declare -A seen_no_proxy_entries=()
+  no_proxy_entries=()
+
+  add_no_proxy_entry() {
+    local value
+    value="$(trim "${1:-}")"
+    if [[ -z "${value}" || -n "${seen_no_proxy_entries[${value}]:-}" ]]; then
+      return
+    fi
+    no_proxy_entries+=("${value}")
+    seen_no_proxy_entries["${value}"]=1
+  }
+
+  local_network_cidr="$(network_cidr_from_ip "${gateway}" "${net_size}" 2>/dev/null || true)"
+  if [[ -z "${local_network_cidr}" ]]; then
+    echo "Error: failed to derive the local network CIDR from gateway=${gateway} and net_size=${net_size}." >&2
+    echo "Fix: ensure network.gateway is a valid IPv4 address and network.net_size is a prefix length such as 24." >&2
+    exit 1
+  fi
+
+  add_no_proxy_entry "localhost"
+  add_no_proxy_entry "127.0.0.1"
+  add_no_proxy_entry "::1"
+  add_no_proxy_entry "${gateway}"
+  add_no_proxy_entry "${local_network_cidr}"
+
+  while IFS= read -r value; do
+    add_no_proxy_entry "${value}"
+  done < <(printf "%s\n" "${!vm_ips[@]}" | sort)
+
+  while IFS= read -r value; do
+    add_no_proxy_entry "${value}"
+  done < <(printf "%s\n" "${vm_ips[@]}" | sort -u)
+
+  add_no_proxy_entry "kubernetes"
+  add_no_proxy_entry "kubernetes.default"
+  add_no_proxy_entry "kubernetes.default.svc"
+  add_no_proxy_entry "kubernetes.default.svc.cluster.local"
+  add_no_proxy_entry "svc"
+  add_no_proxy_entry ".svc"
+  add_no_proxy_entry "svc.cluster.local"
+  add_no_proxy_entry ".svc.cluster.local"
+  add_no_proxy_entry "cluster.local"
+  add_no_proxy_entry ".cluster.local"
+
+  k8s_net_domain=""
+  k8s_net_constants_path="${repo_root}/k8s-net/constants.tf"
+  if [[ "${skip_k8s_net}" != "true" && -r "${k8s_net_constants_path}" ]]; then
+    k8s_net_domain="$(awk -F'"' '/^[[:space:]]*domain[[:space:]]*=/{print $2; exit}' "${k8s_net_constants_path}")"
+    k8s_net_ingress_ip="$(awk -F'"' '/^[[:space:]]*ingress_lb_ip[[:space:]]*=/{print $2; exit}' "${k8s_net_constants_path}")"
+    if [[ -n "${k8s_net_ingress_ip}" ]]; then
+      add_no_proxy_entry "${k8s_net_ingress_ip}"
+    fi
+    if [[ -n "${k8s_net_domain}" ]]; then
+      while IFS= read -r hostname; do
+        add_no_proxy_entry "${hostname}"
+      done < <(
+        awk -v domain="${k8s_net_domain}" -v skip_portainer="${skip_portainer}" -v skip_ceph="${skip_ceph}" -F'"' '
+          /_hostname[[:space:]]*=/ {
+            key=$1
+            gsub(/^[[:space:]]+/, "", key)
+            gsub(/[[:space:]]*=[[:space:]]*$/, "", key)
+            if (skip_portainer == "true" && key == "portainer_hostname") next
+            if (skip_ceph == "true" && key == "ceph_hostname") next
+            val=$2
+            gsub("\\$\\{local.domain\\}", domain, val)
+            print val
+          }
+        ' "${k8s_net_constants_path}"
+      )
+    fi
+  fi
+
+  monitoring_constants_path="${repo_root}/monitoring/constants.tf"
+  if [[ "${skip_monitoring}" != "true" && -r "${monitoring_constants_path}" && -n "${k8s_net_domain}" ]]; then
+    while IFS= read -r hostname; do
+      add_no_proxy_entry "${hostname}"
+    done < <(
+      awk -v domain="${k8s_net_domain}" -F'"' '/_hostname[[:space:]]*=/{val=$2; gsub("\\$\\{local.domain\\}", domain, val); print val}' "${monitoring_constants_path}"
+    )
+  fi
+
+  if [[ -n "${no_proxy_extra}" ]]; then
+    IFS=',' read -ra extra_no_proxy_entries <<< "${no_proxy_extra}"
+    for value in "${extra_no_proxy_entries[@]}"; do
+      add_no_proxy_entry "${value}"
+    done
+  fi
+
+  no_proxy_value=""
+  for value in "${no_proxy_entries[@]}"; do
+    if [[ -n "${no_proxy_value}" ]]; then
+      no_proxy_value+=","
+    fi
+    no_proxy_value+="${value}"
+  done
+
+  proxy_env_section=$'\n'
+  proxy_env_section+=$'    http_proxy: "'"$(yaml_escape "${proxy_url}")"$'"\n'
+  proxy_env_section+=$'    https_proxy: "'"$(yaml_escape "${proxy_url}")"$'"\n'
+  proxy_env_section+=$'    no_proxy: "'"$(yaml_escape "${no_proxy_value}")"$'"'
+fi
+
+proxy_host=""
+proxy_uses_hostname=false
+if [[ -n "${proxy_url}" ]]; then
+  proxy_host="$(proxy_host_from_url "${proxy_url}")"
+  if [[ -n "${proxy_host}" ]] && ! is_ipv4_address "${proxy_host}" && ! is_ipv6_address "${proxy_host}"; then
+    proxy_uses_hostname=true
+  fi
+fi
+
+if [[ "${proxy_uses_hostname}" == "true" ]]; then
+  kernel_dns_servers_effective="${kernel_dns_servers_raw}"
+  if [[ -z "${kernel_dns_servers_effective}" ]]; then
+    kernel_dns_servers_effective="${dns_servers}"
+  fi
+
+  kernel_dns_servers_array=()
+  IFS=',' read -ra kernel_dns_list <<< "${kernel_dns_servers_effective}"
+  for server in "${kernel_dns_list[@]}"; do
+    server="$(trim "${server}")"
+    if [[ -z "${server}" ]]; then
+      continue
+    fi
+    if ! is_ipv4_address "${server}" && ! is_ipv6_address "${server}"; then
+      echo "Error: kernel DNS entries must be IP addresses when network.proxy_url uses a hostname (got ${server})." >&2
+      echo "Fix: set network.kernel_dns_servers or network.dns_servers to IP addresses reachable during early Talos boot." >&2
+      exit 1
+    fi
+    kernel_dns_servers_array+=("${server}")
+  done
+
+  if [[ ${#kernel_dns_servers_array[@]} -eq 0 ]]; then
+    echo "Error: network.proxy_url uses a hostname, but no kernel DNS servers were found." >&2
+    echo "Fix: set network.kernel_dns_servers or network.dns_servers to at least one reachable DNS server IP." >&2
+    exit 1
+  fi
+
+  kernel_dns_0="$(kernel_ip_value "${kernel_dns_servers_array[0]}")"
+  kernel_dns_1=""
+  if [[ ${#kernel_dns_servers_array[@]} -ge 2 ]]; then
+    kernel_dns_1="$(kernel_ip_value "${kernel_dns_servers_array[1]}")"
+  fi
+  kernel_ntp_0=""
+  if [[ ${#ntp_servers_array[@]} -ge 1 ]]; then
+    if is_ipv4_address "${ntp_servers_array[0]}" || is_ipv6_address "${ntp_servers_array[0]}"; then
+      kernel_ntp_0="$(kernel_ip_value "${ntp_servers_array[0]}")"
+    fi
+  fi
+  kernel_args+=("ip=:::::::${kernel_dns_0}:${kernel_dns_1}:${kernel_ntp_0}")
+fi
+
+if [[ ${#kernel_args[@]} -gt 0 ]]; then
+  extra_kernel_args_section=$'\n'
+  for kernel_arg in "${kernel_args[@]}"; do
+    extra_kernel_args_section+=$'      - "'"$(yaml_escape "${kernel_arg}")"$'"\n'
+  done
+  extra_kernel_args_section="${extra_kernel_args_section%$'\n'}"
+else
+  extra_kernel_args_section=" []"
+fi
+
+if [[ ${#cert_file_paths[@]} -gt 0 ]]; then
+  cert_files_section=$'\n'
+  for cert_file_path in "${cert_file_paths[@]}"; do
+    cert_file_content=""
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+      cert_file_content+=$'\n        '"${line}"
+    done < "${cert_file_path}"
+    if [[ -z "${cert_file_content}" ]]; then
+      echo "Error: cert_files entry is empty: ${cert_file_path}" >&2
+      echo "Fix: provide PEM certificates with content, or remove empty paths from network.cert_files." >&2
+      exit 1
+    fi
+
+    cert_files_section+=$'    - content: |'"${cert_file_content}"$'\n'
+    cert_files_section+=$'      permissions: 0644\n'
+    cert_files_section+=$'      path: /etc/ssl/certs/ca-certificates\n'
+    cert_files_section+=$'      op: append\n'
+  done
+  cert_files_section="${cert_files_section%$'\n'}"
 fi
 
 # Build VM role lists from vms_list.tf.
@@ -659,6 +1053,9 @@ for name in "${!vm_ips[@]}"; do
   rendered="${rendered//'${machine_disks_section}'/${machine_disks_section}}"
   rendered="${rendered//'${kubelet_extra_mounts_section}'/${kubelet_extra_mounts_section}}"
   rendered="${rendered//'${k8s_node_labels_section}'/${k8s_node_labels_section}}"
+  rendered="${rendered//'${proxy_env_section}'/${proxy_env_section}}"
+  rendered="${rendered//'${cert_files_section}'/${cert_files_section}}"
+  rendered="${rendered//'${talos_discovery_service_disabled}'/${talos_discovery_service_disabled,,}}"
   out_path="${patch_dir}/machine-${name}.yaml"
   printf "%s\n" "${rendered}" > "${out_path}"
   echo "wrote ${out_path}"

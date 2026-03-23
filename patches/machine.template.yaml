@@ -1,6 +1,8 @@
 machine:
   disks: ${machine_disks_section}
   nodeLabels: ${k8s_node_labels_section}
+  env: ${proxy_env_section}
+  files: ${cert_files_section}
   install:
     extraKernelArgs: ${extra_kernel_args_section}
   network:
@@ -19,3 +21,8 @@ machine:
     servers: [${ntp_servers_section}]
   kubelet:
     extraMounts: ${kubelet_extra_mounts_section}
+cluster:
+  discovery:
+    registries:
+      service:
+        disabled: ${talos_discovery_service_disabled}

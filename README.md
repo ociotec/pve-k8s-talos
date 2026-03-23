@@ -43,7 +43,12 @@ Now you need to update several files to your current needs. Samples of the files
   - DNS servers (comma-separated list, at least one required).
   - Optional VLAN tag for all VMs (leave empty to disable).
   - Optional NTP servers (comma-separated list, leave empty to disable).
+  - Optional `network.proxy_url` to set Talos `http_proxy` and `https_proxy`.
+  - Optional `network.kernel_dns_servers` to override the DNS IPs used in Talos kernel `ip=` arguments when the proxy URL uses a hostname.
+  - Optional `network.no_proxy_extra` to append custom no-proxy entries after the auto-generated localhost, local subnet, node IPs/hostnames, Kubernetes service names, and ingress hostnames.
+  - Optional `network.cert_files` for extra PEM certificates appended to Talos trust roots, including proxy interception CAs and internal/root certificates.
   - Talos version and factory image ID (used to render `patches/qemu.yaml`).
+  - Optional `talos.discovery_service_disabled` toggle (`"true"` by default) to disable Talos public discovery service.
   - Optional global `constants["k8s"]["labels"]` map applied to all k8s nodes (lowest precedence).
 - `vms_list.tf.sample` --> `vms_list.tf`
   - Map of VMs on PVE with VM name as key:
@@ -76,9 +81,17 @@ Whenever you change `vms_list.tf`, `vms_constants.tf`, or `patches/machine.templ
 ./scripts/gen-talos-assets.sh
 ```
 
+If you deploy with skip flags and want the generated `no_proxy` list to match, pass the same flags here too, for example:
+
+```bash
+./scripts/gen-talos-assets.sh --skip-ceph --skip-portainer --skip-monitoring
+```
+
 This script:
 
 - Renders per-VM machine patches under `patches/machine-*.yaml`
+- Optionally injects Talos proxy settings and a generated `no_proxy` list derived from your VM/network/constants files
+- Renders Talos public discovery service as disabled by default, unless overridden in `talos.discovery_service_disabled`
 - Merges node labels with precedence: `vms_constants.tf` (`constants["k8s"]["labels"]`) < `vms_resources.tf` (`k8s_labels`) < `vms_list.tf` (`k8s_labels`)
 - Removes stale patch files for deleted VMs
 - Generates `talos.tf` from several templates:
@@ -105,6 +118,31 @@ scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
 ```
 
 Set `vm.disk_by_id_prefix` to the part before the index (`scsi-0QEMU_QEMU_HARDDISK_drive-scsi` in this example).
+
+### Corporate proxy
+
+If your Talos nodes must reach the internet through a company proxy, set `network.proxy_url` in `vms_constants.tf`.
+The asset generator renders that value into Talos `machine.env.http_proxy` and `machine.env.https_proxy`, and builds `no_proxy` from:
+
+- `localhost`, `127.0.0.1`, `::1`
+- the local subnet derived from `network.gateway` + `network.net_size`
+- all VM hostnames and IPs from `vms_list.tf`
+- Kubernetes internal names such as `kubernetes.default.svc` and `.svc.cluster.local`
+- ingress hostnames and ingress IP from `k8s-net/constants.tf` when present
+- monitoring ingress hostnames from `monitoring/constants.tf` when present
+- any extra entries from `network.no_proxy_extra`
+
+When `network.proxy_url` uses a hostname instead of an IP, the generator also adds Talos kernel arguments for:
+
+- `talos.environment=http_proxy=...`
+- `talos.environment=https_proxy=...`
+- `ip=...` with DNS servers so the proxy hostname can be resolved during earlier Talos stages
+
+By default, the kernel `ip=` argument reuses the first DNS servers from `network.dns_servers`. If your early boot path needs different resolvers, set `network.kernel_dns_servers` to one or two comma-separated DNS server IPs.
+
+If your environment needs extra trusted certificates, set `network.cert_files` to one or more comma-separated PEM paths. This is useful for TLS-intercepting proxy CAs, but it also works for regular internal/root certificates that Talos should trust.
+
+The generated machine patch disables Talos' external service discovery registry by default via `talos.discovery_service_disabled = "true"`, which avoids proxy-related `cluster.DiscoveryServiceController` errors in environments that don't need the public discovery service. Set it to `"false"` if you intentionally need Talos public discovery.
 
 ### Create the infrastructre
 
