@@ -101,6 +101,11 @@ purge_state_dir() {
   fi
 }
 
+state_dir_has_state() {
+  local state_dir="$1"
+  [[ -f "${state_dir}/terraform.tfstate" || -f "${state_dir}/terraform.tfstate.backup" ]]
+}
+
 # Helper to run commands, optionally silencing output for normal runs.
 run() {
   if [[ "${verbose}" == "true" ]]; then
@@ -302,9 +307,16 @@ deploy_start="$(start_timer)"
 
 run tofu init -upgrade
 if [[ "${destroy_first}" == "true" ]]; then
-  message "Destroying Talos cluster VMs..."
-  run tofu destroy -auto-approve -refresh=false
-  message "Done."
+  if state_dir_has_state "${PWD}"; then
+    message "Regenerating Talos assets required for destroy..."
+    run ./scripts/gen-talos-assets.sh
+    message "Destroying Talos cluster VMs..."
+    run tofu destroy -auto-approve -refresh=false
+    message "Done."
+  else
+    message "No root OpenTofu state found; skipping tofu destroy."
+  fi
+
   message "Purging local OpenTofu state files..."
   purge_state_dir "${PWD}"
   purge_state_dir "${PWD}/k8s-net"
