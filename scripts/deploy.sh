@@ -5,6 +5,12 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "${script_dir}/common.sh"
 
+# Export TF_VAR_* variables from existing Proxmox env vars, so OpenTofu/Terraform
+# picks up the Proxmox credentials automatically.
+export TF_VAR_proxmox_endpoint="${TF_VAR_proxmox_endpoint:-${PROXMOX_VE_ENDPOINT:-}}"
+export TF_VAR_proxmox_api_token="${TF_VAR_proxmox_api_token:-${PROXMOX_VE_API_TOKEN:-}}"
+export TF_VAR_proxmox_insecure="${TF_VAR_proxmox_insecure:-${PROXMOX_VE_INSECURE:-}}"
+
 usage() {
   cat <<'USAGE'
 Usage: deploy.sh [options]
@@ -14,6 +20,9 @@ destroy step and only applies.
 
 Options:
   -d, --destroy           Destroy the cluster first (dangerous).
+  -D, --destroy-only      Destroy the cluster and exit (no deployment).
+  -v, --verbose           Show all command output (do not silence tofu/kubectl).
+  -g, --debug             Enable shell tracing + verbose output (sets TF_LOG=DEBUG).
   -c, --skip-ceph         Skip all Rook Ceph steps (operator, cluster, dashboard, CSI).
   -n, --skip-k8s-net      Skip k8s networking and ingress (k8s-net) steps (ingress, MetalLB, cert-manager, Portainer).
   -p, --skip-portainer    Skip Portainer deployment (only if -n/--skip-k8s-net is not used).
@@ -23,6 +32,9 @@ USAGE
 }
 
 destroy_first=false
+destroy_only=false
+debug=false
+verbose=false
 skip_ceph=false
 skip_k8s_net=false
 skip_portainer=false
@@ -32,6 +44,11 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -d|--destroy)
       destroy_first=true
+      shift
+      ;;
+    -D|--destroy-only)
+      destroy_first=true
+      destroy_only=true
       shift
       ;;
     -c|--skip-ceph)
@@ -50,6 +67,15 @@ while [[ $# -gt 0 ]]; do
       skip_monitoring=true
       shift
       ;;
+    -v|--verbose)
+      verbose=true
+      shift
+      ;;
+    -g|--debug)
+      debug=true
+      verbose=true
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -62,10 +88,25 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "${debug}" == "true" ]]; then
+  # Enable verbose tracing and Terraform debug logging for troubleshooting.
+  set -x
+  export TF_LOG=DEBUG
+fi
+
 purge_state_dir() {
   local state_dir="$1"
   if [[ -d "${state_dir}" ]]; then
     rm -f "${state_dir}/terraform.tfstate" "${state_dir}/terraform.tfstate.backup"
+  fi
+}
+
+# Helper to run commands, optionally silencing output for normal runs.
+run() {
+  if [[ "${verbose}" == "true" ]]; then
+    "$@"
+  else
+    "$@" 1>/dev/null
   fi
 }
 
@@ -259,10 +300,10 @@ validate_disk_by_id_prefix() {
 
 deploy_start="$(start_timer)"
 
-tofu init -upgrade 1>/dev/null
+run tofu init -upgrade
 if [[ "${destroy_first}" == "true" ]]; then
   message "Destroying Talos cluster VMs..."
-  tofu destroy -auto-approve -refresh=false 1>/dev/null
+  run tofu destroy -auto-approve -refresh=false
   message "Done."
   message "Purging local OpenTofu state files..."
   purge_state_dir "${PWD}"
@@ -272,11 +313,16 @@ if [[ "${destroy_first}" == "true" ]]; then
   purge_state_dir "${PWD}/rook/03-dashboard"
   purge_state_dir "${PWD}/rook/04-csi"
   purge_state_dir "${PWD}/monitoring"
+
+  if [[ "${destroy_only}" == "true" ]]; then
+    message "Destroy-only requested; exiting without deploying."
+    exit 0
+  fi
 fi
 
 message "Deploying the Talos cluster (PVE VMs creation, Talos cluster initialization, k8s bootstrapping)..."
 ./scripts/gen-talos-assets.sh
-tofu apply -auto-approve 1>/dev/null
+run tofu apply -auto-approve
 
 # Generate kubeconfig and talosconfig only if they don't exist
 # This prevents overwriting files on subsequent runs
@@ -324,24 +370,24 @@ else
     message "Rook Ceph cluster already Ready; skipping operator/cluster apply."
   else
     message "Deploying Rook Ceph operator..."
-    tofu -chdir=rook/01-crds-common-operator init 1>/dev/null
-    tofu -chdir=rook/01-crds-common-operator apply -auto-approve 1>/dev/null
+    run tofu -chdir=rook/01-crds-common-operator init
+    run tofu -chdir=rook/01-crds-common-operator apply -auto-approve
     wait_for_pods_ready "rook-ceph" "rook-ceph-operator" "180s"
 
     message "Deploying Rook Ceph cluster..."
-    tofu -chdir=rook/02-cluster init 1>/dev/null
-    tofu -chdir=rook/02-cluster apply -auto-approve 1>/dev/null
+    run tofu -chdir=rook/02-cluster init
+    run tofu -chdir=rook/02-cluster apply -auto-approve
     wait_for_cephcluster_ready "rook-ceph" "rook-ceph" "900"
   fi
 
   message "Deploying Rook Ceph CSI storage classes..."
-  tofu -chdir=rook/04-csi init 1>/dev/null
-  tofu -chdir=rook/04-csi apply -auto-approve 1>/dev/null
+  run tofu -chdir=rook/04-csi init
+  run tofu -chdir=rook/04-csi apply -auto-approve
   kubectl -n rook-ceph get storageclasses.storage.k8s.io
 
   message "Deploying Rook Ceph dashboard..."
-  tofu -chdir=rook/03-dashboard init 1>/dev/null
-  tofu -chdir=rook/03-dashboard apply -auto-approve 1>/dev/null
+  run tofu -chdir=rook/03-dashboard init
+  run tofu -chdir=rook/03-dashboard apply -auto-approve
   wait_for_dashboard_cert "300"
   dashboard_nodeport=$(kubectl -n rook-ceph get svc rook-ceph-mgr-dashboard-external-https -o jsonpath='{.spec.ports[?(@.name=="dashboard")].nodePort}')
   worker_ip=$(first_worker_ip "${PWD}/vms_list.tf")
@@ -366,14 +412,14 @@ if [[ "${skip_k8s_net}" == "true" ]]; then
   message "Skipping k8s networking and ingress (k8s-net) steps."
 else
   message "Deploying k8s networking and ingress (k8s-net)..."
-  tofu -chdir=k8s-net init 1>/dev/null
-  tofu -chdir=k8s-net apply -auto-approve \
+  run tofu -chdir=k8s-net init
+  run tofu -chdir=k8s-net apply -auto-approve \
     -target=kubernetes_manifest.cert_manager_crds \
     -target=kubernetes_manifest.metallb_native_crds \
     -target=local_file.cert_manager_ca_cert \
     -target=local_file.cert_manager_ca_key \
     -var="skip_portainer=${skip_portainer}" \
-    -var="skip_ceph=${skip_ceph}" 1>/dev/null
+    -var="skip_ceph=${skip_ceph}"
   tofu -chdir=k8s-net apply -auto-approve \
     -var="skip_portainer=${skip_portainer}" \
     -var="skip_ceph=${skip_ceph}" 1>/dev/null
@@ -395,8 +441,8 @@ if [[ "${skip_k8s_net}" == "true" || "${skip_monitoring}" == "true" ]]; then
   message "Skipping monitoring stack."
 else
   message "Deploying monitoring stack..."
-  tofu -chdir=monitoring init 1>/dev/null
-  tofu -chdir=monitoring apply -auto-approve 1>/dev/null
+  run tofu -chdir=monitoring init
+  run tofu -chdir=monitoring apply -auto-approve
   message "Restarting Grafana to reload provisioned dashboards..."
   kubectl -n monitoring rollout restart deploy/grafana 1>/dev/null
   grafana_url="$(tofu -chdir=monitoring output -raw grafana_url)"

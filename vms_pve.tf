@@ -70,6 +70,28 @@ resource "proxmox_virtual_environment_vm" "create_pve_vms" {
       ]
     }
   }
+
+  # Unlock VM before destroying it (avoids "VM is locked" errors during destroy).
+  provisioner "local-exec" {
+    when = destroy
+    command = <<-EOT
+      set -e
+      if [ -n "$${PROXMOX_VE_API_TOKEN:-}" ] && [ -n "$${PROXMOX_VE_ENDPOINT:-}" ]; then
+        endpoint="$${PROXMOX_VE_ENDPOINT%/}"
+        insecure_flag=""
+        if [ "$${PROXMOX_VE_INSECURE:-}" = "true" ]; then
+          insecure_flag="--insecure"
+        fi
+
+        # Try unlocking; ignore failures (already unlocked, already deleted, etc.)
+        curl $${insecure_flag} --silent --show-error --fail \
+          --request POST \
+          --header "Authorization: PVEAPIToken $${PROXMOX_VE_API_TOKEN}" \
+          "$${endpoint}/api2/json/nodes/${self.node_name}/qemu/${self.vm_id}/unlock" \
+          || true
+      fi
+    EOT
+  }
 }
 
 resource "null_resource" "all_vms_ready" {
