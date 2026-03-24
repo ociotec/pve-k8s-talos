@@ -54,13 +54,13 @@ resource "talos_cluster_kubeconfig" "kubeconfig" {
 
 resource "local_file" "talosconfig" {
   content  = data.talos_client_configuration.talosconfig.talos_config
-  filename = "${path.module}/talosconfig"
+  filename = "${path.module}/../talosconfig"
 }
 
 resource "local_file" "kubeconfig" {
   depends_on = [talos_cluster_kubeconfig.kubeconfig]
   content    = resource.talos_cluster_kubeconfig.kubeconfig.kubeconfig_raw
-  filename   = "${path.module}/kubeconfig"
+  filename   = "${path.module}/../kubeconfig"
 }
 
 output "talosconfig" {

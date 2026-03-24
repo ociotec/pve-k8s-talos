@@ -42,3 +42,6 @@ k8s-net/certs/*.pem
 k8s-net/certs/*.cer
 k8s-net/constants.tf
 monitoring/constants.tf
+/clusters/*
+!/clusters/sample/
+!/clusters/sample/**

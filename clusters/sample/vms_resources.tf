@@ -17,8 +17,7 @@ variable "resources" {
     error_message = "Each resources entry must set k8s_node to \"controlplane\" or \"worker\"."
   }
   default = {
-    # These are example values, rename the file to remove
-    # ".sample" and update them to match your environment
+    # These are example values, update them to match your environment
     "controlplane" = {
       vcpus      = 2
       memory     = 2048

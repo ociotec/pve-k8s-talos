@@ -2,18 +2,18 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd "${script_dir}/.." && pwd)"
 # shellcheck source=common.sh
 source "${script_dir}/common.sh"
 
 usage() {
   cat <<'USAGE'
-Usage: update-local.sh [options]
+Usage: update-local.sh --cluster <name> [options]
 
 Installs the k8s-net root CA into the local trust store.
 This script does NOT call sudo; run it with sudo if required.
 
 Options:
+  --cluster <name>    Cluster name. Must match the current clusters/<name> directory.
   -a, --all            Apply all non-destructive actions.
   -c, --root-ca       Install the root CA into the system trust store.
   -e, --etc-hosts     Update /etc/hosts with cluster hostnames.
@@ -26,8 +26,17 @@ install_root_ca=false
 update_hosts=false
 delete_hosts=false
 apply_all=false
+cluster_arg=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --cluster)
+      if [[ $# -lt 2 ]]; then
+        error "--cluster requires a value."
+        exit 1
+      fi
+      cluster_arg="$2"
+      shift 2
+      ;;
     -a|--all)
       apply_all=true
       shift
@@ -56,6 +65,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+setup_cluster_context "${script_dir}" "${cluster_arg}"
+
 if [[ "${apply_all}" == "true" ]]; then
   install_root_ca=true
   update_hosts=true
@@ -82,15 +93,15 @@ require_cmd uname
 require_root() {
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
     error "This script needs to run as root for this operation."
-    error "Run: sudo ${script_dir}/update-local.sh"
+    error "Run: sudo ${script_dir}/update-local.sh --cluster ${cluster_name}"
     exit 1
   fi
 }
 
 # Shared /etc/hosts context and helpers.
 hosts_file="/etc/hosts"
-start_marker="# BEGIN pve-k8s-talos"
-end_marker="# END pve-k8s-talos"
+start_marker="# BEGIN pve-k8s-talos ${cluster_name}"
+end_marker="# END pve-k8s-talos ${cluster_name}"
 
 # Rewrite /etc/hosts without the managed block.
 write_hosts_without_block() {
@@ -107,9 +118,9 @@ if [[ "${install_root_ca}" == "true" ]]; then
   require_cmd cp
 
   # Load domain and cert path from k8s-net constants.
-  constants_path="${repo_root}/k8s-net/constants.tf"
+  constants_path="${cluster_k8s_net_constants_path}"
   if [[ ! -r "${constants_path}" ]]; then
-    error "Cannot read ${constants_path}. Create it from k8s-net/constants.tf.sample."
+    error "Cannot read ${constants_path}. Create it from clusters/sample/k8s_net_constants.tf."
     exit 1
   fi
 
@@ -119,10 +130,10 @@ if [[ "${install_root_ca}" == "true" ]]; then
     exit 1
   fi
 
-  cert_path="${repo_root}/k8s-net/${domain}.pem"
+  cert_path="${cluster_certs_dir}/${domain}.pem"
   if [[ ! -r "${cert_path}" ]]; then
     error "Root CA not found: ${cert_path}"
-    error "Generate it by applying k8s-net first."
+    error "Generate it by applying k8s-net for cluster ${cluster_name} first."
     exit 1
   fi
 
@@ -164,9 +175,9 @@ if [[ "${update_hosts}" == "true" ]]; then
   require_cmd sort
 
   # Load hostnames and ingress IP from constants.
-  constants_path="${repo_root}/k8s-net/constants.tf"
+  constants_path="${cluster_k8s_net_constants_path}"
   if [[ ! -r "${constants_path}" ]]; then
-    error "Cannot read ${constants_path}. Create it from k8s-net/constants.tf.sample."
+    error "Cannot read ${constants_path}. Create it from clusters/sample/k8s_net_constants.tf."
     exit 1
   fi
 
@@ -182,13 +193,12 @@ if [[ "${update_hosts}" == "true" ]]; then
     exit 1
   fi
 
-  monitoring_constants="${repo_root}/monitoring/constants.tf"
-  if [[ ! -r "${monitoring_constants}" ]]; then
-    error "Cannot read ${monitoring_constants}. Create it from monitoring/constants.tf.sample."
-    exit 1
-  fi
+  monitoring_constants="${cluster_monitoring_constants_path}"
   k8s_net_hostnames="$(awk -v domain="${domain}" -F'"' '/_hostname[[:space:]]*=/{val=$2; gsub("\\$\\{local.domain\\}", domain, val); print val}' "${constants_path}")"
-  monitoring_hostnames="$(awk -v domain="${domain}" -F'"' '/_hostname[[:space:]]*=/{val=$2; gsub("\\$\\{local.domain\\}", domain, val); print val}' "${monitoring_constants}")"
+  monitoring_hostnames=""
+  if [[ -r "${monitoring_constants}" ]]; then
+    monitoring_hostnames="$(awk -v domain="${domain}" -F'"' '/_hostname[[:space:]]*=/{val=$2; gsub("\\$\\{local.domain\\}", domain, val); print val}' "${monitoring_constants}")"
+  fi
 
   hostnames="$(printf "%s\n%s\n" "${k8s_net_hostnames}" "${monitoring_hostnames}" | awk 'NF' | sort -u)"
   if [[ -z "${hostnames}" ]]; then

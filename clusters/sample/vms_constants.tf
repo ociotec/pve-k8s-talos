@@ -1,8 +1,7 @@
 variable "constants" {
   type = any
   default = {
-    # These are example values, rename the file to remove
-    # ".sample" and update them to match your environment
+    # These are example values, update them to match your environment
     "vm" = {
       "iso_path"          = "ceph-fs:iso/talos-v1.12.6-nocloud-amd64-with-qemu-guest-agent.iso"
       "datastore_id"      = "local-lvm"

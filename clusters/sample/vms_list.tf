@@ -14,8 +14,7 @@ variable "vms" {
     error_message = "Each vms entry must reference a type that exists in vms_resources.tf."
   }
   default = {
-    # These are example values, rename the file to remove
-    # ".sample" and update them to match your environment
+    # These are example values, update them to match your environment
     "talos-cp-01" = {
       node_name  = "pve01"
       vm_id      = 1001

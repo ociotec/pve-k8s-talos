@@ -89,6 +89,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+setup_cluster_context "${script_dir}" ""
+
 if [[ "${skip_ceph}" == "true" ]]; then
   gen_talos_args+=(--skip-ceph)
 fi
@@ -126,6 +128,100 @@ run() {
     "$@"
   else
     "$@" 1>/dev/null
+  fi
+}
+
+run_gen_talos_assets() {
+  if [[ "${verbose}" == "true" ]]; then
+    "${script_dir}/gen-talos-assets.sh" --cluster "${cluster_name}" "${gen_talos_args[@]}"
+  else
+    "${script_dir}/gen-talos-assets.sh" --cluster "${cluster_name}" "${gen_talos_args[@]}" 1>/dev/null
+  fi
+}
+
+prepare_k8s_net_workspace() {
+  local workspace="${cluster_k8s_net_workspace}"
+
+  require_cluster_file "${cluster_k8s_net_constants_path}" "k8s-net constants"
+  mkdir -p "${workspace}" "${cluster_certs_dir}"
+  if [[ -d "${repo_root}/k8s-net/.terraform" ]]; then
+    link_into_workspace "${repo_root}/k8s-net/.terraform" "${workspace}/.terraform"
+  fi
+  link_into_workspace "${repo_root}/k8s-net/main.tf" "${workspace}/main.tf"
+  link_into_workspace "${repo_root}/k8s-net/cert-manager.yaml" "${workspace}/cert-manager.yaml"
+  link_into_workspace "${repo_root}/k8s-net/ingress-nginx-controller.yaml" "${workspace}/ingress-nginx-controller.yaml"
+  link_into_workspace "${repo_root}/k8s-net/metallb-native.yaml" "${workspace}/metallb-native.yaml"
+  link_into_workspace "${repo_root}/k8s-net/metallb-pool.yaml" "${workspace}/metallb-pool.yaml"
+  link_into_workspace "${repo_root}/k8s-net/portainer.yaml" "${workspace}/portainer.yaml"
+  link_into_workspace "${repo_root}/k8s-net/rook-ceph-dashboard-ingress.yaml" "${workspace}/rook-ceph-dashboard-ingress.yaml"
+  link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/constants.tf"
+  link_into_workspace "${cluster_certs_dir}" "${workspace}/certs"
+  if [[ -r "${repo_root}/k8s-net/.terraform.lock.hcl" ]]; then
+    link_into_workspace "${repo_root}/k8s-net/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
+  fi
+}
+
+prepare_monitoring_workspace() {
+  local workspace="${cluster_monitoring_workspace}"
+
+  require_cluster_file "${cluster_monitoring_constants_path}" "monitoring constants"
+  mkdir -p "${workspace}"
+  if [[ -d "${repo_root}/monitoring/.terraform" ]]; then
+    link_into_workspace "${repo_root}/monitoring/.terraform" "${workspace}/.terraform"
+  fi
+  link_into_workspace "${repo_root}/monitoring/main.tf" "${workspace}/main.tf"
+  link_into_workspace "${cluster_monitoring_constants_path}" "${workspace}/constants.tf"
+  link_into_workspace "${repo_root}/monitoring/namespace.yaml" "${workspace}/namespace.yaml"
+  link_into_workspace "${repo_root}/monitoring/prometheus.yaml" "${workspace}/prometheus.yaml"
+  link_into_workspace "${repo_root}/monitoring/grafana.yaml" "${workspace}/grafana.yaml"
+  link_into_workspace "${repo_root}/monitoring/loki.yaml" "${workspace}/loki.yaml"
+  link_into_workspace "${repo_root}/monitoring/promtail.yaml" "${workspace}/promtail.yaml"
+  link_into_workspace "${repo_root}/monitoring/kube-state-metrics.yaml" "${workspace}/kube-state-metrics.yaml"
+  link_into_workspace "${repo_root}/monitoring/grafana" "${workspace}/grafana"
+  if [[ -r "${repo_root}/monitoring/.terraform.lock.hcl" ]]; then
+    link_into_workspace "${repo_root}/monitoring/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
+  fi
+}
+
+prepare_rook_workspaces() {
+  local rook_root="${cluster_out_dir}/rook"
+
+  mkdir -p "${rook_root}" "${cluster_rook_01_workspace}" "${cluster_rook_02_workspace}" "${cluster_rook_03_workspace}" "${cluster_rook_04_workspace}"
+  link_into_workspace "${repo_root}/rook/manifests" "${rook_root}/manifests"
+  if [[ -d "${repo_root}/rook/01-crds-common-operator/.terraform" ]]; then
+    link_into_workspace "${repo_root}/rook/01-crds-common-operator/.terraform" "${cluster_rook_01_workspace}/.terraform"
+  fi
+  if [[ -d "${repo_root}/rook/02-cluster/.terraform" ]]; then
+    link_into_workspace "${repo_root}/rook/02-cluster/.terraform" "${cluster_rook_02_workspace}/.terraform"
+  fi
+  if [[ -d "${repo_root}/rook/03-dashboard/.terraform" ]]; then
+    link_into_workspace "${repo_root}/rook/03-dashboard/.terraform" "${cluster_rook_03_workspace}/.terraform"
+  fi
+  if [[ -d "${repo_root}/rook/04-csi/.terraform" ]]; then
+    link_into_workspace "${repo_root}/rook/04-csi/.terraform" "${cluster_rook_04_workspace}/.terraform"
+  fi
+  link_into_workspace "${repo_root}/rook/01-crds-common-operator/main.tf" "${cluster_rook_01_workspace}/main.tf"
+  link_into_workspace "${repo_root}/rook/02-cluster/main.tf" "${cluster_rook_02_workspace}/main.tf"
+  link_into_workspace "${repo_root}/rook/03-dashboard/main.tf" "${cluster_rook_03_workspace}/main.tf"
+  link_into_workspace "${repo_root}/rook/04-csi/main.tf" "${cluster_rook_04_workspace}/main.tf"
+  if [[ -r "${repo_root}/rook/01-crds-common-operator/.terraform.lock.hcl" ]]; then
+    link_into_workspace "${repo_root}/rook/01-crds-common-operator/.terraform.lock.hcl" "${cluster_rook_01_workspace}/.terraform.lock.hcl"
+  fi
+  if [[ -r "${repo_root}/rook/02-cluster/.terraform.lock.hcl" ]]; then
+    link_into_workspace "${repo_root}/rook/02-cluster/.terraform.lock.hcl" "${cluster_rook_02_workspace}/.terraform.lock.hcl"
+  fi
+  if [[ -r "${repo_root}/rook/03-dashboard/.terraform.lock.hcl" ]]; then
+    link_into_workspace "${repo_root}/rook/03-dashboard/.terraform.lock.hcl" "${cluster_rook_03_workspace}/.terraform.lock.hcl"
+  fi
+  if [[ -r "${repo_root}/rook/04-csi/.terraform.lock.hcl" ]]; then
+    link_into_workspace "${repo_root}/rook/04-csi/.terraform.lock.hcl" "${cluster_rook_04_workspace}/.terraform.lock.hcl"
+  fi
+}
+
+prepare_root_workspace() {
+  mkdir -p "${cluster_out_dir}"
+  if [[ -d "${repo_root}/.terraform" ]]; then
+    link_into_workspace "${repo_root}/.terraform" "${cluster_root_workspace}/.terraform"
   fi
 }
 
@@ -222,8 +318,8 @@ wait_for_dashboard_cert() {
 }
 
 first_worker_ip() {
-  local resources_file="${PWD}/vms_resources.tf"
-  local vms_file="${PWD}/vms_list.tf"
+  local resources_file="${1:-${cluster_resources_path}}"
+  local vms_file="${2:-${cluster_vms_path}}"
   local worker_types
 
   worker_types="$(
@@ -318,27 +414,28 @@ validate_disk_by_id_prefix() {
 }
 
 deploy_start="$(start_timer)"
-
-run tofu init -upgrade
+prepare_root_workspace
+run_gen_talos_assets
+run tofu -chdir="${cluster_root_workspace}" init
 if [[ "${destroy_first}" == "true" ]]; then
-  if state_dir_has_state "${PWD}"; then
+  if state_dir_has_state "${cluster_root_workspace}"; then
     message "Regenerating Talos assets required for destroy..."
-    run ./scripts/gen-talos-assets.sh "${gen_talos_args[@]}"
+    run_gen_talos_assets
     message "Destroying Talos cluster VMs..."
-    run tofu destroy -auto-approve -refresh=false
+    run tofu -chdir="${cluster_root_workspace}" destroy -auto-approve -refresh=false
     message "Done."
   else
-    message "No root OpenTofu state found; skipping tofu destroy."
+    message "No root OpenTofu state found for cluster ${cluster_name}; skipping tofu destroy."
   fi
 
   message "Purging local OpenTofu state files..."
-  purge_state_dir "${PWD}"
-  purge_state_dir "${PWD}/k8s-net"
-  purge_state_dir "${PWD}/rook/01-crds-common-operator"
-  purge_state_dir "${PWD}/rook/02-cluster"
-  purge_state_dir "${PWD}/rook/03-dashboard"
-  purge_state_dir "${PWD}/rook/04-csi"
-  purge_state_dir "${PWD}/monitoring"
+  purge_state_dir "${cluster_root_workspace}"
+  purge_state_dir "${cluster_k8s_net_workspace}"
+  purge_state_dir "${cluster_rook_01_workspace}"
+  purge_state_dir "${cluster_rook_02_workspace}"
+  purge_state_dir "${cluster_rook_03_workspace}"
+  purge_state_dir "${cluster_rook_04_workspace}"
+  purge_state_dir "${cluster_monitoring_workspace}"
 
   if [[ "${destroy_only}" == "true" ]]; then
     message "Destroy-only requested; exiting without deploying."
@@ -346,44 +443,40 @@ if [[ "${destroy_first}" == "true" ]]; then
   fi
 fi
 
-message "Deploying the Talos cluster (PVE VMs creation, Talos cluster initialization, k8s bootstrapping)..."
-./scripts/gen-talos-assets.sh "${gen_talos_args[@]}"
-run tofu apply -auto-approve
+message "Deploying the Talos cluster ${cluster_name} (PVE VMs creation, Talos cluster initialization, k8s bootstrapping)..."
+run_gen_talos_assets
+run tofu -chdir="${cluster_root_workspace}" apply -auto-approve
 
-# Generate kubeconfig and talosconfig only if they don't exist
-# This prevents overwriting files on subsequent runs
-if [[ ! -f talosconfig ]]; then
-  if ! tofu output -raw talosconfig > talosconfig 2>/dev/null; then
+if [[ ! -f "${cluster_talosconfig_path}" ]]; then
+  if ! tofu -chdir="${cluster_root_workspace}" output -raw talosconfig > "${cluster_talosconfig_path}" 2>/dev/null; then
     error "Failed to write talosconfig from tofu outputs." >&2
     exit 1
   fi
-  chmod 600 talosconfig
-  message "Generated talosconfig"
+  chmod 600 "${cluster_talosconfig_path}"
+  message "Generated ${cluster_talosconfig_path}"
 else
-  message "talosconfig already exists, skipping generation"
+  message "talosconfig already exists at ${cluster_talosconfig_path}, skipping generation"
 fi
 
-if [[ ! -f kubeconfig ]]; then
-  if ! tofu output -raw kubeconfig > kubeconfig 2>/dev/null; then
+if [[ ! -f "${cluster_kubeconfig_path}" ]]; then
+  if ! tofu -chdir="${cluster_root_workspace}" output -raw kubeconfig > "${cluster_kubeconfig_path}" 2>/dev/null; then
     error "Failed to write kubeconfig from tofu outputs." >&2
     exit 1
   fi
-  chmod 600 kubeconfig
-  message "Generated kubeconfig"
+  chmod 600 "${cluster_kubeconfig_path}"
+  message "Generated ${cluster_kubeconfig_path}"
 else
-  message "kubeconfig already exists, skipping generation"
+  message "kubeconfig already exists at ${cluster_kubeconfig_path}, skipping generation"
 fi
 
-# Ensure kubeconfig and talosconfig paths are set for this script session
-# These are needed for kubectl and talosctl commands below
-export TALOSCONFIG="$(pwd)/talosconfig"
-export KUBECONFIG="$(pwd)/kubeconfig"
-worker_ip=$(first_worker_ip "${PWD}/vms_list.tf")
+export TALOSCONFIG="${cluster_talosconfig_path}"
+export KUBECONFIG="${cluster_kubeconfig_path}"
+worker_ip="$(first_worker_ip)"
 if [[ -z "${worker_ip}" ]]; then
   error "Failed to determine the first worker name/IP from vms_list.tf." >&2
   exit 1
 fi
-prefix_value=$(disk_by_id_prefix "${PWD}/vms_constants.tf")
+prefix_value="$(disk_by_id_prefix "${cluster_constants_path}")"
 validate_disk_by_id_prefix "${worker_ip}" "${prefix_value}"
 message "k8s cluster is up and running. Current nodes:"
 kubectl get nodes
@@ -395,28 +488,29 @@ else
   if [[ "${ceph_phase}" == "Ready" ]]; then
     message "Rook Ceph cluster already Ready; skipping operator/cluster apply."
   else
+    prepare_rook_workspaces
     message "Deploying Rook Ceph operator..."
-    run tofu -chdir=rook/01-crds-common-operator init
-    run tofu -chdir=rook/01-crds-common-operator apply -auto-approve
+    run tofu -chdir="${cluster_rook_01_workspace}" init
+    run tofu -chdir="${cluster_rook_01_workspace}" apply -auto-approve
     wait_for_pods_ready "rook-ceph" "rook-ceph-operator" "180s"
 
     message "Deploying Rook Ceph cluster..."
-    run tofu -chdir=rook/02-cluster init
-    run tofu -chdir=rook/02-cluster apply -auto-approve
+    run tofu -chdir="${cluster_rook_02_workspace}" init
+    run tofu -chdir="${cluster_rook_02_workspace}" apply -auto-approve
     wait_for_cephcluster_ready "rook-ceph" "rook-ceph" "900"
   fi
 
   message "Deploying Rook Ceph CSI storage classes..."
-  run tofu -chdir=rook/04-csi init
-  run tofu -chdir=rook/04-csi apply -auto-approve
+  run tofu -chdir="${cluster_rook_04_workspace}" init
+  run tofu -chdir="${cluster_rook_04_workspace}" apply -auto-approve
   kubectl -n rook-ceph get storageclasses.storage.k8s.io
 
   message "Deploying Rook Ceph dashboard..."
-  run tofu -chdir=rook/03-dashboard init
-  run tofu -chdir=rook/03-dashboard apply -auto-approve
+  run tofu -chdir="${cluster_rook_03_workspace}" init
+  run tofu -chdir="${cluster_rook_03_workspace}" apply -auto-approve
   wait_for_dashboard_cert "300"
   dashboard_nodeport=$(kubectl -n rook-ceph get svc rook-ceph-mgr-dashboard-external-https -o jsonpath='{.spec.ports[?(@.name=="dashboard")].nodePort}')
-  worker_ip=$(first_worker_ip "${PWD}/vms_list.tf")
+  worker_ip="$(first_worker_ip)"
   message "Rook Ceph Dashboard is available at ${URL_FMT_START}https://${worker_ip}:${dashboard_nodeport}/${URL_FMT_END}"
   dashboard_password=""
   for _ in {1..12}; do
@@ -437,28 +531,29 @@ fi
 if [[ "${skip_k8s_net}" == "true" ]]; then
   message "Skipping k8s networking and ingress (k8s-net) steps."
 else
+  prepare_k8s_net_workspace
   message "Deploying k8s networking and ingress (k8s-net)..."
-  run tofu -chdir=k8s-net init
-  run tofu -chdir=k8s-net apply -auto-approve \
+  run tofu -chdir="${cluster_k8s_net_workspace}" init
+  run tofu -chdir="${cluster_k8s_net_workspace}" apply -auto-approve \
     -target=kubernetes_manifest.cert_manager_crds \
     -target=kubernetes_manifest.metallb_native_crds \
     -target=local_file.cert_manager_ca_cert \
     -target=local_file.cert_manager_ca_key \
     -var="skip_portainer=${skip_portainer}" \
     -var="skip_ceph=${skip_ceph}"
-  tofu -chdir=k8s-net apply -auto-approve \
+  tofu -chdir="${cluster_k8s_net_workspace}" apply -auto-approve \
     -var="skip_portainer=${skip_portainer}" \
     -var="skip_ceph=${skip_ceph}" 1>/dev/null
   
   if [[ "${skip_portainer}" != "true" ]]; then
-    portainer_url="$(tofu -chdir=k8s-net output -raw portainer_url)"
+    portainer_url="$(tofu -chdir="${cluster_k8s_net_workspace}" output -raw portainer_url)"
     message "Portainer URL: ${URL_FMT_START}${portainer_url}${URL_FMT_END}"
   else
     message "Skipping Portainer deployment."
   fi
   
   if [[ "${skip_ceph}" != "true" ]]; then
-    rook_dashboard_url="$(tofu -chdir=k8s-net output -raw rook_ceph_dashboard_url)"
+    rook_dashboard_url="$(tofu -chdir="${cluster_k8s_net_workspace}" output -raw rook_ceph_dashboard_url)"
     message "Rook Ceph dashboard URL: ${URL_FMT_START}${rook_dashboard_url}${URL_FMT_END}"
   fi
 fi
@@ -466,15 +561,16 @@ fi
 if [[ "${skip_k8s_net}" == "true" || "${skip_monitoring}" == "true" ]]; then
   message "Skipping monitoring stack."
 else
+  prepare_monitoring_workspace
   message "Deploying monitoring stack..."
-  run tofu -chdir=monitoring init
-  run tofu -chdir=monitoring apply -auto-approve
+  run tofu -chdir="${cluster_monitoring_workspace}" init
+  run tofu -chdir="${cluster_monitoring_workspace}" apply -auto-approve
   message "Restarting Grafana to reload provisioned dashboards..."
   kubectl -n monitoring rollout restart deploy/grafana 1>/dev/null
-  grafana_url="$(tofu -chdir=monitoring output -raw grafana_url)"
-  prometheus_url="$(tofu -chdir=monitoring output -raw prometheus_url)"
-  grafana_user="$(tofu -chdir=monitoring output -raw grafana_admin_user)"
-  grafana_password="$(tofu -chdir=monitoring output -raw grafana_admin_password)"
+  grafana_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw grafana_url)"
+  prometheus_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw prometheus_url)"
+  grafana_user="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw grafana_admin_user)"
+  grafana_password="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw grafana_admin_password)"
   message "Grafana URL: ${URL_FMT_START}${grafana_url}${URL_FMT_END}"
   message "Prometheus URL: ${URL_FMT_START}${prometheus_url}${URL_FMT_END}"
   message "Grafana admin user: ${DATA_FMT_START}${grafana_user}${DATA_FMT_END}"
@@ -486,12 +582,12 @@ message ""
 message "To use this cluster in future shell sessions with talosctl and kubectl:"
 message ""
 message "Option 1 - Set environment variables for each session:"
-message "  export TALOSCONFIG=\"$(pwd)/talosconfig\""
-message "  export KUBECONFIG=\"$(pwd)/kubeconfig\""
+message "  export TALOSCONFIG=\"$(pwd)/out/talosconfig\""
+message "  export KUBECONFIG=\"$(pwd)/out/kubeconfig\""
 message ""
-if [[ -f "$(pwd)/.envrc" ]]; then
+if [[ -f "${cluster_envrc_path}" ]]; then
   message "Option 2 - Add to your .envrc file (direnv will auto-load):"
-  message "  echo 'export TALOSCONFIG=\"\$(pwd)/talosconfig\"' >> .envrc"
-  message "  echo 'export KUBECONFIG=\"\$(pwd)/kubeconfig\"' >> .envrc"
+  message "  echo 'export TALOSCONFIG=\"\$(pwd)/out/talosconfig\"' >> .envrc"
+  message "  echo 'export KUBECONFIG=\"\$(pwd)/out/kubeconfig\"' >> .envrc"
   message "  direnv allow"
 fi

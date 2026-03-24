@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=common.sh
+source "${script_dir}/common.sh"
+
+cluster_arg=""
 skip_ceph=false
 skip_k8s_net=false
 skip_portainer=false
@@ -8,6 +13,14 @@ skip_monitoring=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --cluster)
+      if [[ $# -lt 2 ]]; then
+        echo "Error: --cluster requires a value." >&2
+        exit 1
+      fi
+      cluster_arg="$2"
+      shift 2
+      ;;
     --skip-ceph)
       skip_ceph=true
       shift
@@ -26,9 +39,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       cat <<'USAGE'
-Usage: gen-talos-assets.sh [options]
+Usage: gen-talos-assets.sh --cluster <name> [options]
 
 Options:
+  --cluster <name>    Cluster name. Must match the current clusters/<name> directory.
   --skip-ceph         Exclude Rook Ceph hostnames from generated no_proxy values.
   --skip-k8s-net      Exclude k8s-net ingress IP/hostnames from generated no_proxy values.
   --skip-portainer    Exclude Portainer hostname from generated no_proxy values.
@@ -44,15 +58,16 @@ USAGE
   esac
 done
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+setup_cluster_context "${script_dir}" "${cluster_arg}"
+
 template_path="${repo_root}/patches/machine.template.yaml"
 hostname_template_path="${repo_root}/patches/hostname.template.yaml"
 qemu_template_path="${repo_root}/patches/qemu.template.yaml"
-vms_path="${repo_root}/vms_list.tf"
-constants_path="${repo_root}/vms_constants.tf"
-resources_path="${repo_root}/vms_resources.tf"
-patch_dir="${repo_root}/patches"
-talos_tf_path="${repo_root}/talos.tf"
+vms_path="${cluster_vms_path}"
+constants_path="${cluster_constants_path}"
+resources_path="${cluster_resources_path}"
+patch_dir="${cluster_root_patches_dir}"
+talos_tf_path="${cluster_root_workspace}/talos.tf"
 talos_template_path="${repo_root}/templates/talos.template.tf"
 controlplane_data_template_path="${repo_root}/templates/controlplane-data.template.tf"
 worker_data_template_path="${repo_root}/templates/worker-data.template.tf"
@@ -100,11 +115,19 @@ if [[ ! -r "${resources_path}" ]]; then
   exit 1
 fi
 
-if [[ ! -d "${patch_dir}" ]]; then
-  echo "Error: patches directory not found: ${patch_dir}" >&2
-  echo "Fix: create the directory (mkdir -p patches) or restore it from git." >&2
-  exit 1
+mkdir -p "${cluster_out_dir}" "${cluster_root_workspace}" "${patch_dir}"
+
+link_into_workspace "${repo_root}/main.tf" "${cluster_root_workspace}/main.tf"
+link_into_workspace "${repo_root}/providers.tf" "${cluster_root_workspace}/providers.tf"
+link_into_workspace "${repo_root}/vms_pve.tf" "${cluster_root_workspace}/vms_pve.tf"
+link_into_workspace "${repo_root}/vms_variables.tf" "${cluster_root_workspace}/vms_variables.tf"
+link_into_workspace "${cluster_constants_path}" "${cluster_root_workspace}/vms_constants.tf"
+link_into_workspace "${cluster_vms_path}" "${cluster_root_workspace}/vms_list.tf"
+link_into_workspace "${cluster_resources_path}" "${cluster_root_workspace}/vms_resources.tf"
+if [[ -r "${repo_root}/.terraform.lock.hcl" ]]; then
+  link_into_workspace "${repo_root}/.terraform.lock.hcl" "${cluster_root_workspace}/.terraform.lock.hcl"
 fi
+link_into_workspace "${repo_root}/patches/disable-aslr.yaml" "${patch_dir}/disable-aslr.yaml"
 
 if [[ -e "${talos_tf_path}" && ! -w "${talos_tf_path}" ]]; then
   echo "Error: talos.tf is not writable: ${talos_tf_path}" >&2
@@ -516,7 +539,7 @@ if [[ -n "${proxy_url}" ]]; then
   add_no_proxy_entry ".cluster.local"
 
   k8s_net_domain=""
-  k8s_net_constants_path="${repo_root}/k8s-net/constants.tf"
+  k8s_net_constants_path="${cluster_k8s_net_constants_path}"
   if [[ "${skip_k8s_net}" != "true" && -r "${k8s_net_constants_path}" ]]; then
     k8s_net_domain="$(awk -F'"' '/^[[:space:]]*domain[[:space:]]*=/{print $2; exit}' "${k8s_net_constants_path}")"
     k8s_net_ingress_ip="$(awk -F'"' '/^[[:space:]]*ingress_lb_ip[[:space:]]*=/{print $2; exit}' "${k8s_net_constants_path}")"
@@ -543,7 +566,7 @@ if [[ -n "${proxy_url}" ]]; then
     fi
   fi
 
-  monitoring_constants_path="${repo_root}/monitoring/constants.tf"
+  monitoring_constants_path="${cluster_monitoring_constants_path}"
   if [[ "${skip_monitoring}" != "true" && -r "${monitoring_constants_path}" && -n "${k8s_net_domain}" ]]; then
     while IFS= read -r hostname; do
       add_no_proxy_entry "${hostname}"

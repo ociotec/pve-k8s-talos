@@ -26,12 +26,18 @@ tofu init -upgrade
 
 ### Customize your setup
 
-Now you need to update several files to your current needs. Samples of the files are provided for reference, just rename them removing the `.sample` from them.
+Now you need to create one cluster directory under `clusters/` from the versioned sample, and customize the files there.
 
-- `.envrc.sample` --> `.envrc`
+```bash
+cp -R clusters/sample clusters/<cluster>
+```
+
+Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as the reference layout.
+
+- `.envrc`
   - This is an optional file, only proceed with this file creation if you also installed previous optional step `direnv`.
   - Define all required PVE environment variables to allow OpenTofu to access your PVE nodes, it's prererred to use API token authentication as described at sample file.
-- `vms_constants.tf.sample` --> `vms_constants.tf`
+- `vms_constants.tf`
   - Talos ISO path on PVE node.
   - Optional datastore ID for VM disks and cloud-init (defaults to `local-lvm`).
   - Proxmox pool name for VM placement (leave empty to disable).
@@ -50,14 +56,14 @@ Now you need to update several files to your current needs. Samples of the files
   - Talos version and factory image ID (used to render `patches/qemu.yaml`).
   - Optional `talos.discovery_service_disabled` toggle (`"true"` by default) to disable Talos public discovery service.
   - Optional global `constants["k8s"]["labels"]` map applied to all k8s nodes (lowest precedence).
-- `vms_list.tf.sample` --> `vms_list.tf`
+- `vms_list.tf`
   - Map of VMs on PVE with VM name as key:
     - PVE node.
     - VM ID.
     - Resource type key (must exist in `vms_resources.tf`).
     - IP address.
     - Optional `k8s_labels` map per VM (highest precedence).
-- `vms_resources.tf.sample` --> `vms_resources.tf`
+- `vms_resources.tf`
   - Resources per node type referenced by `vms_list.tf`:
     - Count of vCPUs.
     - RAM memory in MB.
@@ -65,36 +71,38 @@ Now you need to update several files to your current needs. Samples of the files
     - Optional `k8s_labels` map per resource type (middle precedence).
     - Disks in GB with optional Talos mount points (first disk is used as root).
     - Mount points must live under `/var` (for example `/var/mnt/kafka` or `/var/lib/kafka`).
-- `k8s-net/constants.tf.sample` --> `k8s-net/constants.tf`
+- `k8s_net_constants.tf`
   - Domain, CA organization, MetalLB pool range, and ingress fixed IP.
 - `root_ca_crt` and `root_ca_key` paths. A new Root CA is generated only when either file is missing or empty.
-- `monitoring/constants.tf.sample` --> `monitoring/constants.tf`
+- `monitoring_constants.tf`
   - Domain, storage class, sizes, retention, and image versions for Prometheus, Loki, and Grafana.
+- `certs/`
+  - Cluster-specific CA and certificate files used by `k8s_net_constants.tf`.
 
 Shortcut: for a one-command install, jump to [Easy deployment](#easy-deployment) to run the helper script; or continue reading for the detailed, step-by-step walkthrough below.
 
 ### Generate Talos assets
 
-Whenever you change `vms_list.tf`, `vms_constants.tf`, or `patches/machine.template.yaml`, regenerate the Talos inputs:
+Whenever you change `vms_list.tf`, `vms_constants.tf`, or `patches/machine.template.yaml`, regenerate the Talos inputs from inside `clusters/<cluster>`:
 
 ```bash
-./scripts/gen-talos-assets.sh
+../../scripts/gen-talos-assets.sh --cluster <cluster>
 ```
 
 If you deploy with skip flags and want the generated `no_proxy` list to match, pass the same flags here too, for example:
 
 ```bash
-./scripts/gen-talos-assets.sh --skip-ceph --skip-portainer --skip-monitoring
+../../scripts/gen-talos-assets.sh --cluster <cluster> --skip-ceph --skip-portainer --skip-monitoring
 ```
 
 This script:
 
-- Renders per-VM machine patches under `patches/machine-*.yaml`
+- Renders per-VM machine patches under `out/root/patches/machine-*.yaml`
 - Optionally injects Talos proxy settings and a generated `no_proxy` list derived from your VM/network/constants files
 - Renders Talos public discovery service as disabled by default, unless overridden in `talos.discovery_service_disabled`
 - Merges node labels with precedence: `vms_constants.tf` (`constants["k8s"]["labels"]`) < `vms_resources.tf` (`k8s_labels`) < `vms_list.tf` (`k8s_labels`)
 - Removes stale patch files for deleted VMs
-- Generates `talos.tf` from several templates:
+- Generates `out/root/talos.tf` from several templates:
   - [`templates/talos.template.tf`](templates/talos.template.tf) main Talos template.
   - [`templates/controlplane-data.template.tf`](templates/controlplane-data.template.tf) template for Talos control plane nodes configuration data.
   - [`templates/worker-data.template.tf`](templates/worker-data.template.tf) template for Talos worker nodes configuration data.
@@ -128,8 +136,8 @@ The asset generator renders that value into Talos `machine.env.http_proxy` and `
 - the local subnet derived from `network.gateway` + `network.net_size`
 - all VM hostnames and IPs from `vms_list.tf`
 - Kubernetes internal names such as `kubernetes.default.svc` and `.svc.cluster.local`
-- ingress hostnames and ingress IP from `k8s-net/constants.tf` when present
-- monitoring ingress hostnames from `monitoring/constants.tf` when present
+- ingress hostnames and ingress IP from `k8s_net_constants.tf` when present
+- monitoring ingress hostnames from `monitoring_constants.tf` when present
 - any extra entries from `network.no_proxy_extra`
 
 When `network.proxy_url` uses a hostname instead of an IP, the generator also adds Talos kernel arguments for:
@@ -149,16 +157,17 @@ The generated machine patch disables Talos' external service discovery registry 
 The easiest way is to use the provided deployment script:
 
 ```bash
-./scripts/deploy.sh
+cd clusters/<cluster>
+../../scripts/deploy.sh
 ```
 
 Alternatively, you can apply the plan manually:
 
 ```bash
-tofu apply -auto-approve
+tofu -chdir=out/root apply -auto-approve
 ```
 
-The deployment script automatically generates `talosconfig` and `kubeconfig` files in the project directory.
+The deployment script automatically generates `talosconfig` and `kubeconfig` under `out/` for the current cluster.
 
 **Configuring your environment for future sessions:**
 
@@ -169,15 +178,15 @@ To use the cluster with `talosctl` and `kubectl` in new shell sessions, you have
 Add these exports to your shell profile (`.bashrc`, `.zshrc`, etc.):
 
 ```bash
-export TALOSCONFIG="/path/to/pve-k8s-talos/talosconfig"
-export KUBECONFIG="/path/to/pve-k8s-talos/kubeconfig"
+export TALOSCONFIG="/path/to/pve-k8s-talos/clusters/<cluster>/out/talosconfig"
+export KUBECONFIG="/path/to/pve-k8s-talos/clusters/<cluster>/out/kubeconfig"
 ```
 
 Or set them for each session:
 
 ```bash
-export TALOSCONFIG="$(pwd)/talosconfig"
-export KUBECONFIG="$(pwd)/kubeconfig"
+export TALOSCONFIG="$(pwd)/out/talosconfig"
+export KUBECONFIG="$(pwd)/out/kubeconfig"
 ```
 
 **Option 2: With direnv (automatic, recommended if you have direnv)**
@@ -185,8 +194,8 @@ export KUBECONFIG="$(pwd)/kubeconfig"
 If you have direnv installed, add these lines to your `.envrc` file in the project directory:
 
 ```bash
-export TALOSCONFIG="$(pwd)/talosconfig"
-export KUBECONFIG="$(pwd)/kubeconfig"
+export TALOSCONFIG="$(pwd)/out/talosconfig"
+export KUBECONFIG="$(pwd)/out/kubeconfig"
 ```
 
 Then run:
@@ -324,7 +333,7 @@ rook-cephfs-replica       rook-ceph.cephfs.csi.ceph.com   Delete          Immedi
 
 ### MetalLB, NGINX ingress controller & certificate manager
 
-Define your constants in `k8s-net/constants.tf`: domain, CA organization, MetalLB pool range, and the fixed ingress IP.
+Define your constants in `clusters/<cluster>/k8s_net_constants.tf`: domain, CA organization, MetalLB pool range, and the fixed ingress IP.
 The MetalLB pool and ingress service are rendered from templates using those values.
 Do not apply `k8s-net/metallb-pool.yaml` or `k8s-net/ingress-nginx-controller.yaml` directly; OpenTofu renders them with your constants.
 
@@ -337,25 +346,25 @@ tofu -chdir=k8s-net apply -auto-approve
 
 #### Install the Root CA locally
 
-Install the generated Root CA so your browser and curl trust the `portainer.home.arpa` certificate (replace the domain if you changed it in `k8s-net/constants.tf`):
+Install the generated Root CA so your browser and curl trust the `portainer.home.arpa` certificate (replace the domain if you changed it in `k8s_net_constants.tf`):
 
 macOS:
 
 ```bash
-sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain k8s-net/certs/home.arpa.pem
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain clusters/<cluster>/certs/home.arpa.pem
 ```
 
 Linux (Debian/Ubuntu):
 
 ```bash
-sudo cp k8s-net/certs/home.arpa.pem /usr/local/share/ca-certificates/home.arpa.crt
+sudo cp clusters/<cluster>/certs/home.arpa.pem /usr/local/share/ca-certificates/home.arpa.crt
 sudo update-ca-certificates
 ```
 
 Linux (RHEL/CentOS/Fedora):
 
 ```bash
-sudo cp k8s-net/certs/home.arpa.pem /etc/pki/ca-trust/source/anchors/home.arpa.crt
+sudo cp clusters/<cluster>/certs/home.arpa.pem /etc/pki/ca-trust/source/anchors/home.arpa.crt
 sudo update-ca-trust
 ```
 
@@ -367,30 +376,31 @@ Import-Certificate -FilePath "C:\\path\\to\\certs\\home.arpa.pem" -CertStoreLoca
 
 #### Local install of root CA and /etc/hosts
 
-Use `scripts/update-local.sh` to install the root CA and manage `/etc/hosts` entries based on `k8s-net/constants.tf` and `monitoring/constants.tf`. The script does not call `sudo`, so run it with `sudo` when it needs to edit system files.
+Use `scripts/update-local.sh` to install the root CA and manage `/etc/hosts` entries based on `k8s_net_constants.tf` and `monitoring_constants.tf`. The script does not call `sudo`, so run it with `sudo` when it needs to edit system files. Run it from inside `clusters/<cluster>` and pass `--cluster <cluster>`.
 
 ```bash
-sudo ./scripts/update-local.sh --root-ca
-sudo ./scripts/update-local.sh --etc-hosts
+cd clusters/<cluster>
+sudo ../../scripts/update-local.sh --cluster <cluster> --root-ca
+sudo ../../scripts/update-local.sh --cluster <cluster> --etc-hosts
 # Or call with -a/--all to do all actions
-sudo ./scripts/update-local.sh --all
+sudo ../../scripts/update-local.sh --cluster <cluster> --all
 ```
 
 To undo those changes, just run:
 
 ```bash
-sudo ./scripts/update-local.sh --del-etc-hosts
+sudo ../../scripts/update-local.sh --cluster <cluster> --del-etc-hosts
 ```
 
 #### Portainer
 
-Portainer is installed by OpenTofu as part of `k8s-net`. Access it at (replace the domain if you changed it in `k8s-net/constants.tf`):
+Portainer is installed by OpenTofu as part of `k8s-net`. Access it at (replace the domain if you changed it in `k8s_net_constants.tf`):
 
 ```text
 https://portainer.home.arpa
 ```
 
-If you don't have internal DNS, add an `/etc/hosts` entry using `ingress_lb_ip` from `k8s-net/constants.tf`:
+If you don't have internal DNS, add an `/etc/hosts` entry using `ingress_lb_ip` from `k8s_net_constants.tf`:
 
 ```bash
 192.168.1.70 portainer.home.arpa
@@ -398,13 +408,13 @@ If you don't have internal DNS, add an `/etc/hosts` entry using `ingress_lb_ip` 
 
 #### Rook Ceph dashboard
 
-The Rook Ceph dashboard is exposed at (replace the domain if you changed it in `k8s-net/constants.tf`):
+The Rook Ceph dashboard is exposed at (replace the domain if you changed it in `k8s_net_constants.tf`):
 
 ```text
 https://ceph.home.arpa
 ```
 
-If you don't have internal DNS, add an `/etc/hosts` entry using `ingress_lb_ip` from `k8s-net/constants.tf`:
+If you don't have internal DNS, add an `/etc/hosts` entry using `ingress_lb_ip` from `k8s_net_constants.tf`:
 
 ```bash
 192.168.1.70 ceph.home.arpa
@@ -412,10 +422,10 @@ If you don't have internal DNS, add an `/etc/hosts` entry using `ingress_lb_ip` 
 
 ### Monitoring (Prometheus, Loki, Grafana)
 
-Define your constants in `monitoring/constants.tf`: domain, storage class, PVC sizes, retention settings, and image versions.
+Define your constants in `clusters/<cluster>/monitoring_constants.tf`: domain, storage class, PVC sizes, retention settings, and image versions.
 This stack also includes kube-state-metrics (requests/limits) and kubelet cAdvisor scrape for CPU/RAM usage.
 The manifests are rendered from templates using those values.
-Use the same domain as `k8s-net/constants.tf` so TLS and DNS align.
+Use the same domain as `k8s_net_constants.tf` so TLS and DNS align.
 
 To deploy the monitoring stack:
 
@@ -450,7 +460,7 @@ kubectl -n monitoring rollout restart deploy/grafana
 If you want to programmatically destroy the plan:
 
 ```bash
-tofu destroy -auto-approve -refresh=false
+tofu -chdir=out/root destroy -auto-approve -refresh=false
 ```
 
 ## Easy deployment
@@ -460,7 +470,8 @@ In order to make easier the development of this repo an utility script [`scripts
 :warning: **Use with caution** due to the VMs cluster will be removed if option `-d` or `--destroy` is passed.
 
 ```bash
-./scripts/deploy.sh
+cd clusters/<cluster>
+../../scripts/deploy.sh
 ```
 
 Run with `-h` or `--help` to see help documentation. Common options:
