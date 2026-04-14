@@ -402,7 +402,7 @@ resource "null_resource" "metallb_controller_ready" {
       kubeconfig="${abspath("${path.module}/${var.kubeconfig_path}")}"
 
       KUBECONFIG="$kubeconfig" kubectl -n metallb-system rollout status deploy/controller --timeout=${local.metallb_wait_seconds}s
-      KUBECONFIG="$kubeconfig" kubectl -n metallb-system wait --for=condition=Ready pod -l app=metallb,component=controller --timeout=${local.metallb_wait_seconds}s
+      KUBECONFIG="$kubeconfig" kubectl -n metallb-system wait --for=condition=Available deploy/controller --timeout=${local.metallb_wait_seconds}s
       KUBECONFIG="$kubeconfig" kubectl -n metallb-system get endpoints metallb-webhook-service \
         -o jsonpath='{.subsets[0].addresses[0].ip}' | grep -q '.'
 
@@ -416,7 +416,9 @@ metadata:
   namespace: metallb-system
 spec:
   addresses:
-  - ${local.metallb_pool_start}-${local.metallb_pool_end}
+  # Use an RFC 5737 TEST-NET-3 address so the readiness probe does not overlap
+  # with the real cluster pool and fail after the webhook is actually working.
+  - 203.0.113.10-203.0.113.10
 ---
 apiVersion: metallb.io/v1beta1
 kind: L2Advertisement

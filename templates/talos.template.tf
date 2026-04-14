@@ -7,6 +7,12 @@ data "talos_client_configuration" "talosconfig" {
   endpoints            = [local.controlplane_vms["__CONTROLPLANE_PRIMARY__"].ip]
 }
 
+locals {
+  # On scale-out re-applies we already have a working cluster and persisted configs
+  # under clusters/<name>/out/. Avoid rerunning bootstrap/health gates in that case.
+  cluster_already_bootstrapped = fileexists("${path.module}/../kubeconfig")
+}
+
 # Generated from templates/controlplane-data.template.tf
 __CONTROLPLANE_DATA__
 
@@ -33,23 +39,34 @@ resource "talos_machine_configuration_apply" "worker_config_apply" {
 }
 
 resource "talos_machine_bootstrap" "bootstrap" {
+  count                = local.cluster_already_bootstrapped ? 0 : 1
   depends_on           = [talos_machine_configuration_apply.controlplane_config_apply, talos_machine_configuration_apply.worker_config_apply]
   client_configuration = talos_machine_secrets.machine_secrets.client_configuration
   node                 = local.controlplane_vms["__CONTROLPLANE_PRIMARY__"].ip
 }
 
 data "talos_cluster_health" "health" {
+  count                = local.cluster_already_bootstrapped ? 0 : 1
   depends_on           = [talos_machine_configuration_apply.controlplane_config_apply, talos_machine_configuration_apply.worker_config_apply]
   client_configuration = data.talos_client_configuration.talosconfig.client_configuration
   control_plane_nodes  = [for v in local.controlplane_vms : v.ip]
   worker_nodes         = [for v in local.worker_vms : v.ip]
   endpoints            = data.talos_client_configuration.talosconfig.endpoints
+  # On scale-out runs, new workers can take a bit longer to finish all k8s checks
+  # even though the cluster is already usable. Give the provider more time here.
+  timeouts = {
+    read = "15m"
+  }
 }
 
 resource "talos_cluster_kubeconfig" "kubeconfig" {
+  count                = local.cluster_already_bootstrapped ? 0 : 1
   depends_on           = [talos_machine_bootstrap.bootstrap, data.talos_cluster_health.health]
   client_configuration = talos_machine_secrets.machine_secrets.client_configuration
   node                 = local.controlplane_vms["__CONTROLPLANE_PRIMARY__"].ip
+  timeouts = {
+    read = "5m"
+  }
 }
 
 resource "local_file" "talosconfig" {
@@ -59,7 +76,7 @@ resource "local_file" "talosconfig" {
 
 resource "local_file" "kubeconfig" {
   depends_on = [talos_cluster_kubeconfig.kubeconfig]
-  content    = resource.talos_cluster_kubeconfig.kubeconfig.kubeconfig_raw
+  content    = local.cluster_already_bootstrapped ? file("${path.module}/../kubeconfig") : resource.talos_cluster_kubeconfig.kubeconfig[0].kubeconfig_raw
   filename   = "${path.module}/../kubeconfig"
 }
 
@@ -69,6 +86,6 @@ output "talosconfig" {
 }
 
 output "kubeconfig" {
-  value     = resource.talos_cluster_kubeconfig.kubeconfig.kubeconfig_raw
+  value     = local.cluster_already_bootstrapped ? file("${path.module}/../kubeconfig") : resource.talos_cluster_kubeconfig.kubeconfig[0].kubeconfig_raw
   sensitive = true
 }
