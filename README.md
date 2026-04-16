@@ -62,6 +62,7 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
     - VM ID.
     - Resource type key (must exist in `resources.auto.tfvars`).
     - IP address.
+    - Optional `vm_tags` list (comma-separated) to append Proxmox VE tags only to that VM.
     - Optional `k8s_labels` map per VM (highest precedence).
 - `resources.auto.tfvars`
   - Resources per node type referenced by `vms.auto.tfvars`:

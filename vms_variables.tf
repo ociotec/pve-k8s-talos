@@ -29,7 +29,7 @@ variable "vms" {
     type       = string
     ip         = string
     k8s_labels = optional(map(string), {})
-    tags       = optional(string)
+    vm_tags    = optional(string)
   }))
   validation {
     condition = alltrue([
