@@ -30,6 +30,7 @@ patches/hostname-*.yaml
 patches/machine-*.yaml
 patches/qemu.yaml
 .envrc
+.codex
 .DS_Store
 kubeconfig
 talosconfig

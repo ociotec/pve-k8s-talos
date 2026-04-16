@@ -384,7 +384,7 @@ validate_disk_by_id_prefix() {
   local output
 
   if [[ -z "${prefix}" ]]; then
-    error "Missing vm.disk_by_id_prefix in vms_constants.tf." >&2
+    error "Missing vm.disk_by_id_prefix in constants.auto.tfvars." >&2
     exit 1
   fi
 
@@ -473,7 +473,7 @@ export TALOSCONFIG="${cluster_talosconfig_path}"
 export KUBECONFIG="${cluster_kubeconfig_path}"
 worker_ip="$(first_worker_ip)"
 if [[ -z "${worker_ip}" ]]; then
-  error "Failed to determine the first worker name/IP from vms_list.tf." >&2
+  error "Failed to determine the first worker name/IP from vms.auto.tfvars." >&2
   exit 1
 fi
 prefix_value="$(disk_by_id_prefix "${cluster_constants_path}")"

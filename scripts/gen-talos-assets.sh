@@ -99,19 +99,19 @@ fi
 
 if [[ ! -r "${vms_path}" ]]; then
   echo "Error: VM list not readable: ${vms_path}" >&2
-  echo "Fix: ensure vms_list.tf exists and is readable." >&2
+  echo "Fix: ensure vms.auto.tfvars exists and is readable." >&2
   exit 1
 fi
 
 if [[ ! -r "${constants_path}" ]]; then
   echo "Error: constants file not readable: ${constants_path}" >&2
-  echo "Fix: ensure vms_constants.tf exists and is readable." >&2
+  echo "Fix: ensure constants.auto.tfvars exists and is readable." >&2
   exit 1
 fi
 
 if [[ ! -r "${resources_path}" ]]; then
   echo "Error: resources file not readable: ${resources_path}" >&2
-  echo "Fix: ensure vms_resources.tf exists and is readable." >&2
+  echo "Fix: ensure resources.auto.tfvars exists and is readable." >&2
   exit 1
 fi
 
@@ -121,9 +121,9 @@ link_into_workspace "${repo_root}/main.tf" "${cluster_root_workspace}/main.tf"
 link_into_workspace "${repo_root}/providers.tf" "${cluster_root_workspace}/providers.tf"
 link_into_workspace "${repo_root}/vms_pve.tf" "${cluster_root_workspace}/vms_pve.tf"
 link_into_workspace "${repo_root}/vms_variables.tf" "${cluster_root_workspace}/vms_variables.tf"
-link_into_workspace "${cluster_constants_path}" "${cluster_root_workspace}/vms_constants.tf"
-link_into_workspace "${cluster_vms_path}" "${cluster_root_workspace}/vms_list.tf"
-link_into_workspace "${cluster_resources_path}" "${cluster_root_workspace}/vms_resources.tf"
+link_into_workspace "${cluster_constants_path}" "${cluster_root_workspace}/constants.auto.tfvars"
+link_into_workspace "${cluster_vms_path}" "${cluster_root_workspace}/vms.auto.tfvars"
+link_into_workspace "${cluster_resources_path}" "${cluster_root_workspace}/resources.auto.tfvars"
 if [[ -r "${repo_root}/.terraform.lock.hcl" ]]; then
   link_into_workspace "${repo_root}/.terraform.lock.hcl" "${cluster_root_workspace}/.terraform.lock.hcl"
 fi
@@ -165,7 +165,7 @@ if [[ ! -r "${machine_config_locals_template_path}" ]]; then
   exit 1
 fi
 
-# Read network constants from vms_constants.tf.
+# Read network constants from constants.auto.tfvars.
 net_size="$(awk -F'"' '/"net_size"/ { print $4; exit }' "${constants_path}")"
 gateway="$(awk -F'"' '/"gateway"/ { print $4; exit }' "${constants_path}")"
 dns_servers="$(awk -F'"' '/"dns_servers"/ { print $4; exit }' "${constants_path}")"
@@ -182,13 +182,13 @@ cert_files_raw="$(awk -F'"' '/"cert_files"/ { print $4; exit }' "${constants_pat
 legacy_proxy_ca_path="$(awk -F'"' '/"proxy_ca_path"/ { print $4; exit }' "${constants_path}")"
 
 if [[ -z "${net_size}" || -z "${gateway}" || -z "${dns_servers}" ]]; then
-  echo "Error: missing network constants in vms_constants.tf." >&2
+  echo "Error: missing network constants in constants.auto.tfvars." >&2
   echo "Fix: ensure net_size, gateway, dns_servers exist under var.constants[\"network\"]." >&2
   exit 1
 fi
 
 if [[ -z "${talos_version}" || -z "${talos_factory_image_id}" ]]; then
-  echo "Error: missing Talos constants in vms_constants.tf." >&2
+  echo "Error: missing Talos constants in constants.auto.tfvars." >&2
   echo "Fix: ensure version and factory_image_id exist under var.constants[\"talos\"]." >&2
   exit 1
 fi
@@ -198,7 +198,7 @@ if [[ -z "${talos_discovery_service_disabled}" ]]; then
 fi
 
 if [[ -z "${disk_by_id_prefix}" ]]; then
-  echo "Error: missing disk_by_id_prefix in vms_constants.tf." >&2
+  echo "Error: missing disk_by_id_prefix in constants.auto.tfvars." >&2
   echo "Fix: set vm.disk_by_id_prefix to match /dev/disk/by-id prefix (for example scsi-0QEMU_QEMU_HARDDISK_drive-scsi)." >&2
   exit 1
 fi
@@ -330,7 +330,7 @@ case "${talos_discovery_service_disabled,,}" in
     ;;
   *)
     echo "Error: talos.discovery_service_disabled must be \"true\" or \"false\" (got ${talos_discovery_service_disabled})." >&2
-    echo "Fix: set talos.discovery_service_disabled to \"true\" or \"false\" in vms_constants.tf." >&2
+    echo "Fix: set talos.discovery_service_disabled to \"true\" or \"false\" in constants.auto.tfvars." >&2
     exit 1
     ;;
 esac
@@ -383,7 +383,7 @@ case "${disable_ipv6,,}" in
   "false" | "0" | "no")
     ;;
   *)
-    echo "Error: invalid disable_ipv6 value in vms_constants.tf: ${disable_ipv6}" >&2
+    echo "Error: invalid disable_ipv6 value in constants.auto.tfvars: ${disable_ipv6}" >&2
     echo "Fix: set network.disable_ipv6 to true/false, 1/0, or yes/no." >&2
     exit 1
     ;;
@@ -420,7 +420,7 @@ qemu_out_path="${patch_dir}/qemu.yaml"
 printf "%s\n" "${qemu_rendered}" > "${qemu_out_path}"
 echo "wrote ${qemu_out_path}"
 
-# Parse vms_list.tf for vm names and IPs, ignoring commented lines.
+# Parse vms.auto.tfvars for VM names and IPs, ignoring commented lines.
 declare -A vm_ips
 while IFS='|' read -r name ip; do
   if [[ -z "${name}" || -z "${ip}" ]]; then
@@ -464,7 +464,7 @@ done < <(
 )
 
 if [[ ${#vm_ips[@]} -eq 0 ]]; then
-  echo "Error: no VMs found in vms_list.tf." >&2
+  echo "Error: no VMs found in vms.auto.tfvars." >&2
   echo "Fix: add VM entries or remove commented-only entries." >&2
   exit 1
 fi
@@ -677,7 +677,7 @@ if [[ ${#cert_file_paths[@]} -gt 0 ]]; then
   cert_files_section="${cert_files_section%$'\n'}"
 fi
 
-# Build VM role lists from vms_list.tf.
+# Build VM role lists from vms.auto.tfvars.
 declare -A vm_resource_types
 declare -A resource_k8s_nodes
 controlplane_names=()
@@ -896,7 +896,7 @@ while IFS='|' read -r name resource_type; do
     k8s_node=""
   fi
   if [[ -z "${k8s_node}" ]]; then
-    echo "Error: resource type '${resource_type}' is not defined in vms_resources.tf." >&2
+    echo "Error: resource type '${resource_type}' is not defined in resources.auto.tfvars." >&2
     echo "Fix: add a resources entry for '${resource_type}' with k8s_node and sizing." >&2
     exit 1
   fi
@@ -906,7 +906,7 @@ while IFS='|' read -r name resource_type; do
     worker_names+=("${name}")
   else
     echo "Error: invalid k8s_node '${k8s_node}' for resource type ${resource_type}." >&2
-    echo "Fix: set k8s_node to 'controlplane' or 'worker' in vms_resources.tf." >&2
+    echo "Fix: set k8s_node to 'controlplane' or 'worker' in resources.auto.tfvars." >&2
     exit 1
   fi
 done < <(
@@ -935,14 +935,14 @@ done < <(
 )
 
 if [[ ${#controlplane_names[@]} -eq 0 || ${#worker_names[@]} -eq 0 ]]; then
-  echo "Error: could not detect controlplane/worker VM types in vms_list.tf." >&2
+  echo "Error: could not detect controlplane/worker VM types in vms.auto.tfvars." >&2
   echo "Fix: ensure each VM block has type = \"controlplane\" or type = \"worker\"." >&2
   exit 1
 fi
 
 for name in "${!vm_ips[@]}"; do
   if [[ -z "${vm_resource_types[${name}]:-}" ]]; then
-    echo "Error: VM ${name} has no type in vms_list.tf." >&2
+    echo "Error: VM ${name} has no type in vms.auto.tfvars." >&2
     echo "Fix: add type = \"<resource-type>\" for ${name}." >&2
     exit 1
   fi
@@ -1007,7 +1007,7 @@ for name in "${!vm_ips[@]}"; do
   ip="${vm_ips[${name}]}"
   if [[ ! "${ip}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
     echo "Error: invalid IP format for ${name}: ${ip}" >&2
-    echo "Fix: set a valid IPv4 address in vms_list.tf for ${name}." >&2
+    echo "Fix: set a valid IPv4 address in vms.auto.tfvars for ${name}." >&2
     exit 1
   fi
   resource_type="${vm_resource_types[${name}]}"
@@ -1089,7 +1089,7 @@ for name in "${!vm_ips[@]}"; do
   echo "wrote ${hostname_out_path}"
 done
 
-# Remove stale patch files not present in vms_list.tf.
+# Remove stale patch files not present in vms.auto.tfvars.
 for path in "${patch_dir}"/machine-*.yaml; do
   [[ -e "${path}" ]] || continue
   base="$(basename "${path}")"
@@ -1121,7 +1121,7 @@ done
 primary_controlplane="${controlplane_names[0]}"
 if [[ -z "${primary_controlplane}" ]]; then
   echo "Error: unable to determine primary control plane VM." >&2
-  echo "Fix: ensure vms_list.tf contains at least one controlplane entry." >&2
+  echo "Fix: ensure vms.auto.tfvars contains at least one controlplane entry." >&2
   exit 1
 fi
 

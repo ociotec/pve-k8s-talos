@@ -37,7 +37,7 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
 - `.envrc`
   - This is an optional file, only proceed with this file creation if you also installed previous optional step `direnv`.
   - Define all required PVE environment variables to allow OpenTofu to access your PVE nodes, it's prererred to use API token authentication as described at sample file.
-- `vms_constants.tf`
+- `constants.auto.tfvars`
   - Talos ISO path on PVE node.
   - Optional datastore ID for VM disks and cloud-init (defaults to `local-lvm`).
   - Proxmox pool name for VM placement (leave empty to disable).
@@ -56,15 +56,15 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
   - Talos version and factory image ID (used to render `patches/qemu.yaml`).
   - Optional `talos.discovery_service_disabled` toggle (`"true"` by default) to disable Talos public discovery service.
   - Optional global `constants["k8s"]["labels"]` map applied to all k8s nodes (lowest precedence).
-- `vms_list.tf`
+- `vms.auto.tfvars`
   - Map of VMs on PVE with VM name as key:
     - PVE node.
     - VM ID.
-    - Resource type key (must exist in `vms_resources.tf`).
+    - Resource type key (must exist in `resources.auto.tfvars`).
     - IP address.
     - Optional `k8s_labels` map per VM (highest precedence).
-- `vms_resources.tf`
-  - Resources per node type referenced by `vms_list.tf`:
+- `resources.auto.tfvars`
+  - Resources per node type referenced by `vms.auto.tfvars`:
     - Count of vCPUs.
     - RAM memory in MB.
     - `k8s_node` role: `controlplane` or `worker`.
@@ -83,7 +83,7 @@ Shortcut: for a one-command install, jump to [Easy deployment](#easy-deployment)
 
 ### Generate Talos assets
 
-Whenever you change `vms_list.tf`, `vms_constants.tf`, or `patches/machine.template.yaml`, regenerate the Talos inputs from inside `clusters/<cluster>`:
+Whenever you change `vms.auto.tfvars`, `constants.auto.tfvars`, or `patches/machine.template.yaml`, regenerate the Talos inputs from inside `clusters/<cluster>`:
 
 ```bash
 ../../scripts/gen-talos-assets.sh --cluster <cluster>
@@ -100,7 +100,7 @@ This script:
 - Renders per-VM machine patches under `out/root/patches/machine-*.yaml`
 - Optionally injects Talos proxy settings and a generated `no_proxy` list derived from your VM/network/constants files
 - Renders Talos public discovery service as disabled by default, unless overridden in `talos.discovery_service_disabled`
-- Merges node labels with precedence: `vms_constants.tf` (`constants["k8s"]["labels"]`) < `vms_resources.tf` (`k8s_labels`) < `vms_list.tf` (`k8s_labels`)
+- Merges node labels with precedence: `constants.auto.tfvars` (`constants["k8s"]["labels"]`) < `resources.auto.tfvars` (`k8s_labels`) < `vms.auto.tfvars` (`k8s_labels`)
 - Removes stale patch files for deleted VMs
 - Generates `out/root/talos.tf` from several templates:
   - [`templates/talos.template.tf`](templates/talos.template.tf) main Talos template.
@@ -129,12 +129,12 @@ Set `vm.disk_by_id_prefix` to the part before the index (`scsi-0QEMU_QEMU_HARDDI
 
 ### Corporate proxy
 
-If your Talos nodes must reach the internet through a company proxy, set `network.proxy_url` in `vms_constants.tf`.
+If your Talos nodes must reach the internet through a company proxy, set `network.proxy_url` in `constants.auto.tfvars`.
 The asset generator renders that value into Talos `machine.env.http_proxy` and `machine.env.https_proxy`, and builds `no_proxy` from:
 
 - `localhost`, `127.0.0.1`, `::1`
 - the local subnet derived from `network.gateway` + `network.net_size`
-- all VM hostnames and IPs from `vms_list.tf`
+- all VM hostnames and IPs from `vms.auto.tfvars`
 - Kubernetes internal names such as `kubernetes.default.svc` and `.svc.cluster.local`
 - ingress hostnames and ingress IP from `k8s_net_constants.tf` when present
 - monitoring ingress hostnames from `monitoring_constants.tf` when present
