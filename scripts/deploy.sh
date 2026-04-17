@@ -220,6 +220,9 @@ prepare_rook_workspaces() {
 
 prepare_root_workspace() {
   mkdir -p "${cluster_out_dir}"
+  reset_workspace_file "${cluster_root_workspace}/vms_constants.tf"
+  reset_workspace_file "${cluster_root_workspace}/vms_list.tf"
+  reset_workspace_file "${cluster_root_workspace}/vms_resources.tf"
   if [[ -d "${repo_root}/.terraform" ]]; then
     link_into_workspace "${repo_root}/.terraform" "${cluster_root_workspace}/.terraform"
   fi

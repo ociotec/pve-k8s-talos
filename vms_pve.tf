@@ -23,7 +23,7 @@ resource "proxmox_virtual_environment_vm" "create_pve_vms" {
     [var.resources[each.value.type].k8s_node, each.value.type],
     local.extra_vm_tags,
     [
-      for tag in split(",", try(each.value.vm_tags, "")) :
+      for tag in split(",", try(each.value.vm_tags != null ? each.value.vm_tags : "", "")) :
       trimspace(tag)
       if trimspace(tag) != ""
     ]

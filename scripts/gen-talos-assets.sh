@@ -117,6 +117,11 @@ fi
 
 mkdir -p "${cluster_out_dir}" "${cluster_root_workspace}" "${patch_dir}"
 
+# Remove legacy workspace links left from the old variable-file layout.
+reset_workspace_file "${cluster_root_workspace}/vms_constants.tf"
+reset_workspace_file "${cluster_root_workspace}/vms_list.tf"
+reset_workspace_file "${cluster_root_workspace}/vms_resources.tf"
+
 link_into_workspace "${repo_root}/main.tf" "${cluster_root_workspace}/main.tf"
 link_into_workspace "${repo_root}/providers.tf" "${cluster_root_workspace}/providers.tf"
 link_into_workspace "${repo_root}/vms_pve.tf" "${cluster_root_workspace}/vms_pve.tf"
