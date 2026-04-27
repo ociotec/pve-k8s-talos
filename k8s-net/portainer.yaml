@@ -165,7 +165,7 @@ metadata:
   name: portainer-cert
   namespace: portainer
 spec:
-  secretName: portainer-tls
+  secretName: ${portainer_tls_secret_name}
   issuerRef:
     name: root-ca
     kind: ClusterIssuer
@@ -184,7 +184,7 @@ spec:
   tls:
     - hosts:
         - ${portainer_hostname}
-      secretName: portainer-tls
+      secretName: ${portainer_tls_secret_name}
   rules:
     - host: ${portainer_hostname}
       http:

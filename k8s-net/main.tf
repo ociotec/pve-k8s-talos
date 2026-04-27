@@ -25,12 +25,6 @@ variable "kubeconfig_path" {
   description = "Path to the kubeconfig file."
 }
 
-variable "skip_portainer" {
-  type        = bool
-  default     = false
-  description = "Skip Portainer deployment."
-}
-
 variable "skip_ceph" {
   type        = bool
   default     = false
@@ -42,6 +36,7 @@ provider "kubernetes" {
 }
 
 locals {
+  constants_source = file("${path.module}/constants.tf")
   cert_manager = [
     for doc in split("\n---\n", file("${path.module}/cert-manager.yaml")) :
     yamldecode(doc)
@@ -99,65 +94,79 @@ locals {
     for m in local.ingress_nginx : m
     if try(m.kind, "") != "Namespace"
   ]
-  portainer = [
-    for doc in split("\n---\n", templatefile("${path.module}/portainer.yaml", {
-      portainer_hostname = local.portainer_hostname
-      portainer_image    = local.portainer_image_tag
-      portainer_storage  = local.portainer_storage_class
-      portainer_size     = local.portainer_pvc_size
-    })) :
-    yamldecode(doc)
-    if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
-  ]
-  rook_dashboard = [
-    for doc in split("\n---\n", templatefile("${path.module}/rook-ceph-dashboard-ingress.yaml", {
-      ceph_hostname = local.ceph_hostname
-    })) :
-    yamldecode(doc)
-    if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
-  ]
-  portainer_namespace = [
-    for m in local.portainer : m
-    if try(m.kind, "") == "Namespace" && !var.skip_portainer
-  ]
-  portainer_other = [
-    for m in local.portainer : m
-    if try(m.kind, "") != "Namespace" && !var.skip_portainer
-  ]
+  root_ca_crt_path    = local.root_ca_crt
+  root_ca_key_path    = can(regex("(?m)^\\s*root_ca_key\\s*=\\s*\"([^\"]*)\"", local.constants_source)[0]) ? regex("(?m)^\\s*root_ca_key\\s*=\\s*\"([^\"]*)\"", local.constants_source)[0] : ""
+  root_ca_crt_content = try(file(local.root_ca_crt_path), "")
+  root_ca_key_content = try(file(local.root_ca_key_path), "")
+  root_ca_common_name_value = can(regex("(?m)^\\s*root_ca_common_name\\s*=\\s*\"([^\"]*)\"", local.constants_source)[0]) ? regex("(?m)^\\s*root_ca_common_name\\s*=\\s*\"([^\"]*)\"", local.constants_source)[0] : local.domain
+  root_ca_organization_value = can(regex("(?m)^\\s*root_ca_organization\\s*=\\s*\"([^\"]*)\"", local.constants_source)[0]) ? regex("(?m)^\\s*root_ca_organization\\s*=\\s*\"([^\"]*)\"", local.constants_source)[0] : "Generated local CA"
+  root_ca_validity_hours_value = can(regex("(?m)^\\s*root_ca_validity_hours\\s*=\\s*([0-9]+)", local.constants_source)[0]) ? tonumber(regex("(?m)^\\s*root_ca_validity_hours\\s*=\\s*([0-9]+)", local.constants_source)[0]) : 876000
 
-  root_ca_crt_content = try(file(local.root_ca_crt), "")
-  root_ca_key_content = try(file(local.root_ca_key), "")
+  root_ca_has_crt = local.root_ca_crt_path != "" && trimspace(local.root_ca_crt_content) != ""
+  root_ca_has_key = local.root_ca_key_path != "" && trimspace(local.root_ca_key_content) != ""
 
-  root_ca_has_crt = local.root_ca_crt != "" && trimspace(local.root_ca_crt_content) != ""
-  root_ca_has_key = local.root_ca_key != "" && trimspace(local.root_ca_key_content) != ""
-
-  root_ca_use_external = local.root_ca_has_crt && local.root_ca_has_key
-  root_ca_external_ok  = local.root_ca_has_crt == local.root_ca_has_key
-  root_ca_cert_pem     = local.root_ca_use_external ? local.root_ca_crt_content : tls_self_signed_cert.cert_manager_ca[0].cert_pem
-  root_ca_key_pem      = local.root_ca_use_external ? local.root_ca_key_content : tls_private_key.cert_manager_ca[0].private_key_pem
+  root_ca_use_external = local.tls_source == "ca_issuer" && local.root_ca_has_crt && local.root_ca_has_key
+  root_ca_external_ok = local.tls_source == "ca_issuer" ? local.root_ca_has_crt == local.root_ca_has_key : (
+    local.root_ca_has_crt && !local.root_ca_has_key
+  )
+  root_ca_cert_pem = local.tls_source == "ca_issuer" ? (
+    local.root_ca_use_external ? local.root_ca_crt_content : tls_self_signed_cert.cert_manager_ca[0].cert_pem
+  ) : ""
+  root_ca_key_pem = local.tls_source == "ca_issuer" ? (
+    local.root_ca_use_external ? local.root_ca_key_content : tls_private_key.cert_manager_ca[0].private_key_pem
+  ) : ""
 
   cert_manager_wait_seconds = 120
   metallb_wait_seconds      = 120
 }
 
 moved {
-  from = local_file.cert_manager_ca_cert[0]
-  to   = local_file.cert_manager_ca_cert
+  from = local_file.cert_manager_ca_cert
+  to   = local_file.cert_manager_ca_cert[0]
 }
 
 moved {
-  from = local_file.cert_manager_ca_key[0]
-  to   = local_file.cert_manager_ca_key
+  from = local_file.cert_manager_ca_key
+  to   = local_file.cert_manager_ca_key[0]
+}
+
+moved {
+  from = tls_private_key.cert_manager_ca
+  to   = tls_private_key.cert_manager_ca[0]
+}
+
+moved {
+  from = tls_self_signed_cert.cert_manager_ca
+  to   = tls_self_signed_cert.cert_manager_ca[0]
+}
+
+moved {
+  from = kubernetes_secret_v1.cert_manager_ca
+  to   = kubernetes_secret_v1.cert_manager_ca[0]
+}
+
+moved {
+  from = kubernetes_manifest.cert_manager_clusterissuer
+  to   = kubernetes_manifest.cert_manager_clusterissuer[0]
 }
 
 check "root_ca_files" {
   assert {
     condition = local.root_ca_external_ok
     error_message = format(
-      "root_ca_crt and root_ca_key must either both exist with content or both be missing/empty. root_ca_crt=%q root_ca_key=%q",
-      local.root_ca_crt,
-      local.root_ca_key
+      local.tls_source == "ca_issuer"
+      ? "For tls_source=ca_issuer, root_ca_crt and root_ca_key must either both exist with content or both be missing/empty. root_ca_crt=%q root_ca_key=%q"
+      : "For tls_source=preissued, root_ca_crt must exist with content and root_ca_key must be missing/empty. root_ca_crt=%q root_ca_key=%q",
+      local.root_ca_crt_path,
+      local.root_ca_key_path
     )
+  }
+}
+
+check "tls_source_valid" {
+  assert {
+    condition     = contains(["ca_issuer", "preissued"], local.tls_source)
+    error_message = format("tls_source must be \"ca_issuer\" or \"preissued\", got %q", local.tls_source)
   }
 }
 
@@ -228,57 +237,21 @@ resource "null_resource" "ingress_nginx_webhook_ready" {
   }
 }
 
-resource "kubernetes_manifest" "portainer_namespace" {
-  for_each   = { for i, m in local.portainer_namespace : i => m }
-  manifest   = each.value
-  depends_on = [kubernetes_manifest.ingress_nginx]
-}
-
-resource "kubernetes_manifest" "portainer" {
-  for_each = { for i, m in local.portainer_other : i => m }
-  manifest = each.value
-  computed_fields = [
-    "metadata.labels",
-    "spec.externalTrafficPolicy",
-    "spec.template.spec.nodeSelector",
-  ]
-  depends_on = [
-    kubernetes_manifest.portainer_namespace,
-    null_resource.ingress_nginx_webhook_ready,
-    kubernetes_manifest.cert_manager_clusterissuer,
-  ]
-}
-
-resource "kubernetes_manifest" "rook_dashboard" {
-  for_each = {
-    for i, m in local.rook_dashboard : i => m
-    if !var.skip_ceph
-  }
-  manifest = each.value
-  computed_fields = [
-    "metadata.labels",
-  ]
-  depends_on = [
-    null_resource.ingress_nginx_webhook_ready,
-    kubernetes_manifest.cert_manager_clusterissuer,
-  ]
-}
-
 resource "tls_private_key" "cert_manager_ca" {
-  count     = local.root_ca_use_external ? 0 : 1
+  count     = local.tls_source == "ca_issuer" && !local.root_ca_use_external ? 1 : 0
   algorithm = "RSA"
   rsa_bits  = 4096
 }
 
 resource "tls_self_signed_cert" "cert_manager_ca" {
-  count                 = local.root_ca_use_external ? 0 : 1
+  count                 = local.tls_source == "ca_issuer" && !local.root_ca_use_external ? 1 : 0
   private_key_pem       = tls_private_key.cert_manager_ca[0].private_key_pem
   is_ca_certificate     = true
-  validity_period_hours = local.root_ca_validity_hours
+  validity_period_hours = local.root_ca_validity_hours_value
 
   subject {
-    common_name  = local.root_ca_common_name
-    organization = local.root_ca_organization
+    common_name  = local.root_ca_common_name_value
+    organization = local.root_ca_organization_value
   }
 
   allowed_uses = [
@@ -292,7 +265,8 @@ resource "tls_self_signed_cert" "cert_manager_ca" {
 }
 
 resource "local_file" "cert_manager_ca_cert" {
-  filename        = local.root_ca_crt
+  count           = local.tls_source == "ca_issuer" ? 1 : 0
+  filename        = local.root_ca_crt_path
   content         = local.root_ca_cert_pem
   file_permission = "0644"
   lifecycle {
@@ -301,7 +275,8 @@ resource "local_file" "cert_manager_ca_cert" {
 }
 
 resource "local_file" "cert_manager_ca_key" {
-  filename        = local.root_ca_key
+  count           = local.tls_source == "ca_issuer" ? 1 : 0
+  filename        = local.root_ca_key_path
   content         = local.root_ca_key_pem
   file_permission = "0600"
   lifecycle {
@@ -310,6 +285,8 @@ resource "local_file" "cert_manager_ca_key" {
 }
 
 resource "kubernetes_secret_v1" "cert_manager_ca" {
+  count = local.tls_source == "ca_issuer" ? 1 : 0
+
   metadata {
     name      = "cert-manager-root-ca"
     namespace = "cert-manager"
@@ -326,6 +303,8 @@ resource "kubernetes_secret_v1" "cert_manager_ca" {
 }
 
 resource "kubernetes_manifest" "cert_manager_clusterissuer" {
+  count = local.tls_source == "ca_issuer" ? 1 : 0
+
   manifest = {
     apiVersion = "cert-manager.io/v1"
     kind       = "ClusterIssuer"
@@ -334,7 +313,7 @@ resource "kubernetes_manifest" "cert_manager_clusterissuer" {
     }
     spec = {
       ca = {
-        secretName = kubernetes_secret_v1.cert_manager_ca.metadata[0].name
+        secretName = kubernetes_secret_v1.cert_manager_ca[0].metadata[0].name
       }
     }
   }
@@ -344,16 +323,6 @@ resource "kubernetes_manifest" "cert_manager_clusterissuer" {
     kubernetes_secret_v1.cert_manager_ca,
     null_resource.cert_manager_webhook_ready,
   ]
-}
-
-output "portainer_url" {
-  description = "Portainer HTTPS URL."
-  value       = var.skip_portainer ? null : "https://${local.portainer_hostname}"
-}
-
-output "rook_ceph_dashboard_url" {
-  description = "Rook Ceph dashboard HTTPS URL."
-  value       = "https://${local.ceph_hostname}"
 }
 
 resource "null_resource" "cert_manager_webhook_ready" {

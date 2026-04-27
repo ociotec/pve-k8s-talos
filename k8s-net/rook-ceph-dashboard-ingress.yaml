@@ -4,7 +4,7 @@ metadata:
   name: rook-ceph-dashboard-cert
   namespace: rook-ceph
 spec:
-  secretName: rook-ceph-dashboard-tls
+  secretName: ${ceph_tls_secret_name}
   issuerRef:
     name: root-ca
     kind: ClusterIssuer
@@ -24,7 +24,7 @@ spec:
   tls:
     - hosts:
         - ${ceph_hostname}
-      secretName: rook-ceph-dashboard-tls
+      secretName: ${ceph_tls_secret_name}
   rules:
     - host: ${ceph_hostname}
       http:

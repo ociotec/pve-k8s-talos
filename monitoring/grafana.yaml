@@ -128,7 +128,7 @@ metadata:
   name: grafana-cert
   namespace: monitoring
 spec:
-  secretName: grafana-tls
+  secretName: ${grafana_tls_secret_name}
   issuerRef:
     name: root-ca
     kind: ClusterIssuer
@@ -147,7 +147,7 @@ spec:
   tls:
     - hosts:
         - ${grafana_hostname}
-      secretName: grafana-tls
+      secretName: ${grafana_tls_secret_name}
   rules:
     - host: ${grafana_hostname}
       http:

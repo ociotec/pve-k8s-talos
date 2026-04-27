@@ -235,7 +235,7 @@ metadata:
   name: prometheus-cert
   namespace: monitoring
 spec:
-  secretName: prometheus-tls
+  secretName: ${prometheus_tls_secret_name}
   issuerRef:
     name: root-ca
     kind: ClusterIssuer
@@ -254,7 +254,7 @@ spec:
   tls:
     - hosts:
         - ${prometheus_hostname}
-      secretName: prometheus-tls
+      secretName: ${prometheus_tls_secret_name}
   rules:
     - host: ${prometheus_hostname}
       http:

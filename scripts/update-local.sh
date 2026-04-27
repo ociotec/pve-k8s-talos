@@ -113,6 +113,24 @@ write_hosts_without_block() {
   ' "${hosts_file}" > "${dest}"
 }
 
+resolve_cluster_path() {
+  local raw_path="$1"
+
+  if [[ -z "${raw_path}" ]]; then
+    printf "%s" ""
+    return 0
+  fi
+
+  case "${raw_path}" in
+    /*)
+      printf "%s" "${raw_path}"
+      ;;
+    *)
+      printf "%s" "${cluster_dir}/${raw_path#./}"
+      ;;
+  esac
+}
+
 if [[ "${install_root_ca}" == "true" ]]; then
   require_cmd awk
   require_cmd cp
@@ -130,11 +148,23 @@ if [[ "${install_root_ca}" == "true" ]]; then
     exit 1
   fi
 
-  cert_path="${cluster_certs_dir}/${domain}.pem"
+  raw_cert_path="$(awk -F'"' '/^[[:space:]]*root_ca_crt[[:space:]]*=/{print $2; exit}' "${constants_path}")"
+  if [[ -z "${raw_cert_path}" ]]; then
+    error "Failed to parse root_ca_crt from ${constants_path}."
+    exit 1
+  fi
+
+  cert_path="$(resolve_cluster_path "${raw_cert_path}")"
   if [[ ! -r "${cert_path}" ]]; then
     error "Root CA not found: ${cert_path}"
     error "Generate it by applying k8s-net for cluster ${cluster_name} first."
     exit 1
+  fi
+
+  cert_filename="$(basename "${cert_path}")"
+  cert_stem="${cert_filename%.*}"
+  if [[ -z "${cert_stem}" || "${cert_stem}" == "${cert_filename}" ]]; then
+    cert_stem="${domain}"
   fi
 
   require_root
@@ -149,11 +179,11 @@ if [[ "${install_root_ca}" == "true" ]]; then
     Linux)
       if command -v update-ca-certificates >/dev/null 2>&1; then
         message "Installing Root CA on Debian/Ubuntu..."
-        cp "${cert_path}" "/usr/local/share/ca-certificates/${domain}.crt"
+        cp "${cert_path}" "/usr/local/share/ca-certificates/${cert_stem}.crt"
         update-ca-certificates
       elif command -v update-ca-trust >/dev/null 2>&1; then
         message "Installing Root CA on RHEL/Fedora/CentOS..."
-        cp "${cert_path}" "/etc/pki/ca-trust/source/anchors/${domain}.crt"
+        cp "${cert_path}" "/etc/pki/ca-trust/source/anchors/${cert_stem}.crt"
         update-ca-trust
       else
         error "Unsupported Linux distro: update-ca-certificates/update-ca-trust not found."

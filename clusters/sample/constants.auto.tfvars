@@ -30,7 +30,8 @@ constants = {
     # localhost, node IPs, local subnet, k8s service names, and ingress hostnames.
     "no_proxy_extra"     = ""
     # Optional comma-separated PEM certificate paths appended to Talos trust roots.
-    # Useful for TLS-intercepting proxy CAs and any other internal/root certificates.
+    # Use this for extra CAs such as TLS-intercepting proxy certificates.
+    # The main cluster root CA should be set with root_ca_crt in k8s_net_constants.tf.
     # Example: "./certs/company-proxy-ca.pem,./certs/internal-root-ca.pem"
     "cert_files"         = ""
     # Proxmox bridge device name (example: vmbr0).

@@ -24,8 +24,8 @@ Options:
   -v, --verbose           Show all command output (do not silence tofu/kubectl).
   -g, --debug             Enable shell tracing + verbose output (sets TF_LOG=DEBUG).
   -c, --skip-ceph         Skip all Rook Ceph steps (operator, cluster, dashboard, CSI).
-  -n, --skip-k8s-net      Skip k8s networking and ingress (k8s-net) steps (ingress, MetalLB, cert-manager, Portainer).
-  -p, --skip-portainer    Skip Portainer deployment (only if -n/--skip-k8s-net is not used).
+  -n, --skip-k8s-net      Skip k8s networking and ingress (k8s-net) steps (ingress, MetalLB, cert-manager).
+  -p, --skip-portainer    Skip Portainer deployment (only if monitoring is deployed).
   -m, --skip-monitoring   Skip monitoring stack (Prometheus, Loki, Grafana).
   -h, --help              Show this help message.
 USAGE
@@ -152,8 +152,6 @@ prepare_k8s_net_workspace() {
   link_into_workspace "${repo_root}/k8s-net/ingress-nginx-controller.yaml" "${workspace}/ingress-nginx-controller.yaml"
   link_into_workspace "${repo_root}/k8s-net/metallb-native.yaml" "${workspace}/metallb-native.yaml"
   link_into_workspace "${repo_root}/k8s-net/metallb-pool.yaml" "${workspace}/metallb-pool.yaml"
-  link_into_workspace "${repo_root}/k8s-net/portainer.yaml" "${workspace}/portainer.yaml"
-  link_into_workspace "${repo_root}/k8s-net/rook-ceph-dashboard-ingress.yaml" "${workspace}/rook-ceph-dashboard-ingress.yaml"
   link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/constants.tf"
   link_into_workspace "${cluster_certs_dir}" "${workspace}/certs"
   if [[ -r "${repo_root}/k8s-net/.terraform.lock.hcl" ]]; then
@@ -165,12 +163,15 @@ prepare_monitoring_workspace() {
   local workspace="${cluster_monitoring_workspace}"
 
   require_cluster_file "${cluster_monitoring_constants_path}" "monitoring constants"
-  mkdir -p "${workspace}"
+  mkdir -p "${workspace}" "${cluster_certs_dir}"
   if [[ -d "${repo_root}/monitoring/.terraform" ]]; then
     link_into_workspace "${repo_root}/monitoring/.terraform" "${workspace}/.terraform"
   fi
   link_into_workspace "${repo_root}/monitoring/main.tf" "${workspace}/main.tf"
   link_into_workspace "${cluster_monitoring_constants_path}" "${workspace}/constants.tf"
+  link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/k8s_net_constants.tf"
+  link_into_workspace "${cluster_certs_dir}" "${workspace}/certs"
+  link_into_workspace "${repo_root}/k8s-net/portainer.yaml" "${workspace}/portainer.yaml"
   link_into_workspace "${repo_root}/monitoring/namespace.yaml" "${workspace}/namespace.yaml"
   link_into_workspace "${repo_root}/monitoring/prometheus.yaml" "${workspace}/prometheus.yaml"
   link_into_workspace "${repo_root}/monitoring/grafana.yaml" "${workspace}/grafana.yaml"
@@ -203,6 +204,9 @@ prepare_rook_workspaces() {
   link_into_workspace "${repo_root}/rook/01-crds-common-operator/main.tf" "${cluster_rook_01_workspace}/main.tf"
   link_into_workspace "${repo_root}/rook/02-cluster/main.tf" "${cluster_rook_02_workspace}/main.tf"
   link_into_workspace "${repo_root}/rook/03-dashboard/main.tf" "${cluster_rook_03_workspace}/main.tf"
+  link_into_workspace "${repo_root}/k8s-net/rook-ceph-dashboard-ingress.yaml" "${cluster_rook_03_workspace}/rook-ceph-dashboard-ingress.yaml"
+  link_into_workspace "${cluster_k8s_net_constants_path}" "${cluster_rook_03_workspace}/k8s_net_constants.tf"
+  link_into_workspace "${cluster_certs_dir}" "${cluster_rook_03_workspace}/certs"
   link_into_workspace "${repo_root}/rook/04-csi/main.tf" "${cluster_rook_04_workspace}/main.tf"
   if [[ -r "${repo_root}/rook/01-crds-common-operator/.terraform.lock.hcl" ]]; then
     link_into_workspace "${repo_root}/rook/01-crds-common-operator/.terraform.lock.hcl" "${cluster_rook_01_workspace}/.terraform.lock.hcl"
@@ -508,13 +512,62 @@ else
   run tofu -chdir="${cluster_rook_04_workspace}" apply -auto-approve
   kubectl -n rook-ceph get storageclasses.storage.k8s.io
 
-  message "Deploying Rook Ceph dashboard..."
+fi
+
+if [[ "${skip_k8s_net}" == "true" ]]; then
+  message "Skipping k8s networking and ingress (k8s-net) steps."
+else
+  prepare_k8s_net_workspace
+  message "Deploying k8s networking and ingress (k8s-net)..."
+  run tofu -chdir="${cluster_k8s_net_workspace}" init
+  run tofu -chdir="${cluster_k8s_net_workspace}" apply -auto-approve \
+    -target=kubernetes_manifest.cert_manager_crds \
+    -target=kubernetes_manifest.metallb_native_crds \
+    -target=local_file.cert_manager_ca_cert \
+    -target=local_file.cert_manager_ca_key \
+    -var="skip_ceph=${skip_ceph}"
+  tofu -chdir="${cluster_k8s_net_workspace}" apply -auto-approve \
+    -var="skip_ceph=${skip_ceph}" 1>/dev/null
+
+fi
+
+if [[ "${skip_k8s_net}" == "true" || "${skip_monitoring}" == "true" ]]; then
+  message "Skipping monitoring stack."
+else
+  prepare_monitoring_workspace
+  message "Deploying monitoring stack and Portainer..."
+  run tofu -chdir="${cluster_monitoring_workspace}" init
+  run tofu -chdir="${cluster_monitoring_workspace}" apply -auto-approve -var="skip_portainer=${skip_portainer}"
+  message "Restarting Grafana to reload provisioned dashboards..."
+  kubectl -n monitoring rollout restart deploy/grafana 1>/dev/null
+  if [[ "${skip_portainer}" != "true" ]]; then
+    portainer_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw portainer_url)"
+    message "Portainer URL: ${URL_FMT_START}${portainer_url}${URL_FMT_END}"
+  else
+    message "Skipping Portainer deployment."
+  fi
+  grafana_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw grafana_url)"
+  prometheus_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw prometheus_url)"
+  grafana_user="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw grafana_admin_user)"
+  grafana_password="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw grafana_admin_password)"
+  message "Grafana URL: ${URL_FMT_START}${grafana_url}${URL_FMT_END}"
+  message "Prometheus URL: ${URL_FMT_START}${prometheus_url}${URL_FMT_END}"
+  message "Grafana admin user: ${DATA_FMT_START}${grafana_user}${DATA_FMT_END}"
+  message "Grafana admin password: ${DATA_FMT_START}${grafana_password}${DATA_FMT_END}"
+fi
+
+if [[ "${skip_ceph}" == "true" || "${skip_k8s_net}" == "true" ]]; then
+  :
+else
+  message "Deploying Rook Ceph dashboard ingress..."
   run tofu -chdir="${cluster_rook_03_workspace}" init
   run tofu -chdir="${cluster_rook_03_workspace}" apply -auto-approve
   wait_for_dashboard_cert "300"
+  rook_dashboard_url="$(tofu -chdir="${cluster_rook_03_workspace}" output -raw rook_ceph_dashboard_url)"
+  message "Rook Ceph dashboard URL: ${URL_FMT_START}${rook_dashboard_url}${URL_FMT_END}"
   dashboard_nodeport=$(kubectl -n rook-ceph get svc rook-ceph-mgr-dashboard-external-https -o jsonpath='{.spec.ports[?(@.name=="dashboard")].nodePort}')
   worker_ip="$(first_worker_ip)"
-  message "Rook Ceph Dashboard is available at ${URL_FMT_START}https://${worker_ip}:${dashboard_nodeport}/${URL_FMT_END}"
+  message "Rook Ceph Dashboard is also available at ${URL_FMT_START}https://${worker_ip}:${dashboard_nodeport}/${URL_FMT_END}"
   dashboard_password=""
   for _ in {1..12}; do
     if kubectl -n rook-ceph get secret rook-ceph-dashboard-password 1>/dev/null 2>&1; then
@@ -529,55 +582,6 @@ else
     error "Dashboard password secret not found yet. Retry: kubectl -n rook-ceph get secret rook-ceph-dashboard-password"
     exit 1
   fi
-fi
-
-if [[ "${skip_k8s_net}" == "true" ]]; then
-  message "Skipping k8s networking and ingress (k8s-net) steps."
-else
-  prepare_k8s_net_workspace
-  message "Deploying k8s networking and ingress (k8s-net)..."
-  run tofu -chdir="${cluster_k8s_net_workspace}" init
-  run tofu -chdir="${cluster_k8s_net_workspace}" apply -auto-approve \
-    -target=kubernetes_manifest.cert_manager_crds \
-    -target=kubernetes_manifest.metallb_native_crds \
-    -target=local_file.cert_manager_ca_cert \
-    -target=local_file.cert_manager_ca_key \
-    -var="skip_portainer=${skip_portainer}" \
-    -var="skip_ceph=${skip_ceph}"
-  tofu -chdir="${cluster_k8s_net_workspace}" apply -auto-approve \
-    -var="skip_portainer=${skip_portainer}" \
-    -var="skip_ceph=${skip_ceph}" 1>/dev/null
-  
-  if [[ "${skip_portainer}" != "true" ]]; then
-    portainer_url="$(tofu -chdir="${cluster_k8s_net_workspace}" output -raw portainer_url)"
-    message "Portainer URL: ${URL_FMT_START}${portainer_url}${URL_FMT_END}"
-  else
-    message "Skipping Portainer deployment."
-  fi
-  
-  if [[ "${skip_ceph}" != "true" ]]; then
-    rook_dashboard_url="$(tofu -chdir="${cluster_k8s_net_workspace}" output -raw rook_ceph_dashboard_url)"
-    message "Rook Ceph dashboard URL: ${URL_FMT_START}${rook_dashboard_url}${URL_FMT_END}"
-  fi
-fi
-
-if [[ "${skip_k8s_net}" == "true" || "${skip_monitoring}" == "true" ]]; then
-  message "Skipping monitoring stack."
-else
-  prepare_monitoring_workspace
-  message "Deploying monitoring stack..."
-  run tofu -chdir="${cluster_monitoring_workspace}" init
-  run tofu -chdir="${cluster_monitoring_workspace}" apply -auto-approve
-  message "Restarting Grafana to reload provisioned dashboards..."
-  kubectl -n monitoring rollout restart deploy/grafana 1>/dev/null
-  grafana_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw grafana_url)"
-  prometheus_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw prometheus_url)"
-  grafana_user="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw grafana_admin_user)"
-  grafana_password="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw grafana_admin_password)"
-  message "Grafana URL: ${URL_FMT_START}${grafana_url}${URL_FMT_END}"
-  message "Prometheus URL: ${URL_FMT_START}${prometheus_url}${URL_FMT_END}"
-  message "Grafana admin user: ${DATA_FMT_START}${grafana_user}${DATA_FMT_END}"
-  message "Grafana admin password: ${DATA_FMT_START}${grafana_password}${DATA_FMT_END}"
 fi
 
 message "Cluster deployed successfully in $(render_elapsed "${deploy_start}")."

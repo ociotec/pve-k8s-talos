@@ -1,11 +1,16 @@
 locals {
-  k8s_net_constants = file("${path.module}/../k8s-net/constants.tf")
-  domain            = regexall("domain\\s*=\\s*\"([^\"]+)\"", local.k8s_net_constants)[0][0]
-
+  portainer_hostname  = "portainer.${local.domain}"
   grafana_hostname    = "grafana.${local.domain}"
   prometheus_hostname = "prometheus.${local.domain}"
+  portainer_tls_secret_name  = "portainer-tls"
+  grafana_tls_secret_name    = "grafana-tls"
+  prometheus_tls_secret_name = "prometheus-tls"
 
   storage_class = "rook-ceph-block-ec"
+
+  portainer_image_tag     = "2.33.6"
+  portainer_storage_class = local.storage_class
+  portainer_pvc_size      = "10Gi"
 
   grafana_storage_size    = "5Gi"
   prometheus_storage_size = "20Gi"
@@ -47,4 +52,22 @@ locals {
   kube_state_metrics_cpu_limit   = "300m"
   kube_state_metrics_mem_request = "128Mi"
   kube_state_metrics_mem_limit   = "256Mi"
+
+  tls_secrets = [
+    {
+      certificate = local.default_certificate_name
+      namespace   = "portainer"
+      secret_name = local.portainer_tls_secret_name
+    },
+    {
+      certificate = local.default_certificate_name
+      namespace   = "monitoring"
+      secret_name = local.grafana_tls_secret_name
+    },
+    {
+      certificate = local.default_certificate_name
+      namespace   = "monitoring"
+      secret_name = local.prometheus_tls_secret_name
+    },
+  ]
 }

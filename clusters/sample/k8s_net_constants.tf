@@ -1,21 +1,28 @@
 locals {
   domain                  = "home.arpa"
 
+  tls_source              = "ca_issuer"
+
+  # Public CA certificate path. When present, gen-talos-assets installs it into every
+  # Talos node as a TrustedRootsConfig. Required for "preissued".
+  root_ca_crt             = "./certs/${local.domain}.pem"
+
   root_ca_common_name     = local.domain
   root_ca_organization    = "My home local network"
   root_ca_validity_hours  = 876000 # 100 years
-  # Root CA paths. A new Root CA is generated only when the crt/key files are missing or empty.
-  root_ca_crt             = "./certs/${local.domain}.pem"
   root_ca_key             = "./certs/${local.domain}.key"
 
   metallb_pool_start      = "192.168.1.70"
   metallb_pool_end        = "192.168.1.79"
   ingress_lb_ip           = "192.168.1.70"
+  available_certificates  = {
+    wildcard_default = {
+      cert_path = "./certs/wildcard.${local.domain}.fullchain.pem"
+      key_path  = "./certs/wildcard.${local.domain}.key"
+    }
+  }
+  default_certificate_name = "wildcard_default"
 
-  portainer_hostname      = "portainer.${local.domain}"
-  ceph_hostname           = "ceph.${local.domain}"
-
-  portainer_image_tag     = "2.33.6"
-  portainer_storage_class = "rook-ceph-block-ec"
-  portainer_pvc_size      = "10Gi"
+  # available_certificates is the catalog of installable certificate/key pairs.
+  # Consumers such as monitoring or the Rook dashboard reference them by name.
 }
