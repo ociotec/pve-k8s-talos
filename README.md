@@ -2,6 +2,8 @@
 
 Automatic deployment of a k8s Talos cluster on Promox VE virtual machines with OpenTofu to create VMs infra & Talos API to create k8s cluster.
 
+For contributor and automation-agent working rules (change placement, validation discipline, provider/lockfile policy, and known OpenTofu/Kubernetes provider caveats), see [AGENTS.md](AGENTS.md).
+
 ## Infrastructure
 
 ### Install requirements
@@ -73,15 +75,10 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
     - Disks in GB with optional Talos mount points (first disk is used as root).
     - Mount points must live under `/var` (for example `/var/mnt/kafka` or `/var/lib/kafka`).
 - `k8s_net_constants.tf`
-  - `tls_source = "ca_issuer"` to let cert-manager issue ingress certificates from a CA.
-  - `tls_source = "preissued"` to load pre-generated TLS secrets from files instead of creating `Certificate` resources.
-  - `root_ca_crt` public PEM path. `gen-talos-assets.sh` installs it into every Talos node as a `TrustedRootsConfig`. Required for `preissued`; recommended for `ca_issuer` when you want Talos to trust the same CA from first boot.
-  - `root_ca_key`, `root_ca_common_name`, `root_ca_organization`, and `root_ca_validity_hours` are only used by `ca_issuer`.
-  - `available_certificates` is the shared catalog of installable certificate/key pairs, keyed by an internal name.
-  - `default_certificate_name` selects the default entry used by the Rook Ceph dashboard ingress.
+  - Domain, TLS mode, root CA path, MetalLB range, and ingress fixed IP.
+  - Certificate catalog (`available_certificates`) and default certificate entry.
 - `monitoring_constants.tf`
   - Storage class, sizes, retention, image versions, and hostnames for Prometheus, Loki, Grafana, and Portainer.
-  - It can reference `local.ceph_storage_class_names.*` from `ceph_constants.tf`.
   - `tls_secrets` maps namespaces/secret names to entries from `available_certificates`.
 - `ceph_constants.tf`
   - `ceph_mode = "internal"` to run a full Rook-managed Ceph cluster in Kubernetes.
@@ -100,25 +97,13 @@ Whenever you change `vms.auto.tfvars`, `constants.auto.tfvars`, or `patches/mach
 ../../scripts/gen-talos-assets.sh --cluster <cluster>
 ```
 
-If you deploy with skip flags and want the generated `no_proxy` list to match, pass the same flags here too, for example:
+If you deploy with skip flags and want generated assets to match, pass the same flags here too, for example:
 
 ```bash
 ../../scripts/gen-talos-assets.sh --cluster <cluster> --skip-ceph --skip-portainer --skip-monitoring
 ```
 
-This script:
-
-- Renders per-VM machine patches under `out/root/patches/machine-*.yaml`
-- Renders `out/root/patches/trusted-roots-root-ca.yaml` from `root_ca_crt` when that file is configured and readable
-- Optionally injects Talos proxy settings and a generated `no_proxy` list derived from your VM/network/constants files
-- Renders Talos public discovery service as disabled by default, unless overridden in `talos.discovery_service_disabled`
-- Merges node labels with precedence: `constants.auto.tfvars` (`constants["k8s"]["labels"]`) < `resources.auto.tfvars` (`k8s_labels`) < `vms.auto.tfvars` (`k8s_labels`)
-- Removes stale patch files for deleted VMs
-- Generates `out/root/talos.tf` from several templates:
-  - [`templates/talos.template.tf`](templates/talos.template.tf) main Talos template.
-  - [`templates/controlplane-data.template.tf`](templates/controlplane-data.template.tf) template for Talos control plane nodes configuration data.
-  - [`templates/worker-data.template.tf`](templates/worker-data.template.tf) template for Talos worker nodes configuration data.
-  - [`templates/machine-config-locals.template.tf`](templates/machine-config-locals.template.tf) just create convinient local variables for easier Talos Tofu configuration steps.
+For low-level generation behavior and contributor rules, see [AGENTS.md](AGENTS.md).
 
 ### Disk by-id prefix
 
@@ -357,6 +342,8 @@ tofu -chdir=k8s-net apply -auto-approve
 ```
 
 `deploy.sh` applies the stack in this order: `k8s-net -> ceph -> monitoring`.
+
+For implementation details on generated workspaces under `clusters/<cluster>/out/*` and validation expectations per workspace, see [AGENTS.md](AGENTS.md).
 
 #### Install the Root CA locally
 
