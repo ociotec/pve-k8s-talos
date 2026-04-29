@@ -56,6 +56,7 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
   - Optional `network.no_proxy_extra` to append custom no-proxy entries after the auto-generated localhost, local subnet, node IPs/hostnames, Kubernetes service names, and ingress hostnames.
   - Optional `network.cert_files` for extra PEM certificates appended to Talos trust roots, for example proxy interception CAs.
   - Talos version and factory image ID (used to render `patches/qemu.yaml`).
+  - Optional `talos.max_pods` (kubelet `maxPods`) to override per-node pod density. Leave empty to keep Kubernetes default (`110`).
   - Optional `talos.discovery_service_disabled` toggle (`"true"` by default) to disable Talos public discovery service.
   - Optional global `constants["k8s"]["labels"]` map applied to all k8s nodes (lowest precedence).
 - `vms.auto.tfvars`
@@ -207,7 +208,7 @@ If direnv says `.envrc is blocked`, simply run `direnv allow` to approve it.
 
 ```bash
 talosctl stats --nodes <node-ip>
-kubectl get nodes
+kubectl get nodes -o custom-columns=NAME:.metadata.name,VERSION:.status.nodeInfo.kubeletVersion,MAX_PODS:.status.capacity.pods
 ```
 
 ### Rook Ceph

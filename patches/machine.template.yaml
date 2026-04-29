@@ -21,6 +21,7 @@ machine:
     servers: [${ntp_servers_section}]
   kubelet:
     extraMounts: ${kubelet_extra_mounts_section}
+${kubelet_extra_args_section}
 cluster:
   discovery:
     registries:

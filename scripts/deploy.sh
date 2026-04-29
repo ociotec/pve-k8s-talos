@@ -425,6 +425,90 @@ disk_by_id_prefix() {
   awk -F'"' '/"disk_by_id_prefix"/ { print $4; exit }' "$1"
 }
 
+talos_max_pods() {
+  awk -F'"' '/"max_pods"/ { print $4; exit }' "$1"
+}
+
+reboot_nodes_with_pending_kubelet_max_pods() {
+  local constants_file="${1:-${cluster_constants_path}}"
+  local desired_max_pods
+  local node_rows
+  local pending_count=0
+  local pending_nodes=()
+  local pending_ips=()
+  local idx
+
+  desired_max_pods="$(talos_max_pods "${constants_file}")"
+  desired_max_pods="${desired_max_pods#"${desired_max_pods%%[![:space:]]*}"}"
+  desired_max_pods="${desired_max_pods%"${desired_max_pods##*[![:space:]]}"}"
+
+  if [[ -z "${desired_max_pods}" ]]; then
+    return 0
+  fi
+
+  if [[ ! "${desired_max_pods}" =~ ^[0-9]+$ ]]; then
+    message "warning: talos.max_pods is not numeric (${desired_max_pods}), skipping pending kubelet check."
+    return 0
+  fi
+
+  if ! command -v talosctl >/dev/null 2>&1; then
+    message "warning: talosctl is not available, skipping automatic reboot for pending kubelet max-pods."
+    return 0
+  fi
+
+  node_rows="$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.addresses[?(@.type=="InternalIP")].address}{"|"}{.status.capacity.pods}{"\n"}{end}' 2>/dev/null || true)"
+  if [[ -z "${node_rows}" ]]; then
+    message "warning: could not read node pod capacity to validate talos.max_pods propagation."
+    return 0
+  fi
+
+  while IFS='|' read -r node_name node_ip node_max_pods; do
+    if [[ -z "${node_name}" || -z "${node_ip}" || -z "${node_max_pods}" ]]; then
+      continue
+    fi
+    if [[ "${node_max_pods}" != "${desired_max_pods}" ]]; then
+      pending_count=$((pending_count + 1))
+      pending_nodes+=("${node_name}")
+      pending_ips+=("${node_ip}")
+    fi
+  done <<< "${node_rows}"
+
+  if (( pending_count == 0 )); then
+    return 0
+  fi
+
+  message "info: rebooting ${pending_count} node(s) to apply kubelet max-pods=${desired_max_pods}: ${pending_nodes[*]}"
+
+  for ((idx=0; idx<pending_count; idx++)); do
+    local node_name="${pending_nodes[idx]}"
+    local node_ip="${pending_ips[idx]}"
+    local verify_start
+
+    if ! talosctl -n "${node_ip}" reboot; then
+      error "Failed to trigger reboot on ${node_name} (${node_ip})." >&2
+      continue
+    fi
+    if ! kubectl wait --for=condition=Ready "node/${node_name}" --timeout=20m 1>/dev/null; then
+      error "Node ${node_name} did not become Ready within timeout after reboot." >&2
+      continue
+    fi
+
+    verify_start="$(date +%s)"
+    while true; do
+      local current_max_pods
+      current_max_pods="$(kubectl get node "${node_name}" -o jsonpath='{.status.capacity.pods}' 2>/dev/null || true)"
+      if [[ "${current_max_pods}" == "${desired_max_pods}" ]]; then
+        break
+      fi
+      if (( $(date +%s) - verify_start >= 300 )); then
+        error "Node ${node_name} is Ready but still reports MAX_PODS=${current_max_pods:-unknown} (expected ${desired_max_pods})." >&2
+        break
+      fi
+      sleep 5
+    done
+  done
+}
+
 validate_disk_by_id_prefix() {
   local worker_ip="$1"
   local prefix="$2"
@@ -541,8 +625,9 @@ if [[ -z "${worker_ip}" ]]; then
 fi
 prefix_value="$(disk_by_id_prefix "${cluster_constants_path}")"
 validate_disk_by_id_prefix "${worker_ip}" "${prefix_value}"
+reboot_nodes_with_pending_kubelet_max_pods "${cluster_constants_path}"
 message "k8s cluster is up and running. Current nodes:"
-kubectl get nodes
+kubectl get nodes -o custom-columns=NAME:.metadata.name,VERSION:.status.nodeInfo.kubeletVersion,MAX_PODS:.status.capacity.pods
 
 if [[ "${skip_k8s_net}" == "true" ]]; then
   message "Skipping k8s networking and ingress (k8s-net) steps."

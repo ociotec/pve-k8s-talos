@@ -180,6 +180,7 @@ disable_ipv6="$(awk -F'"' '/"disable_ipv6"/ { print $4; exit }' "${constants_pat
 talos_version="$(awk -F'"' '/"version"/ { print $4; exit }' "${constants_path}")"
 talos_factory_image_id="$(awk -F'"' '/"factory_image_id"/ { print $4; exit }' "${constants_path}")"
 talos_discovery_service_disabled="$(awk -F'"' '/"discovery_service_disabled"/ { print $4; exit }' "${constants_path}")"
+talos_max_pods="$(awk -F'"' '/"max_pods"/ { print $4; exit }' "${constants_path}")"
 disk_by_id_prefix="$(awk -F'"' '/"disk_by_id_prefix"/ { print $4; exit }' "${constants_path}")"
 proxy_url="$(awk -F'"' '/"proxy_url"/ { print $4; exit }' "${constants_path}")"
 no_proxy_extra="$(awk -F'"' '/"no_proxy_extra"/ { print $4; exit }' "${constants_path}")"
@@ -356,6 +357,7 @@ kernel_dns_servers_raw="$(trim "${kernel_dns_servers_raw}")"
 cert_files_raw="$(trim "${cert_files_raw}")"
 legacy_proxy_ca_path="$(trim "${legacy_proxy_ca_path}")"
 talos_discovery_service_disabled="$(trim "${talos_discovery_service_disabled}")"
+talos_max_pods="$(trim "${talos_max_pods}")"
 
 if [[ -n "${proxy_url}" && ! "${proxy_url}" =~ ^https?:// ]]; then
   echo "Error: network.proxy_url must start with http:// or https:// (got ${proxy_url})." >&2
@@ -372,6 +374,22 @@ case "${talos_discovery_service_disabled,,}" in
     exit 1
     ;;
 esac
+
+if [[ -n "${talos_max_pods}" ]]; then
+  if [[ ! "${talos_max_pods}" =~ ^[0-9]+$ ]]; then
+    echo "Error: talos.max_pods must be a positive integer (got ${talos_max_pods})." >&2
+    echo "Fix: set talos.max_pods to an integer under constants[\"talos\"], or leave it empty." >&2
+    exit 1
+  fi
+  if (( talos_max_pods < 1 )); then
+    echo "Error: talos.max_pods must be greater than 0 (got ${talos_max_pods})." >&2
+    echo "Fix: set talos.max_pods to a value >= 1, or leave it empty." >&2
+    exit 1
+  fi
+  if (( talos_max_pods < 110 )); then
+    echo "warning: talos.max_pods=${talos_max_pods} is lower than Kubernetes default (110)." >&2
+  fi
+fi
 
 if [[ -z "${cert_files_raw}" && -n "${legacy_proxy_ca_path}" ]]; then
   cert_files_raw="${legacy_proxy_ca_path}"
@@ -429,8 +447,8 @@ fi
 template="$(cat "${template_path}")"
 
 # Basic template sanity check.
-if [[ "${template}" != *'${ip}'* || "${template}" != *'${cidr}'* || "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${k8s_node_labels_section}'* || "${template}" != *'${proxy_env_section}'* || "${template}" != *'${cert_files_section}'* || "${template}" != *'${talos_discovery_service_disabled}'* ]]; then
-  echo "Error: template is missing required placeholders (\${ip}, \${cidr}, \${machine_disks_section}, \${kubelet_extra_mounts_section}, \${k8s_node_labels_section}, \${proxy_env_section}, \${cert_files_section}, \${talos_discovery_service_disabled})." >&2
+if [[ "${template}" != *'${ip}'* || "${template}" != *'${cidr}'* || "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${kubelet_extra_args_section}'* || "${template}" != *'${k8s_node_labels_section}'* || "${template}" != *'${proxy_env_section}'* || "${template}" != *'${cert_files_section}'* || "${template}" != *'${talos_discovery_service_disabled}'* ]]; then
+  echo "Error: template is missing required placeholders (\${ip}, \${cidr}, \${machine_disks_section}, \${kubelet_extra_mounts_section}, \${kubelet_extra_args_section}, \${k8s_node_labels_section}, \${proxy_env_section}, \${cert_files_section}, \${talos_discovery_service_disabled})." >&2
   echo "Fix: restore patches/machine.template.yaml or add the missing placeholders." >&2
   exit 1
 fi
@@ -1138,6 +1156,13 @@ for name in "${!vm_ips[@]}"; do
   else
     kubelet_extra_mounts_section=" []"
   fi
+  if [[ -n "${talos_max_pods}" ]]; then
+    kubelet_extra_args_section=$'\n'
+    kubelet_extra_args_section+=$'    extraArgs:\n'
+    kubelet_extra_args_section+=$'      max-pods: "'"${talos_max_pods}"'"'
+  else
+    kubelet_extra_args_section=""
+  fi
 
   for key in "${!resource_labels[@]}"; do
     if [[ "${key}" == "${resource_type}|"* ]]; then
@@ -1170,6 +1195,7 @@ for name in "${!vm_ips[@]}"; do
   rendered="${rendered//'${extra_kernel_args_section}'/${extra_kernel_args_section}}"
   rendered="${rendered//'${machine_disks_section}'/${machine_disks_section}}"
   rendered="${rendered//'${kubelet_extra_mounts_section}'/${kubelet_extra_mounts_section}}"
+  rendered="${rendered//'${kubelet_extra_args_section}'/${kubelet_extra_args_section}}"
   rendered="${rendered//'${k8s_node_labels_section}'/${k8s_node_labels_section}}"
   rendered="${rendered//'${proxy_env_section}'/${proxy_env_section}}"
   rendered="${rendered//'${cert_files_section}'/${cert_files_section}}"
