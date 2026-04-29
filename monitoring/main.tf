@@ -6,15 +6,15 @@ terraform {
     }
     local = {
       source  = "hashicorp/local"
-      version = ">= 2.6.0"
+      version = ">= 2.6.1"
     }
     null = {
       source  = "hashicorp/null"
-      version = ">= 3.2.2"
+      version = ">= 3.2.4"
     }
     random = {
       source  = "hashicorp/random"
-      version = ">= 3.6.0"
+      version = ">= 3.7.2"
     }
   }
 }
@@ -117,7 +117,7 @@ locals {
   ]
 
   monitoring_resources = concat(
-    var.skip_portainer ? [] : local.portainer_manifests,
+    slice(local.portainer_manifests, 0, var.skip_portainer ? 0 : length(local.portainer_manifests)),
     local.prometheus_manifests,
     local.grafana_manifests,
     local.loki_manifests,
@@ -166,7 +166,6 @@ locals {
     if try(m.kind, "") == "Namespace"
   ]
 
-  tls_secrets = try(local.tls_secrets, [])
   preissued_tls_secrets_by_target = {
     for secret in local.tls_secrets : format("%s/%s", secret.namespace, secret.secret_name) => merge(
       secret,
@@ -256,6 +255,7 @@ resource "kubernetes_manifest" "monitoring_other" {
     "metadata.annotations",
     "metadata.annotations[\"deprecated.daemonset.template.generation\"]",
     "spec.template.spec.containers[0].resources.limits.cpu",
+    "spec.template.spec.nodeSelector",
   ]
   lifecycle {
     ignore_changes = [

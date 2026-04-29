@@ -28,6 +28,11 @@ Options:
   -p, --skip-portainer    Skip Portainer deployment (only if monitoring is deployed).
   -m, --skip-monitoring   Skip monitoring stack (Prometheus, Loki, Grafana).
   -h, --help              Show this help message.
+
+Note:
+  This script does not auto-upgrade OpenTofu providers.
+  To update provider versions manually, run:
+    tofu -chdir=<workspace> init -upgrade
 USAGE
 }
 
@@ -139,6 +144,28 @@ run_gen_talos_assets() {
   fi
 }
 
+run_tofu_init() {
+  local workspace="$1"
+  local init_log
+
+  message "Initializing OpenTofu providers in ${workspace}..."
+  if [[ "${verbose}" == "true" ]]; then
+    tofu -chdir="${workspace}" init
+    return 0
+  fi
+
+  init_log="$(mktemp)"
+  if tofu -chdir="${workspace}" init >"${init_log}" 2>&1; then
+    rm -f "${init_log}"
+    return 0
+  fi
+
+  error "OpenTofu init failed in ${workspace}. Output:" >&2
+  cat "${init_log}" >&2
+  rm -f "${init_log}"
+  return 1
+}
+
 prepare_k8s_net_workspace() {
   local workspace="${cluster_k8s_net_workspace}"
 
@@ -163,6 +190,7 @@ prepare_monitoring_workspace() {
   local workspace="${cluster_monitoring_workspace}"
 
   require_cluster_file "${cluster_monitoring_constants_path}" "monitoring constants"
+  require_cluster_file "${cluster_ceph_constants_path}" "ceph constants"
   mkdir -p "${workspace}" "${cluster_certs_dir}"
   if [[ -d "${repo_root}/monitoring/.terraform" ]]; then
     link_into_workspace "${repo_root}/monitoring/.terraform" "${workspace}/.terraform"
@@ -170,6 +198,7 @@ prepare_monitoring_workspace() {
   link_into_workspace "${repo_root}/monitoring/main.tf" "${workspace}/main.tf"
   link_into_workspace "${cluster_monitoring_constants_path}" "${workspace}/constants.tf"
   link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/k8s_net_constants.tf"
+  link_into_workspace "${cluster_ceph_constants_path}" "${workspace}/ceph_constants.tf"
   link_into_workspace "${cluster_certs_dir}" "${workspace}/certs"
   link_into_workspace "${repo_root}/k8s-net/portainer.yaml" "${workspace}/portainer.yaml"
   link_into_workspace "${repo_root}/monitoring/namespace.yaml" "${workspace}/namespace.yaml"
@@ -187,6 +216,7 @@ prepare_monitoring_workspace() {
 prepare_rook_workspaces() {
   local rook_root="${cluster_out_dir}/rook"
 
+  require_cluster_file "${cluster_ceph_constants_path}" "ceph constants"
   mkdir -p "${rook_root}" "${cluster_rook_01_workspace}" "${cluster_rook_02_workspace}" "${cluster_rook_03_workspace}" "${cluster_rook_04_workspace}"
   link_into_workspace "${repo_root}/rook/manifests" "${rook_root}/manifests"
   if [[ -d "${repo_root}/rook/01-crds-common-operator/.terraform" ]]; then
@@ -203,11 +233,16 @@ prepare_rook_workspaces() {
   fi
   link_into_workspace "${repo_root}/rook/01-crds-common-operator/main.tf" "${cluster_rook_01_workspace}/main.tf"
   link_into_workspace "${repo_root}/rook/02-cluster/main.tf" "${cluster_rook_02_workspace}/main.tf"
+  link_into_workspace "${cluster_ceph_constants_path}" "${cluster_rook_02_workspace}/ceph_constants.tf"
+  link_into_workspace "${cluster_k8s_net_constants_path}" "${cluster_rook_02_workspace}/k8s_net_constants.tf"
+  link_into_workspace "${repo_root}/scripts/pve-ceph-external.sh" "${cluster_rook_02_workspace}/pve-ceph-external.sh"
   link_into_workspace "${repo_root}/rook/03-dashboard/main.tf" "${cluster_rook_03_workspace}/main.tf"
   link_into_workspace "${repo_root}/k8s-net/rook-ceph-dashboard-ingress.yaml" "${cluster_rook_03_workspace}/rook-ceph-dashboard-ingress.yaml"
   link_into_workspace "${cluster_k8s_net_constants_path}" "${cluster_rook_03_workspace}/k8s_net_constants.tf"
+  link_into_workspace "${cluster_ceph_constants_path}" "${cluster_rook_03_workspace}/ceph_constants.tf"
   link_into_workspace "${cluster_certs_dir}" "${cluster_rook_03_workspace}/certs"
   link_into_workspace "${repo_root}/rook/04-csi/main.tf" "${cluster_rook_04_workspace}/main.tf"
+  link_into_workspace "${cluster_ceph_constants_path}" "${cluster_rook_04_workspace}/ceph_constants.tf"
   if [[ -r "${repo_root}/rook/01-crds-common-operator/.terraform.lock.hcl" ]]; then
     link_into_workspace "${repo_root}/rook/01-crds-common-operator/.terraform.lock.hcl" "${cluster_rook_01_workspace}/.terraform.lock.hcl"
   fi
@@ -281,7 +316,8 @@ wait_for_pods_ready() {
 wait_for_cephcluster_ready() {
   local namespace="$1"
   local name="$2"
-  local timeout_seconds="${3:-900}"
+  local ceph_mode="${3:-internal}"
+  local timeout_seconds="${4:-900}"
   local start
   local phase
   local health
@@ -291,7 +327,13 @@ wait_for_cephcluster_ready() {
     echo -n "."
     phase="$(kubectl -n "${namespace}" get cephcluster "${name}" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
     health="$(kubectl -n "${namespace}" get cephcluster "${name}" -o jsonpath='{.status.ceph.health}' 2>/dev/null || true)"
-    if [[ "${phase}" == "Ready" && "${health}" == "HEALTH_OK" ]]; then
+    if [[ "${ceph_mode}" == "external" ]]; then
+      if [[ "${phase}" == "Connected" && "${health}" != "HEALTH_ERR" && -n "${health}" ]]; then
+        echo
+        message "CephCluster ${namespace}/${name} is Connected (phase=${phase}, health=${health})."
+        break
+      fi
+    elif [[ "${phase}" == "Ready" && "${health}" == "HEALTH_OK" ]]; then
       echo
       message "CephCluster ${namespace}/${name} is Ready (phase=Ready, health=HEALTH_OK)."
       break
@@ -420,14 +462,27 @@ validate_disk_by_id_prefix() {
   done
 }
 
+ceph_mode_from_constants() {
+  local constants_file="$1"
+  local mode
+
+  mode="$(awk -F'"' '/^[[:space:]]*ceph_mode[[:space:]]*=/{print $2; exit}' "${constants_file}")"
+  if [[ -z "${mode}" ]]; then
+    mode="internal"
+  fi
+  printf '%s\n' "${mode}"
+}
+
 deploy_start="$(start_timer)"
+message "Provider upgrades are disabled by default. Update manually when needed: tofu -chdir=<workspace> init -upgrade"
 prepare_root_workspace
 run_gen_talos_assets
-run tofu -chdir="${cluster_root_workspace}" init
+run_tofu_init "${cluster_root_workspace}"
 if [[ "${destroy_first}" == "true" ]]; then
   if state_dir_has_state "${cluster_root_workspace}"; then
     message "Regenerating Talos assets required for destroy..."
     run_gen_talos_assets
+    run_tofu_init "${cluster_root_workspace}"
     message "Destroying Talos cluster VMs..."
     run tofu -chdir="${cluster_root_workspace}" destroy -auto-approve -refresh=false
     message "Done."
@@ -452,6 +507,7 @@ fi
 
 message "Deploying the Talos cluster ${cluster_name} (PVE VMs creation, Talos cluster initialization, k8s bootstrapping)..."
 run_gen_talos_assets
+run_tofu_init "${cluster_root_workspace}"
 run tofu -chdir="${cluster_root_workspace}" apply -auto-approve
 
 if [[ ! -f "${cluster_talosconfig_path}" ]]; then
@@ -488,38 +544,12 @@ validate_disk_by_id_prefix "${worker_ip}" "${prefix_value}"
 message "k8s cluster is up and running. Current nodes:"
 kubectl get nodes
 
-if [[ "${skip_ceph}" == "true" ]]; then
-  message "Skipping Rook Ceph steps."
-else
-  ceph_phase="$(kubectl -n rook-ceph get cephcluster rook-ceph -o jsonpath='{.status.phase}' 2>/dev/null || true)"
-  if [[ "${ceph_phase}" == "Ready" ]]; then
-    message "Rook Ceph cluster already Ready; skipping operator/cluster apply."
-  else
-    prepare_rook_workspaces
-    message "Deploying Rook Ceph operator..."
-    run tofu -chdir="${cluster_rook_01_workspace}" init
-    run tofu -chdir="${cluster_rook_01_workspace}" apply -auto-approve
-    wait_for_pods_ready "rook-ceph" "rook-ceph-operator" "180s"
-
-    message "Deploying Rook Ceph cluster..."
-    run tofu -chdir="${cluster_rook_02_workspace}" init
-    run tofu -chdir="${cluster_rook_02_workspace}" apply -auto-approve
-    wait_for_cephcluster_ready "rook-ceph" "rook-ceph" "900"
-  fi
-
-  message "Deploying Rook Ceph CSI storage classes..."
-  run tofu -chdir="${cluster_rook_04_workspace}" init
-  run tofu -chdir="${cluster_rook_04_workspace}" apply -auto-approve
-  kubectl -n rook-ceph get storageclasses.storage.k8s.io
-
-fi
-
 if [[ "${skip_k8s_net}" == "true" ]]; then
   message "Skipping k8s networking and ingress (k8s-net) steps."
 else
   prepare_k8s_net_workspace
   message "Deploying k8s networking and ingress (k8s-net)..."
-  run tofu -chdir="${cluster_k8s_net_workspace}" init
+  run_tofu_init "${cluster_k8s_net_workspace}"
   run tofu -chdir="${cluster_k8s_net_workspace}" apply -auto-approve \
     -target=kubernetes_manifest.cert_manager_crds \
     -target=kubernetes_manifest.metallb_native_crds \
@@ -531,12 +561,38 @@ else
 
 fi
 
+if [[ "${skip_ceph}" == "true" ]]; then
+  message "Skipping Rook Ceph steps."
+else
+  prepare_rook_workspaces
+  ceph_mode_value="$(ceph_mode_from_constants "${cluster_ceph_constants_path}")"
+  ceph_phase="$(kubectl -n rook-ceph get cephcluster rook-ceph -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+  if [[ "${ceph_phase}" == "Ready" ]]; then
+    message "Rook Ceph cluster already Ready; skipping operator/cluster apply."
+  else
+    message "Deploying Rook Ceph operator..."
+    run_tofu_init "${cluster_rook_01_workspace}"
+    run tofu -chdir="${cluster_rook_01_workspace}" apply -auto-approve
+    wait_for_pods_ready "rook-ceph" "rook-ceph-operator" "180s"
+
+    message "Deploying Rook Ceph cluster..."
+    run_tofu_init "${cluster_rook_02_workspace}"
+    run tofu -chdir="${cluster_rook_02_workspace}" apply -auto-approve
+    wait_for_cephcluster_ready "rook-ceph" "rook-ceph" "${ceph_mode_value}" "900"
+  fi
+
+  message "Deploying Rook Ceph CSI storage classes..."
+  run_tofu_init "${cluster_rook_04_workspace}"
+  run tofu -chdir="${cluster_rook_04_workspace}" apply -auto-approve
+  kubectl -n rook-ceph get storageclasses.storage.k8s.io
+fi
+
 if [[ "${skip_k8s_net}" == "true" || "${skip_monitoring}" == "true" ]]; then
   message "Skipping monitoring stack."
 else
   prepare_monitoring_workspace
   message "Deploying monitoring stack and Portainer..."
-  run tofu -chdir="${cluster_monitoring_workspace}" init
+  run_tofu_init "${cluster_monitoring_workspace}"
   run tofu -chdir="${cluster_monitoring_workspace}" apply -auto-approve -var="skip_portainer=${skip_portainer}"
   message "Restarting Grafana to reload provisioned dashboards..."
   kubectl -n monitoring rollout restart deploy/grafana 1>/dev/null
@@ -556,11 +612,15 @@ else
   message "Grafana admin password: ${DATA_FMT_START}${grafana_password}${DATA_FMT_END}"
 fi
 
-if [[ "${skip_ceph}" == "true" || "${skip_k8s_net}" == "true" ]]; then
+ceph_mode_value="$(ceph_mode_from_constants "${cluster_ceph_constants_path}")"
+if [[ "${skip_ceph}" == "true" || "${skip_k8s_net}" == "true" || "${ceph_mode_value}" == "external" ]]; then
+  if [[ "${ceph_mode_value}" == "external" && "${skip_ceph}" != "true" ]]; then
+    message "Skipping Rook Ceph dashboard ingress for external Ceph mode."
+  fi
   :
 else
   message "Deploying Rook Ceph dashboard ingress..."
-  run tofu -chdir="${cluster_rook_03_workspace}" init
+  run_tofu_init "${cluster_rook_03_workspace}"
   run tofu -chdir="${cluster_rook_03_workspace}" apply -auto-approve
   wait_for_dashboard_cert "300"
   rook_dashboard_url="$(tofu -chdir="${cluster_rook_03_workspace}" output -raw rook_ceph_dashboard_url)"

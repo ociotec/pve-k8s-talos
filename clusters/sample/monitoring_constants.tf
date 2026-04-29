@@ -6,7 +6,7 @@ locals {
   grafana_tls_secret_name    = "grafana-tls"
   prometheus_tls_secret_name = "prometheus-tls"
 
-  storage_class = "rook-ceph-block-ec"
+  storage_class = "${local.ceph_name_prefix}-rbd-ec"
 
   portainer_image_tag     = "2.33.6"
   portainer_storage_class = local.storage_class

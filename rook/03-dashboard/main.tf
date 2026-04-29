@@ -6,7 +6,7 @@ terraform {
     }
     null = {
       source  = "hashicorp/null"
-      version = ">= 3.2.2"
+      version = ">= 3.2.4"
     }
   }
 }
@@ -21,9 +21,10 @@ provider "kubernetes" {
 }
 
 locals {
-  ceph_hostname = try(local.ceph_hostname, "ceph.${local.domain}")
+  effective_ceph_mode = try(local.ceph_mode, "internal")
+  effective_ceph_hostname = try(local.ceph_dashboard_hostname, "ceph.${local.domain}")
   ceph_tls_secret_name = "rook-ceph-dashboard-tls"
-  ceph_dashboard_resources = concat(
+  ceph_dashboard_resources = local.effective_ceph_mode == "external" ? [] : concat(
     [
       for doc in split("\n---\n", file("${path.module}/../manifests/dashboard-external-https.yaml")) :
       yamldecode(doc)
@@ -31,7 +32,7 @@ locals {
     ],
     [
       for doc in split("\n---\n", templatefile("${path.module}/rook-ceph-dashboard-ingress.yaml", {
-        ceph_hostname        = local.ceph_hostname
+        ceph_hostname        = local.effective_ceph_hostname
         ceph_tls_secret_name = local.ceph_tls_secret_name
       })) :
       yamldecode(doc)
@@ -64,7 +65,7 @@ check "tls_source_valid" {
 
 check "preissued_ceph_certificate" {
   assert {
-    condition = local.tls_source != "preissued" || (
+    condition = local.effective_ceph_mode == "external" || local.tls_source != "preissued" || (
       local.preissued_ceph_certificate != null &&
       trimspace(local.preissued_ceph_cert_content) != "" &&
       trimspace(local.preissued_ceph_key_content) != ""
@@ -84,7 +85,7 @@ resource "kubernetes_manifest" "rook_dashboard_other" {
 }
 
 resource "null_resource" "cert_manager_webhook_ready" {
-  count = local.tls_source == "ca_issuer" ? 1 : 0
+  count = local.effective_ceph_mode == "internal" && local.tls_source == "ca_issuer" ? 1 : 0
 
   provisioner "local-exec" {
     command = "KUBECONFIG=${var.kubeconfig_path} kubectl -n cert-manager rollout status deploy/cert-manager-webhook --timeout=300s"
@@ -107,7 +108,7 @@ resource "kubernetes_manifest" "rook_dashboard_certificates" {
 }
 
 resource "kubernetes_secret_v1" "preissued_ceph_tls" {
-  count = local.tls_source == "preissued" ? 1 : 0
+  count = local.effective_ceph_mode == "internal" && local.tls_source == "preissued" ? 1 : 0
 
   metadata {
     name      = local.ceph_tls_secret_name
@@ -123,6 +124,8 @@ resource "kubernetes_secret_v1" "preissued_ceph_tls" {
 }
 
 resource "null_resource" "ingress_nginx_webhook_ready" {
+  count = local.effective_ceph_mode == "internal" ? 1 : 0
+
   provisioner "local-exec" {
     command = "KUBECONFIG=${var.kubeconfig_path} kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=300s && KUBECONFIG=${var.kubeconfig_path} kubectl -n ingress-nginx wait --for=condition=Ready pod -l app.kubernetes.io/name=ingress-nginx,app.kubernetes.io/component=controller --timeout=300s"
   }
@@ -146,5 +149,5 @@ resource "kubernetes_manifest" "rook_dashboard_ingress" {
 }
 
 output "rook_ceph_dashboard_url" {
-  value = "https://${local.ceph_hostname}"
+  value = local.effective_ceph_mode == "external" ? "" : "https://${local.effective_ceph_hostname}"
 }

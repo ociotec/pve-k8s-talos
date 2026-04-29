@@ -652,6 +652,15 @@ if [[ -n "${proxy_url}" ]]; then
     fi
   fi
 
+  ceph_constants_path="${cluster_ceph_constants_path}"
+  if [[ "${skip_ceph}" != "true" && -r "${ceph_constants_path}" && -n "${k8s_net_domain}" ]]; then
+    while IFS= read -r hostname; do
+      add_no_proxy_entry "${hostname}"
+    done < <(
+      awk -v domain="${k8s_net_domain}" -F'"' '/ceph_dashboard_hostname[[:space:]]*=/{val=$2; gsub("\\$\\{local.domain\\}", domain, val); print val}' "${ceph_constants_path}"
+    )
+  fi
+
   monitoring_constants_path="${cluster_monitoring_constants_path}"
   if [[ "${skip_monitoring}" != "true" && -r "${monitoring_constants_path}" && -n "${k8s_net_domain}" ]]; then
     while IFS= read -r hostname; do

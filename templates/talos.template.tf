@@ -55,13 +55,13 @@ data "talos_cluster_health" "health" {
   # On scale-out runs, new workers can take a bit longer to finish all k8s checks
   # even though the cluster is already usable. Give the provider more time here.
   timeouts = {
-    read = "15m"
+    read = "30m"
   }
 }
 
 resource "talos_cluster_kubeconfig" "kubeconfig" {
   count                = local.cluster_already_bootstrapped ? 0 : 1
-  depends_on           = [talos_machine_bootstrap.bootstrap, data.talos_cluster_health.health]
+  depends_on           = [talos_machine_bootstrap.bootstrap, talos_machine_configuration_apply.controlplane_config_apply, talos_machine_configuration_apply.worker_config_apply]
   client_configuration = talos_machine_secrets.machine_secrets.client_configuration
   node                 = local.controlplane_vms["__CONTROLPLANE_PRIMARY__"].ip
   timeouts = {

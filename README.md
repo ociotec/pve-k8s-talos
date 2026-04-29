@@ -81,7 +81,12 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
   - `default_certificate_name` selects the default entry used by the Rook Ceph dashboard ingress.
 - `monitoring_constants.tf`
   - Storage class, sizes, retention, image versions, and hostnames for Prometheus, Loki, Grafana, and Portainer.
+  - It can reference `local.ceph_storage_class_names.*` from `ceph_constants.tf`.
   - `tls_secrets` maps namespaces/secret names to entries from `available_certificates`.
+- `ceph_constants.tf`
+  - `ceph_mode = "internal"` to run a full Rook-managed Ceph cluster in Kubernetes.
+  - `ceph_mode = "external"` to consume a native PVE Ceph cluster from Rook after `k8s-net`.
+  - Defines block and file storage profiles, storage class names, pool/filesystem naming, and all external Ceph connection/CSI credentials in a single file.
 - `certs/`
   - Cluster-specific CA and certificate files used by `k8s_net_constants.tf`.
 
@@ -326,7 +331,7 @@ tofu -chdir=rook/04-csi init
 tofu -chdir=rook/04-csi apply -auto-approve
 ```
 
-CSIs are created for all types and for erasure coded (EC) and replica modes:
+CSIs are created from `ceph_constants.tf` for block and file storage in both replicated and erasure-coded (EC) variants when enabled:
 
 ```bash
 kubectl -n rook-ceph get storageclasses.storage.k8s.io
@@ -350,6 +355,8 @@ To deploy these resources run the following command:
 tofu -chdir=k8s-net init
 tofu -chdir=k8s-net apply -auto-approve
 ```
+
+`deploy.sh` applies the stack in this order: `k8s-net -> ceph -> monitoring`.
 
 #### Install the Root CA locally
 
