@@ -94,6 +94,19 @@ locals {
     for m in local.ingress_nginx : m
     if try(m.kind, "") != "Namespace"
   ]
+  metrics_server = [
+    for doc in split("\n---\n", file("${path.module}/metrics-server.yaml")) :
+    yamldecode(doc)
+    if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
+  ]
+  metrics_server_other = [
+    for m in local.metrics_server : m
+    if try(m.kind, "") != "APIService"
+  ]
+  metrics_server_apiservice = [
+    for m in local.metrics_server : m
+    if try(m.kind, "") == "APIService"
+  ]
   root_ca_crt_path    = local.root_ca_crt
   root_ca_key_path    = can(regex("(?m)^\\s*root_ca_key\\s*=\\s*\"([^\"]*)\"", local.constants_source)[0]) ? regex("(?m)^\\s*root_ca_key\\s*=\\s*\"([^\"]*)\"", local.constants_source)[0] : ""
   root_ca_crt_content = try(file(local.root_ca_crt_path), "")
@@ -229,11 +242,51 @@ resource "kubernetes_manifest" "ingress_nginx_namespace" {
   manifest   = each.value
 }
 
+resource "kubernetes_manifest" "metrics_server" {
+  for_each = { for i, m in local.metrics_server_other : i => m }
+  manifest = each.value
+  computed_fields = [
+    "metadata.annotations",
+    "spec.template.spec.containers[0].resources.limits.cpu",
+    "spec.template.spec.nodeSelector",
+  ]
+  lifecycle {
+    ignore_changes = [
+      manifest.metadata.annotations,
+    ]
+  }
+  depends_on = [kubernetes_manifest.ingress_nginx]
+}
+
+resource "kubernetes_manifest" "metrics_server_apiservice" {
+  for_each = { for i, m in local.metrics_server_apiservice : i => m }
+  manifest = each.value
+  depends_on = [
+    kubernetes_manifest.metrics_server,
+    null_resource.metrics_server_ready,
+  ]
+}
+
 resource "null_resource" "ingress_nginx_webhook_ready" {
   depends_on = [kubernetes_manifest.ingress_nginx]
 
   provisioner "local-exec" {
     command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=300s && KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n ingress-nginx wait --for=condition=Ready pod -l app.kubernetes.io/name=ingress-nginx,app.kubernetes.io/component=controller --timeout=300s"
+  }
+}
+
+resource "null_resource" "metrics_server_ready" {
+  depends_on = [kubernetes_manifest.metrics_server]
+
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    command = <<-EOT
+      set -euo pipefail
+      kubeconfig="${abspath("${path.module}/${var.kubeconfig_path}")}"
+
+      KUBECONFIG="$kubeconfig" kubectl -n kube-system rollout status deploy/metrics-server --timeout=300s
+      KUBECONFIG="$kubeconfig" kubectl -n kube-system wait --for=condition=Available deploy/metrics-server --timeout=300s
+    EOT
   }
 }
 
