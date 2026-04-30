@@ -673,40 +673,6 @@ ceph_mode_from_constants() {
   printf '%s\n' "${mode}"
 }
 
-ensure_kubeconfig_available() {
-  if [[ -f "${cluster_kubeconfig_path}" ]]; then
-    return 0
-  fi
-
-  if ! state_dir_has_state "${cluster_root_workspace}"; then
-    error "Cannot purge external Ceph without ${cluster_kubeconfig_path} or root OpenTofu state." >&2
-    exit 1
-  fi
-
-  prepare_root_workspace
-  run_gen_talos_assets
-  run_tofu_init "${cluster_root_workspace}"
-  if ! tofu -chdir="${cluster_root_workspace}" output -raw kubeconfig > "${cluster_kubeconfig_path}" 2>/dev/null; then
-    error "Failed to regenerate kubeconfig from root OpenTofu outputs." >&2
-    exit 1
-  fi
-  chmod 600 "${cluster_kubeconfig_path}"
-}
-
-destroy_workspace_if_state() {
-  local workspace="$1"
-  local description="$2"
-
-  if ! state_dir_has_state "${workspace}"; then
-    message "No ${description} OpenTofu state found; skipping destroy."
-    return 0
-  fi
-
-  run_tofu_init "${workspace}"
-  message "Destroying ${description}..."
-  run tofu -chdir="${workspace}" destroy -auto-approve -refresh=false
-}
-
 deploy_start="$(start_timer)"
 message "Provider upgrades are disabled by default. Update manually when needed: tofu -chdir=<workspace> init -upgrade"
 if [[ "${purge_external_ceph}" == "true" ]]; then
