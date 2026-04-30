@@ -22,6 +22,7 @@ machine:
   kubelet:
     extraMounts: ${kubelet_extra_mounts_section}
 ${kubelet_extra_args_section}
+${machine_registries_section}
 cluster:
   discovery:
     registries:

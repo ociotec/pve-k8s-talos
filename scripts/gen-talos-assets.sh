@@ -304,6 +304,133 @@ kernel_ip_value() {
   fi
 }
 
+registry_host_from_url() {
+  local url="$1"
+  local remainder
+
+  remainder="${url#*://}"
+  remainder="${remainder%%/*}"
+  remainder="${remainder##*@}"
+
+  printf '%s' "${remainder}"
+}
+
+parse_talos_registry_settings() {
+  awk '
+    function brace_delta(line,   tmp, opens, closes) {
+      tmp = line
+      opens = gsub(/{/, "{", tmp)
+      tmp = line
+      closes = gsub(/}/, "}", tmp)
+      return opens - closes
+    }
+    function trim(value) {
+      sub(/^[[:space:]]+/, "", value)
+      sub(/[[:space:]]+$/, "", value)
+      return value
+    }
+
+    BEGIN {
+      in_talos = 0
+      talos_depth = 0
+      in_registry = 0
+      registry_depth = 0
+      in_mirrors = 0
+      mirrors_depth = 0
+    }
+
+    {
+      line = $0
+      delta = brace_delta(line)
+    }
+
+    !in_talos && line ~ /"talos"[[:space:]]*=[[:space:]]*{/ {
+      in_talos = 1
+      talos_depth = 1
+      next
+    }
+
+    in_talos {
+      if (!in_registry && line ~ /"registry"[[:space:]]*=[[:space:]]*{/) {
+        in_registry = 1
+        registry_depth = 1
+        talos_depth += delta
+        next
+      }
+
+      if (in_registry) {
+        if (!in_mirrors && line ~ /"mirrors"[[:space:]]*=[[:space:]]*{/) {
+          in_mirrors = 1
+          mirrors_depth = 1
+          registry_depth += delta
+          talos_depth += delta
+          next
+        }
+
+        if (in_mirrors) {
+          if (match(line, /"[^"]+"[[:space:]]*=[[:space:]]*"[^"]*"/)) {
+            pair = substr(line, RSTART, RLENGTH)
+            key = pair
+            sub(/^[[:space:]]*"/, "", key)
+            sub(/".*/, "", key)
+            sub(/^[^=]*=[[:space:]]*"/, "", pair)
+            value = pair
+            sub(/".*/, "", value)
+            print "mirror|" key "|" value
+          }
+
+          mirrors_depth += delta
+          registry_depth += delta
+          talos_depth += delta
+          if (mirrors_depth <= 0) {
+            in_mirrors = 0
+            mirrors_depth = 0
+          }
+          if (registry_depth <= 0) {
+            in_registry = 0
+            registry_depth = 0
+          }
+          if (talos_depth <= 0) {
+            in_talos = 0
+            talos_depth = 0
+          }
+          next
+        }
+
+        if (match(line, /"(skip_fallback|override_path|ignore_TLS_error)"[[:space:]]*=[[:space:]]*("?[^"}[:space:]]+"?)/)) {
+          pair = substr(line, RSTART, RLENGTH)
+          key = pair
+          sub(/^[[:space:]]*"/, "", key)
+          sub(/".*/, "", key)
+          sub(/^[^=]*=[[:space:]]*/, "", pair)
+          value = trim(pair)
+          gsub(/^"/, "", value)
+          gsub(/"$/, "", value)
+          print "global|" key "|" value
+        }
+
+        registry_depth += delta
+        talos_depth += delta
+        if (registry_depth <= 0) {
+          in_registry = 0
+          registry_depth = 0
+        }
+        if (talos_depth <= 0) {
+          in_talos = 0
+          talos_depth = 0
+        }
+        next
+      }
+
+      talos_depth += delta
+      if (talos_depth <= 0) {
+        in_talos = 0
+        talos_depth = 0
+      }
+    }
+  ' "${constants_path}"
+}
+
 ipv4_to_int() {
   local ip="$1"
   local a b c d
@@ -395,6 +522,51 @@ if [[ -z "${cert_files_raw}" && -n "${legacy_proxy_ca_path}" ]]; then
   cert_files_raw="${legacy_proxy_ca_path}"
 fi
 
+registry_skip_fallback="true"
+registry_override_path="false"
+registry_ignore_tls_error="false"
+declare -A registry_mirror_urls=()
+
+while IFS='|' read -r kind key value; do
+  [[ -n "${kind}" ]] || continue
+  value="$(trim "${value}")"
+  case "${kind}" in
+    global)
+      case "${key}" in
+        skip_fallback)
+          registry_skip_fallback="${value}"
+          ;;
+        override_path)
+          registry_override_path="${value}"
+          ;;
+        ignore_TLS_error)
+          registry_ignore_tls_error="${value}"
+          ;;
+      esac
+      ;;
+    mirror)
+      registry_mirror_urls["${key}"]="${value}"
+      ;;
+  esac
+done < <(parse_talos_registry_settings)
+
+for registry_boolean_name in \
+  registry_skip_fallback \
+  registry_override_path \
+  registry_ignore_tls_error; do
+  registry_boolean_value="${!registry_boolean_name}"
+  case "${registry_boolean_value,,}" in
+    "true"|"false")
+      printf -v "${registry_boolean_name}" '%s' "${registry_boolean_value,,}"
+      ;;
+    *)
+      echo "Error: talos.registry.${registry_boolean_name#registry_} must be \"true\" or \"false\" (got ${registry_boolean_value})." >&2
+      echo "Fix: set talos.registry.${registry_boolean_name#registry_} to true/false or \"true\"/\"false\" in constants.auto.tfvars." >&2
+      exit 1
+      ;;
+  esac
+done
+
 trusted_roots_patch_path="${patch_dir}/trusted-roots-root-ca.yaml"
 tls_source=""
 root_ca_crt_raw=""
@@ -447,8 +619,8 @@ fi
 template="$(cat "${template_path}")"
 
 # Basic template sanity check.
-if [[ "${template}" != *'${ip}'* || "${template}" != *'${cidr}'* || "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${kubelet_extra_args_section}'* || "${template}" != *'${k8s_node_labels_section}'* || "${template}" != *'${proxy_env_section}'* || "${template}" != *'${cert_files_section}'* || "${template}" != *'${talos_discovery_service_disabled}'* ]]; then
-  echo "Error: template is missing required placeholders (\${ip}, \${cidr}, \${machine_disks_section}, \${kubelet_extra_mounts_section}, \${kubelet_extra_args_section}, \${k8s_node_labels_section}, \${proxy_env_section}, \${cert_files_section}, \${talos_discovery_service_disabled})." >&2
+if [[ "${template}" != *'${ip}'* || "${template}" != *'${cidr}'* || "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${kubelet_extra_args_section}'* || "${template}" != *'${machine_registries_section}'* || "${template}" != *'${k8s_node_labels_section}'* || "${template}" != *'${proxy_env_section}'* || "${template}" != *'${cert_files_section}'* || "${template}" != *'${talos_discovery_service_disabled}'* ]]; then
+  echo "Error: template is missing required placeholders (\${ip}, \${cidr}, \${machine_disks_section}, \${kubelet_extra_mounts_section}, \${kubelet_extra_args_section}, \${machine_registries_section}, \${k8s_node_labels_section}, \${proxy_env_section}, \${cert_files_section}, \${talos_discovery_service_disabled})." >&2
   echo "Fix: restore patches/machine.template.yaml or add the missing placeholders." >&2
   exit 1
 fi
@@ -575,8 +747,46 @@ fi
 
 proxy_env_section="{}"
 cert_files_section="[]"
+machine_registries_section=""
 cert_file_paths=()
 no_proxy_value=""
+
+if [[ ${#registry_mirror_urls[@]} -gt 0 ]]; then
+  machine_registries_has_content=false
+  declare -A registry_config_hosts=()
+  machine_registries_section=$'\n  registries:'
+  machine_registries_section+=$'\n    mirrors:'
+  while IFS= read -r registry_name; do
+    registry_url="${registry_mirror_urls[${registry_name}]}"
+    if [[ -z "$(trim "${registry_url}")" ]]; then
+      echo "Error: talos.registry.mirrors[${registry_name}] is empty." >&2
+      echo "Fix: set talos.registry.mirrors entries to non-empty registry endpoint URLs." >&2
+      exit 1
+    fi
+    if [[ ! "${registry_url}" =~ ^https?:// ]]; then
+      echo "Error: talos.registry.mirrors[${registry_name}] must start with http:// or https:// (got ${registry_url})." >&2
+      echo "Fix: use a full mirror URL such as https://registry.example.com." >&2
+      exit 1
+    fi
+    machine_registries_has_content=true
+    machine_registries_section+=$'\n      "'"$(yaml_escape "${registry_name}")"$'":'
+    machine_registries_section+=$'\n        endpoints:'
+    machine_registries_section+=$'\n          - "'"$(yaml_escape "${registry_url}")"$'"'
+    machine_registries_section+=$'\n        skipFallback: '"${registry_skip_fallback}"
+    machine_registries_section+=$'\n        overridePath: '"${registry_override_path}"
+    registry_config_host="$(registry_host_from_url "${registry_url}")"
+    if [[ -n "${registry_config_host}" ]]; then
+      registry_config_hosts["${registry_config_host}"]=1
+    fi
+  done < <(printf "%s\n" "${!registry_mirror_urls[@]}" | sort)
+
+  machine_registries_section+=$'\n    config:'
+  while IFS= read -r registry_host; do
+    machine_registries_section+=$'\n      "'"$(yaml_escape "${registry_host}")"$'":'
+    machine_registries_section+=$'\n        tls:'
+    machine_registries_section+=$'\n          insecureSkipVerify: '"${registry_ignore_tls_error}"
+  done < <(printf "%s\n" "${!registry_config_hosts[@]}" | sort)
+fi
 if [[ -n "${cert_files_raw}" ]]; then
   IFS=',' read -ra cert_file_entries <<< "${cert_files_raw}"
   for cert_file_path in "${cert_file_entries[@]}"; do
@@ -1196,6 +1406,7 @@ for name in "${!vm_ips[@]}"; do
   rendered="${rendered//'${machine_disks_section}'/${machine_disks_section}}"
   rendered="${rendered//'${kubelet_extra_mounts_section}'/${kubelet_extra_mounts_section}}"
   rendered="${rendered//'${kubelet_extra_args_section}'/${kubelet_extra_args_section}}"
+  rendered="${rendered//'${machine_registries_section}'/${machine_registries_section}}"
   rendered="${rendered//'${k8s_node_labels_section}'/${k8s_node_labels_section}}"
   rendered="${rendered//'${proxy_env_section}'/${proxy_env_section}}"
   rendered="${rendered//'${cert_files_section}'/${cert_files_section}}"

@@ -50,6 +50,18 @@ constants = {
     "cluster_name"               = "talos"
     # Optional kubelet max pods per node. Leave empty to keep Kubernetes default (110).
     "max_pods"                   = ""
+    # Optional Talos registry mirror settings. The generator renders these under
+    # machine.registries using the global defaults below for every mirror.
+    # Example:
+    # "registry" = {
+    #   "mirrors" = {
+    #     "docker.io" = "https://registry.example.com"
+    #     "*"         = "https://registry.example.com"
+    #   }
+    #   "skip_fallback"   = "true"
+    #   "override_path"   = "false"
+    #   "ignore_TLS_error" = "false"
+    # }
     # Disable Talos public discovery service by default. Set to "false" if you
     # explicitly want the external discovery registry (for example with KubeSpan).
     "discovery_service_disabled" = "true"

@@ -150,6 +150,26 @@ The environment root CA should be declared with `root_ca_crt` in `k8s_net_consta
 
 The generated machine patch disables Talos' external service discovery registry by default via `talos.discovery_service_disabled = "true"`, which avoids proxy-related `cluster.DiscoveryServiceController` errors in environments that don't need the public discovery service. Set it to `"false"` if you intentionally need Talos public discovery.
 
+To configure container registry mirrors for Talos, define `talos.registry` in `constants.auto.tfvars`. The generator renders `machine.registries.mirrors` from the `mirrors` map, applies the same `skipFallback`/`overridePath` values to every mirror, and renders `machine.registries.config.*.tls.insecureSkipVerify` from the global TLS flag for each unique mirror host.
+
+```hcl
+"talos" = {
+  # ...
+  "registry" = {
+    "mirrors" = {
+      "docker.io"            = "https://docker-cscc-public.cscc.gmv.es"
+      "registry-1.docker.io" = "https://docker-cscc-public.cscc.gmv.es"
+      "*"                    = "https://docker-cscc-public.cscc.gmv.es"
+    }
+    "skip_fallback"    = "true"
+    "override_path"    = "false"
+    "ignore_TLS_error" = "false"
+  }
+}
+```
+
+That example renders Talos YAML using `skipFallback: true`, `overridePath: false`, and `insecureSkipVerify: false`. Then regenerate Talos assets.
+
 ### Create the infrastructre
 
 The easiest way is to use the provided deployment script:
