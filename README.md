@@ -79,7 +79,8 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
   - Domain, TLS mode, root CA path, MetalLB range, and ingress fixed IP.
   - Certificate catalog (`available_certificates`) and default certificate entry.
 - `monitoring_constants.tf`
-  - Storage class, sizes, retention, image versions, and hostnames for Prometheus, Loki, Grafana, and Portainer.
+- `platform_constants.tf`
+  - Storage class, image versions, and hostnames for platform services such as Portainer.
   - `tls_secrets` maps namespaces/secret names to entries from `available_certificates`.
 - `ceph_constants.tf`
   - `ceph_mode = "internal"` to run a full Rook-managed Ceph cluster in Kubernetes.
@@ -136,6 +137,7 @@ The asset generator renders that value into Talos `machine.env.http_proxy` and `
 - Kubernetes internal names such as `kubernetes.default.svc` and `.svc.cluster.local`
 - ingress hostnames and ingress IP from `k8s_net_constants.tf` when present
 - monitoring ingress hostnames from `monitoring_constants.tf` when present
+- platform ingress hostnames from `platform_constants.tf` when present
 - any extra entries from `network.no_proxy_extra`
 
 When `network.proxy_url` uses a hostname instead of an IP, the generator also adds Talos kernel arguments for:
@@ -398,7 +400,7 @@ Import-Certificate -FilePath "C:\\path\\to\\certs\\home.arpa.pem" -CertStoreLoca
 
 #### Local install of root CA and /etc/hosts
 
-Use `scripts/update-local.sh` to install the root CA and manage `/etc/hosts` entries based on `k8s_net_constants.tf` and `monitoring_constants.tf`. The script does not call `sudo`, so run it with `sudo` when it needs to edit system files. Run it from inside `clusters/<cluster>` and pass `--cluster <cluster>`.
+Use `scripts/update-local.sh` to install the root CA and manage `/etc/hosts` entries based on `k8s_net_constants.tf`, `monitoring_constants.tf`, and `platform_constants.tf`. The script does not call `sudo`, so run it with `sudo` when it needs to edit system files. Run it from inside `clusters/<cluster>` and pass `--cluster <cluster>`.
 
 ```bash
 cd clusters/<cluster>
@@ -442,9 +444,11 @@ If you don't have internal DNS, add an `/etc/hosts` entry using `ingress_lb_ip` 
 192.168.1.70 ceph.home.arpa
 ```
 
-### Monitoring (Prometheus, Loki, Grafana, Portainer)
+### Monitoring (Prometheus, Loki, Grafana)
 
-Define your constants in `clusters/<cluster>/monitoring_constants.tf`: domain, storage class, PVC sizes, retention settings, and image versions.
+Define your constants in `clusters/<cluster>/monitoring_constants.tf`: monitoring hostnames, storage class, PVC sizes, retention settings, and image versions.
+
+Define Portainer-specific constants in `clusters/<cluster>/platform_constants.tf`.
 This stack also includes kube-state-metrics (requests/limits) and kubelet cAdvisor scrape for CPU/RAM usage.
 The manifests are rendered from templates using those values.
 Use the same domain as `k8s_net_constants.tf` so TLS and DNS align.

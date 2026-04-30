@@ -880,6 +880,15 @@ if [[ -n "${proxy_url}" ]]; then
     fi
   fi
 
+  platform_constants_path="${cluster_platform_constants_path}"
+  if [[ "${skip_portainer}" != "true" && -r "${platform_constants_path}" && -n "${k8s_net_domain}" ]]; then
+    while IFS= read -r hostname; do
+      add_no_proxy_entry "${hostname}"
+    done < <(
+      awk -v domain="${k8s_net_domain}" -F'"' '/portainer_hostname[[:space:]]*=/{val=$2; gsub("\\$\\{local.domain\\}", domain, val); print val}' "${platform_constants_path}"
+    )
+  fi
+
   ceph_constants_path="${cluster_ceph_constants_path}"
   if [[ "${skip_ceph}" != "true" && -r "${ceph_constants_path}" && -n "${k8s_net_domain}" ]]; then
     while IFS= read -r hostname; do

@@ -1,16 +1,10 @@
 locals {
-  portainer_hostname  = "portainer.${local.domain}"
   grafana_hostname    = "grafana.${local.domain}"
   prometheus_hostname = "prometheus.${local.domain}"
-  portainer_tls_secret_name  = "portainer-tls"
   grafana_tls_secret_name    = "grafana-tls"
   prometheus_tls_secret_name = "prometheus-tls"
 
   storage_class = "${local.ceph_name_prefix}-rbd-ec"
-
-  portainer_image_tag     = "2.40.0"
-  portainer_storage_class = local.storage_class
-  portainer_pvc_size      = "10Gi"
 
   grafana_storage_size    = "5Gi"
   prometheus_storage_size = "20Gi"
@@ -54,11 +48,6 @@ locals {
   kube_state_metrics_mem_limit   = "256Mi"
 
   tls_secrets = [
-    {
-      certificate = local.default_certificate_name
-      namespace   = "portainer"
-      secret_name = local.portainer_tls_secret_name
-    },
     {
       certificate = local.default_certificate_name
       namespace   = "monitoring"

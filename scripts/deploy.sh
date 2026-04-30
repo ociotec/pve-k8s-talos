@@ -27,7 +27,7 @@ Options:
   -g, --debug               Enable shell tracing + verbose output (sets TF_LOG=DEBUG).
   -c, --skip-ceph           Skip all Rook Ceph steps (operator, cluster, dashboard, CSI).
   -n, --skip-k8s-net        Skip k8s networking and ingress (k8s-net) steps (ingress, MetalLB, cert-manager).
-  -p, --skip-portainer      Skip Portainer deployment (only if monitoring is deployed).
+  -p, --skip-portainer      Skip Portainer deployment.
   -m, --skip-monitoring     Skip monitoring stack (Prometheus, Loki, Grafana).
   -h, --help                Show this help message.
 
@@ -228,7 +228,6 @@ prepare_monitoring_workspace() {
   link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/k8s_net_constants.tf"
   link_into_workspace "${cluster_ceph_constants_path}" "${workspace}/ceph_constants.tf"
   link_into_workspace "${cluster_certs_dir}" "${workspace}/certs"
-  link_into_workspace "${repo_root}/k8s-net/portainer.yaml" "${workspace}/portainer.yaml"
   link_into_workspace "${repo_root}/monitoring/namespace.yaml" "${workspace}/namespace.yaml"
   link_into_workspace "${repo_root}/monitoring/prometheus.yaml" "${workspace}/prometheus.yaml"
   link_into_workspace "${repo_root}/monitoring/grafana.yaml" "${workspace}/grafana.yaml"
@@ -238,6 +237,26 @@ prepare_monitoring_workspace() {
   link_into_workspace "${repo_root}/monitoring/grafana" "${workspace}/grafana"
   if [[ -r "${repo_root}/monitoring/.terraform.lock.hcl" ]]; then
     link_into_workspace "${repo_root}/monitoring/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
+  fi
+}
+
+prepare_platform_workspace() {
+  local workspace="${cluster_platform_workspace}"
+
+  require_cluster_file "${cluster_platform_constants_path}" "platform constants"
+  require_cluster_file "${cluster_ceph_constants_path}" "ceph constants"
+  mkdir -p "${workspace}" "${cluster_certs_dir}"
+  if [[ -d "${repo_root}/platform/.terraform" ]]; then
+    link_into_workspace "${repo_root}/platform/.terraform" "${workspace}/.terraform"
+  fi
+  link_into_workspace "${repo_root}/platform/main.tf" "${workspace}/main.tf"
+  link_into_workspace "${cluster_platform_constants_path}" "${workspace}/constants.tf"
+  link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/k8s_net_constants.tf"
+  link_into_workspace "${cluster_ceph_constants_path}" "${workspace}/ceph_constants.tf"
+  link_into_workspace "${cluster_certs_dir}" "${workspace}/certs"
+  link_into_workspace "${repo_root}/platform/portainer.yaml" "${workspace}/portainer.yaml"
+  if [[ -r "${repo_root}/platform/.terraform.lock.hcl" ]]; then
+    link_into_workspace "${repo_root}/platform/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
   fi
 }
 
@@ -799,29 +818,19 @@ else
   kubectl -n rook-ceph get storageclasses.storage.k8s.io
 fi
 
-if [[ "${skip_k8s_net}" == "true" || "${skip_monitoring}" == "true" ]]; then
+if [[ "${skip_monitoring}" == "true" ]]; then
   message "Skipping monitoring stack."
 else
   prepare_monitoring_workspace
-  message "Deploying monitoring stack and Portainer..."
+  message "Deploying monitoring stack..."
   run_tofu_init "${cluster_monitoring_workspace}"
-  run tofu -chdir="${cluster_monitoring_workspace}" apply -auto-approve -var="skip_portainer=${skip_portainer}"
+  run tofu -chdir="${cluster_monitoring_workspace}" apply -auto-approve
   message "Restarting Grafana to reload provisioned dashboards..."
   kubectl -n monitoring rollout restart deploy/grafana 1>/dev/null
   message "Waiting for monitoring PVCs, workloads, and endpoints to become ready..."
   wait_for_pvcs_bound "monitoring" "600" "grafana-data" "loki-data" "prometheus-data"
   wait_for_deployments_ready "monitoring" "600s" "grafana" "loki" "prometheus" "kube-state-metrics"
   wait_for_service_endpoints "monitoring" "600" "grafana" "loki" "prometheus" "kube-state-metrics"
-  if [[ "${skip_portainer}" != "true" ]]; then
-    message "Waiting for Portainer PVC, workload, and endpoints to become ready..."
-    wait_for_pvcs_bound "portainer" "600" "portainer"
-    wait_for_deployments_ready "portainer" "600s" "portainer"
-    wait_for_service_endpoints "portainer" "600" "portainer"
-    portainer_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw portainer_url)"
-    message "Portainer URL: ${URL_FMT_START}${portainer_url}${URL_FMT_END}"
-  else
-    message "Skipping Portainer deployment."
-  fi
   grafana_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw grafana_url)"
   prometheus_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw prometheus_url)"
   grafana_user="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw grafana_admin_user)"
@@ -830,6 +839,21 @@ else
   message "Prometheus URL: ${URL_FMT_START}${prometheus_url}${URL_FMT_END}"
   message "Grafana admin user: ${DATA_FMT_START}${grafana_user}${DATA_FMT_END}"
   message "Grafana admin password: ${DATA_FMT_START}${grafana_password}${DATA_FMT_END}"
+fi
+
+if [[ "${skip_portainer}" == "true" ]]; then
+  message "Skipping platform services."
+else
+  prepare_platform_workspace
+  message "Deploying platform services..."
+  run_tofu_init "${cluster_platform_workspace}"
+  run tofu -chdir="${cluster_platform_workspace}" apply -auto-approve
+  message "Waiting for Portainer PVC, workload, and endpoints to become ready..."
+  wait_for_pvcs_bound "portainer" "600" "portainer"
+  wait_for_deployments_ready "portainer" "600s" "portainer"
+  wait_for_service_endpoints "portainer" "600" "portainer"
+  portainer_url="$(tofu -chdir="${cluster_platform_workspace}" output -raw portainer_url)"
+  message "Portainer URL: ${URL_FMT_START}${portainer_url}${URL_FMT_END}"
 fi
 
 ceph_mode_value="$(ceph_mode_from_constants "${cluster_ceph_constants_path}")"

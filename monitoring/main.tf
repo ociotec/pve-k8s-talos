@@ -25,29 +25,12 @@ variable "kubeconfig_path" {
   description = "Path to the kubeconfig file."
 }
 
-variable "skip_portainer" {
-  type        = bool
-  default     = false
-  description = "Skip Portainer deployment."
-}
-
 provider "kubernetes" {
   config_path = abspath("${path.module}/${var.kubeconfig_path}")
 }
 
 locals {
   monitoring_namespace = yamldecode(file("${path.module}/namespace.yaml"))
-  portainer_manifests = [
-    for doc in split("\n---\n", templatefile("${path.module}/portainer.yaml", {
-      portainer_hostname        = local.portainer_hostname
-      portainer_image           = local.portainer_image_tag
-      portainer_storage         = local.portainer_storage_class
-      portainer_size            = local.portainer_pvc_size
-      portainer_tls_secret_name = local.portainer_tls_secret_name
-    })) :
-    yamldecode(doc)
-    if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
-  ]
   prometheus_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/prometheus.yaml", {
       storage_class               = local.storage_class
@@ -117,7 +100,6 @@ locals {
   ]
 
   monitoring_resources = concat(
-    slice(local.portainer_manifests, 0, var.skip_portainer ? 0 : length(local.portainer_manifests)),
     local.prometheus_manifests,
     local.grafana_manifests,
     local.loki_manifests,
@@ -177,10 +159,7 @@ locals {
     )
   }
   expected_preissued_tls_secret_targets = local.tls_source == "preissued" ? [
-    for target in [
-      for secret in local.tls_secrets : format("%s/%s", secret.namespace, secret.secret_name)
-      if !var.skip_portainer || secret.namespace != "portainer"
-    ] : target
+    for secret in local.tls_secrets : format("%s/%s", secret.namespace, secret.secret_name)
   ] : []
   missing_preissued_tls_secret_targets = [
     for target in local.expected_preissued_tls_secret_targets : target
@@ -327,10 +306,6 @@ resource "kubernetes_manifest" "monitoring_ingress" {
 
 output "grafana_url" {
   value = "https://${local.grafana_hostname}"
-}
-
-output "portainer_url" {
-  value = var.skip_portainer ? null : "https://${local.portainer_hostname}"
 }
 
 output "prometheus_url" {
