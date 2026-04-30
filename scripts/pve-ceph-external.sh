@@ -169,6 +169,26 @@ wait_for_task() {
   done
 }
 
+wait_for_pool_exists() {
+  local node="$1"
+  local pool_name="$2"
+  local started_at
+  started_at="$(date +%s)"
+
+  while true; do
+    if pool_exists "${node}" "${pool_name}"; then
+      return 0
+    fi
+
+    if (( $(date +%s) - started_at > 120 )); then
+      echo "Timed out waiting for Ceph pool ${pool_name} to appear on ${node}" >&2
+      exit 1
+    fi
+
+    sleep 3
+  done
+}
+
 set_pool_autoscale_on() {
   local node="$1"
   local pool_name="$2"
@@ -181,6 +201,20 @@ set_pool_autoscale_on() {
   upid="$(printf '%s' "${response}" | json_extract "data")"
   wait_for_task "${node}" "${upid}"
   echo "Pool ${pool_name} autoscale mode set to on."
+}
+
+set_pool_allow_ec_overwrites() {
+  local node="$1"
+  local pool_name="$2"
+  local response upid
+
+  response="$(
+    api_put "/nodes/${node}/ceph/pool/${pool_name}" \
+      --data-urlencode "allow_ec_overwrites=1"
+  )"
+  upid="$(printf '%s' "${response}" | json_extract "data")"
+  wait_for_task "${node}" "${upid}"
+  echo "Pool ${pool_name} allow_ec_overwrites set to on."
 }
 
 ensure_rbd_pool() {
@@ -263,7 +297,11 @@ ensure_rbd_pool() {
 
   if pool_exists "${node}" "${pool_name}"; then
     echo "Pool ${pool_name} already exists on ${node}, skipping."
-    set_pool_autoscale_on "${node}" "${pool_name}"
+    if [[ "${pool_type}" == "replicated" ]]; then
+      set_pool_autoscale_on "${node}" "${pool_name}"
+    else
+      echo "Skipping EC pool post-create tuning for existing pool ${pool_name}."
+    fi
     return 0
   fi
 
@@ -298,7 +336,17 @@ ensure_rbd_pool() {
   upid="$(printf '%s' "${response}" | json_extract "data")"
   wait_for_task "${node}" "${upid}"
   echo "Pool ${pool_name} created on ${node}."
-  set_pool_autoscale_on "${node}" "${pool_name}"
+
+  # Replicated pools show up consistently in the Proxmox Ceph pool API right away,
+  # but EC data pools can lag or be omitted there even after the creation task
+  # reports success. Avoid turning that into a hard failure for the external mode
+  # bootstrap flow.
+  if [[ "${pool_type}" == "replicated" ]]; then
+    wait_for_pool_exists "${node}" "${pool_name}"
+    set_pool_autoscale_on "${node}" "${pool_name}"
+  else
+    set_pool_allow_ec_overwrites "${node}" "${pool_name}"
+  fi
 }
 
 main() {

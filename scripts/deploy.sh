@@ -115,11 +115,26 @@ if [[ "${debug}" == "true" ]]; then
   export TF_LOG=DEBUG
 fi
 
-purge_state_dir() {
-  local state_dir="$1"
-  if [[ -d "${state_dir}" ]]; then
-    rm -f "${state_dir}/terraform.tfstate" "${state_dir}/terraform.tfstate.backup"
+purge_cluster_out_dir() {
+  rm -rf "${cluster_out_dir}"
+}
+
+clear_stale_lock_if_present() {
+  local workspace="$1"
+  local lock_path="${workspace}/.terraform.tfstate.lock.info"
+
+  if [[ ! -f "${lock_path}" ]]; then
+    return 0
   fi
+
+  if pgrep -af "tofu -chdir=${workspace}" >/dev/null 2>&1; then
+    error "OpenTofu workspace appears to be locked by a running process: ${workspace}" >&2
+    error "If this is unexpected, inspect the process before retrying." >&2
+    exit 1
+  fi
+
+  message "Removing stale OpenTofu lock in ${workspace}..."
+  rm -f "${lock_path}"
 }
 
 state_dir_has_state() {
@@ -148,6 +163,7 @@ run_tofu_init() {
   local workspace="$1"
   local init_log
 
+  clear_stale_lock_if_present "${workspace}"
   message "Initializing OpenTofu providers in ${workspace}..."
   if [[ "${verbose}" == "true" ]]; then
     tofu -chdir="${workspace}" init
@@ -574,14 +590,8 @@ if [[ "${destroy_first}" == "true" ]]; then
     message "No root OpenTofu state found for cluster ${cluster_name}; skipping tofu destroy."
   fi
 
-  message "Purging local OpenTofu state files..."
-  purge_state_dir "${cluster_root_workspace}"
-  purge_state_dir "${cluster_k8s_net_workspace}"
-  purge_state_dir "${cluster_rook_01_workspace}"
-  purge_state_dir "${cluster_rook_02_workspace}"
-  purge_state_dir "${cluster_rook_03_workspace}"
-  purge_state_dir "${cluster_rook_04_workspace}"
-  purge_state_dir "${cluster_monitoring_workspace}"
+  message "Removing generated cluster runtime workspace at ${cluster_out_dir}..."
+  purge_cluster_out_dir
 
   if [[ "${destroy_only}" == "true" ]]; then
     message "Destroy-only requested; exiting without deploying."
@@ -627,7 +637,106 @@ prefix_value="$(disk_by_id_prefix "${cluster_constants_path}")"
 validate_disk_by_id_prefix "${worker_ip}" "${prefix_value}"
 reboot_nodes_with_pending_kubelet_max_pods "${cluster_constants_path}"
 message "k8s cluster is up and running. Current nodes:"
-kubectl get nodes -o custom-columns=NAME:.metadata.name,VERSION:.status.nodeInfo.kubeletVersion,MAX_PODS:.status.capacity.pods
+NODE_JSON="$(kubectl get nodes -o json)"
+NODE_JSON="${NODE_JSON}" python3 - <<'PY'
+import json
+import os
+import sys
+from datetime import datetime, timezone
+
+
+def parse_rfc3339(value):
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def render_age(created_at):
+    delta = datetime.now(timezone.utc) - parse_rfc3339(created_at)
+    seconds = int(delta.total_seconds())
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, _ = divmod(rem, 60)
+
+    if days > 0:
+        return f"{days}d"
+    if hours > 0:
+        return f"{hours}h"
+    return f"{minutes}m"
+
+
+def ready_status(conditions):
+    for condition in conditions:
+        if condition.get("type") == "Ready":
+            return "Ready" if condition.get("status") == "True" else "NotReady"
+    return "Unknown"
+
+
+def node_roles(labels):
+    roles = []
+    for key in labels:
+        if key.startswith("node-role.kubernetes.io/"):
+            role = key.split("/", 1)[1]
+            roles.append(role if role else "<none>")
+
+    if not roles:
+        legacy_role = labels.get("kubernetes.io/role")
+        if legacy_role:
+            roles.append(legacy_role)
+
+    return ",".join(sorted(set(roles))) if roles else "<none>"
+
+
+def internal_ip(addresses):
+    for address in addresses:
+        if address.get("type") == "InternalIP":
+            return address.get("address", "")
+    return ""
+
+payload = json.loads(os.environ["NODE_JSON"])
+headers = [
+    "NAME",
+    "STATUS",
+    "ROLES",
+    "AGE",
+    "INTERNAL-IP",
+    "VERSION",
+    "OS-IMAGE",
+    "KERNEL-VERSION",
+    "CONTAINER-RUNTIME",
+    "MAX-PODS",
+]
+rows = []
+
+for item in sorted(payload.get("items", []), key=lambda node: node["metadata"]["name"]):
+    metadata = item.get("metadata", {})
+    status = item.get("status", {})
+    node_info = status.get("nodeInfo", {})
+    rows.append(
+        [
+            metadata.get("name", ""),
+            ready_status(status.get("conditions", [])),
+            node_roles(metadata.get("labels", {})),
+            render_age(metadata.get("creationTimestamp", datetime.now(timezone.utc).isoformat())),
+            internal_ip(status.get("addresses", [])),
+            node_info.get("kubeletVersion", ""),
+            node_info.get("osImage", ""),
+            node_info.get("kernelVersion", ""),
+            node_info.get("containerRuntimeVersion", ""),
+            status.get("capacity", {}).get("pods", ""),
+        ]
+    )
+
+widths = [len(header) for header in headers]
+for row in rows:
+    for index, value in enumerate(row):
+        widths[index] = max(widths[index], len(value))
+
+def format_row(values):
+    return "  ".join(value.ljust(widths[index]) for index, value in enumerate(values))
+
+print(format_row(headers))
+for row in rows:
+    print(format_row(row))
+PY
 
 if [[ "${skip_k8s_net}" == "true" ]]; then
   message "Skipping k8s networking and ingress (k8s-net) steps."
@@ -734,12 +843,12 @@ message ""
 message "To use this cluster in future shell sessions with talosctl and kubectl:"
 message ""
 message "Option 1 - Set environment variables for each session:"
-message "  export TALOSCONFIG=\"$(pwd)/out/talosconfig\""
-message "  export KUBECONFIG=\"$(pwd)/out/kubeconfig\""
+message "  export TALOSCONFIG=\"${cluster_out_dir}/talosconfig\""
+message "  export KUBECONFIG=\"${cluster_out_dir}/kubeconfig\""
 message ""
 if [[ -f "${cluster_envrc_path}" ]]; then
-  message "Option 2 - Add to your .envrc file (direnv will auto-load):"
-  message "  echo 'export TALOSCONFIG=\"\$(pwd)/out/talosconfig\"' >> .envrc"
-  message "  echo 'export KUBECONFIG=\"\$(pwd)/out/kubeconfig\"' >> .envrc"
+  message "Option 2 - Add to your .envrc file:"
+  message "  echo 'export TALOSCONFIG=\"\$PWD/out/talosconfig\"' >> .envrc"
+  message "  echo 'export KUBECONFIG=\"\$PWD/out/kubeconfig\"' >> .envrc"
   message "  direnv allow"
 fi

@@ -38,16 +38,53 @@ resource "talos_machine_configuration_apply" "worker_config_apply" {
   node                        = each.value.ip
 }
 
+resource "null_resource" "controlplane_api_ready" {
+  count = local.cluster_already_bootstrapped ? 0 : 1
+  depends_on = [
+    talos_machine_configuration_apply.controlplane_config_apply,
+    local_file.talosconfig,
+  ]
+
+  triggers = {
+    controlplane_ips = join(",", [for v in local.controlplane_vms : v.ip])
+    talosconfig_sha  = sha256(local_file.talosconfig.content)
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -eu
+      talosconfig="${path.module}/../talosconfig"
+
+      for node_ip in ${join(" ", [for v in local.controlplane_vms : v.ip])}; do
+        start_time=$(date +%s)
+        while true; do
+          if talosctl --talosconfig="$talosconfig" version -n "$node_ip" >/dev/null 2>&1; then
+            break
+          fi
+
+          now=$(date +%s)
+          if [ $((now-start_time)) -ge 300 ]; then
+            echo "Error: Talos API on $node_ip did not leave maintenance mode within 300s." >&2
+            exit 1
+          fi
+
+          sleep 5
+        done
+      done
+    EOT
+  }
+}
+
 resource "talos_machine_bootstrap" "bootstrap" {
   count                = local.cluster_already_bootstrapped ? 0 : 1
-  depends_on           = [talos_machine_configuration_apply.controlplane_config_apply, talos_machine_configuration_apply.worker_config_apply]
+  depends_on           = [null_resource.controlplane_api_ready, talos_machine_configuration_apply.worker_config_apply]
   client_configuration = talos_machine_secrets.machine_secrets.client_configuration
   node                 = local.controlplane_vms["__CONTROLPLANE_PRIMARY__"].ip
 }
 
 data "talos_cluster_health" "health" {
   count                = local.cluster_already_bootstrapped ? 0 : 1
-  depends_on           = [talos_machine_configuration_apply.controlplane_config_apply, talos_machine_configuration_apply.worker_config_apply]
+  depends_on           = [null_resource.controlplane_api_ready, talos_machine_configuration_apply.worker_config_apply]
   client_configuration = data.talos_client_configuration.talosconfig.client_configuration
   control_plane_nodes  = [for v in local.controlplane_vms : v.ip]
   worker_nodes         = [for v in local.worker_vms : v.ip]
