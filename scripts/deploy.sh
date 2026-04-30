@@ -19,15 +19,17 @@ Deploys the Talos + Rook Ceph stack. By default it skips the destructive
 destroy step and only applies.
 
 Options:
-  -d, --destroy           Destroy the cluster first (dangerous).
-  -D, --destroy-only      Destroy the cluster and exit (no deployment).
-  -v, --verbose           Show all command output (do not silence tofu/kubectl).
-  -g, --debug             Enable shell tracing + verbose output (sets TF_LOG=DEBUG).
-  -c, --skip-ceph         Skip all Rook Ceph steps (operator, cluster, dashboard, CSI).
-  -n, --skip-k8s-net      Skip k8s networking and ingress (k8s-net) steps (ingress, MetalLB, cert-manager).
-  -p, --skip-portainer    Skip Portainer deployment (only if monitoring is deployed).
-  -m, --skip-monitoring   Skip monitoring stack (Prometheus, Loki, Grafana).
-  -h, --help              Show this help message.
+  -d, --destroy             Destroy the cluster first (dangerous).
+  -D, --destroy-only        Destroy the cluster and exit (no deployment).
+      --purge-external-ceph Purge external Ceph resources managed by this cluster.
+                            Can be used alone or combined with --destroy/--destroy-only.
+  -v, --verbose             Show all command output (do not silence tofu/kubectl).
+  -g, --debug               Enable shell tracing + verbose output (sets TF_LOG=DEBUG).
+  -c, --skip-ceph           Skip all Rook Ceph steps (operator, cluster, dashboard, CSI).
+  -n, --skip-k8s-net        Skip k8s networking and ingress (k8s-net) steps (ingress, MetalLB, cert-manager).
+  -p, --skip-portainer      Skip Portainer deployment (only if monitoring is deployed).
+  -m, --skip-monitoring     Skip monitoring stack (Prometheus, Loki, Grafana).
+  -h, --help                Show this help message.
 
 Note:
   This script does not auto-upgrade OpenTofu providers.
@@ -38,6 +40,7 @@ USAGE
 
 destroy_first=false
 destroy_only=false
+purge_external_ceph=false
 debug=false
 verbose=false
 skip_ceph=false
@@ -55,6 +58,10 @@ while [[ $# -gt 0 ]]; do
     -D|--destroy-only)
       destroy_first=true
       destroy_only=true
+      shift
+      ;;
+    --purge-external-ceph)
+      purge_external_ceph=true
       shift
       ;;
     -c|--skip-ceph)
@@ -93,6 +100,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "${purge_external_ceph}" == "true" && "${destroy_first}" != "true" ]]; then
+  error "--purge-external-ceph requires --destroy or --destroy-only." >&2
+  exit 1
+fi
 
 setup_cluster_context "${script_dir}" ""
 
@@ -382,6 +394,94 @@ wait_for_dashboard_cert() {
   done
 }
 
+wait_for_pvcs_bound() {
+  local namespace="$1"
+  local timeout_seconds="${2:-600}"
+  shift 2
+  local pvc_names=("$@")
+  local start
+  local pvc_name
+  local phase
+
+  if [[ "${#pvc_names[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  start="$(date +%s)"
+  while true; do
+    local all_bound=true
+    for pvc_name in "${pvc_names[@]}"; do
+      phase="$(kubectl -n "${namespace}" get pvc "${pvc_name}" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+      if [[ "${phase}" != "Bound" ]]; then
+        all_bound=false
+        break
+      fi
+    done
+
+    if [[ "${all_bound}" == "true" ]]; then
+      return 0
+    fi
+
+    if (( $(date +%s) - start >= timeout_seconds )); then
+      error "Timed out waiting for PVCs in ${namespace} to become Bound." >&2
+      kubectl -n "${namespace}" get pvc "${pvc_names[@]}" >&2 || true
+      exit 1
+    fi
+
+    sleep 5
+  done
+}
+
+wait_for_deployments_ready() {
+  local namespace="$1"
+  local timeout="${2:-600s}"
+  shift 2
+  local deployments=("$@")
+  local deployment_name
+
+  for deployment_name in "${deployments[@]}"; do
+    kubectl -n "${namespace}" rollout status "deploy/${deployment_name}" --timeout="${timeout}"
+  done
+}
+
+wait_for_service_endpoints() {
+  local namespace="$1"
+  local timeout_seconds="${2:-600}"
+  shift 2
+  local service_names=("$@")
+  local start
+  local service_name
+  local addresses
+
+  if [[ "${#service_names[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  start="$(date +%s)"
+  while true; do
+    local all_ready=true
+    for service_name in "${service_names[@]}"; do
+      addresses="$(kubectl -n "${namespace}" get endpoints "${service_name}" -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || true)"
+      if [[ -z "${addresses}" ]]; then
+        all_ready=false
+        break
+      fi
+    done
+
+    if [[ "${all_ready}" == "true" ]]; then
+      return 0
+    fi
+
+    if (( $(date +%s) - start >= timeout_seconds )); then
+      error "Timed out waiting for service endpoints in ${namespace} to become ready." >&2
+      kubectl -n "${namespace}" get endpoints "${service_names[@]}" >&2 || true
+      exit 1
+    fi
+
+    sleep 5
+  done
+}
+
 first_worker_ip() {
   local resources_file="${1:-${cluster_resources_path}}"
   local vms_file="${2:-${cluster_vms_path}}"
@@ -573,8 +673,48 @@ ceph_mode_from_constants() {
   printf '%s\n' "${mode}"
 }
 
+ensure_kubeconfig_available() {
+  if [[ -f "${cluster_kubeconfig_path}" ]]; then
+    return 0
+  fi
+
+  if ! state_dir_has_state "${cluster_root_workspace}"; then
+    error "Cannot purge external Ceph without ${cluster_kubeconfig_path} or root OpenTofu state." >&2
+    exit 1
+  fi
+
+  prepare_root_workspace
+  run_gen_talos_assets
+  run_tofu_init "${cluster_root_workspace}"
+  if ! tofu -chdir="${cluster_root_workspace}" output -raw kubeconfig > "${cluster_kubeconfig_path}" 2>/dev/null; then
+    error "Failed to regenerate kubeconfig from root OpenTofu outputs." >&2
+    exit 1
+  fi
+  chmod 600 "${cluster_kubeconfig_path}"
+}
+
+destroy_workspace_if_state() {
+  local workspace="$1"
+  local description="$2"
+
+  if ! state_dir_has_state "${workspace}"; then
+    message "No ${description} OpenTofu state found; skipping destroy."
+    return 0
+  fi
+
+  run_tofu_init "${workspace}"
+  message "Destroying ${description}..."
+  run tofu -chdir="${workspace}" destroy -auto-approve -refresh=false
+}
+
 deploy_start="$(start_timer)"
 message "Provider upgrades are disabled by default. Update manually when needed: tofu -chdir=<workspace> init -upgrade"
+if [[ "${purge_external_ceph}" == "true" ]]; then
+  if [[ "$(ceph_mode_from_constants "${cluster_ceph_constants_path}")" != "external" ]]; then
+    error "--purge-external-ceph requires ceph_mode = \"external\" in ceph_constants.tf." >&2
+    exit 1
+  fi
+fi
 prepare_root_workspace
 run_gen_talos_assets
 run_tofu_init "${cluster_root_workspace}"
@@ -588,6 +728,12 @@ if [[ "${destroy_first}" == "true" ]]; then
     message "Done."
   else
     message "No root OpenTofu state found for cluster ${cluster_name}; skipping tofu destroy."
+  fi
+
+  if [[ "${purge_external_ceph}" == "true" ]]; then
+    "${script_dir}/purge-external-ceph.sh" \
+      --cluster-name "${cluster_name}" \
+      --ceph-constants "${cluster_ceph_constants_path}"
   fi
 
   message "Removing generated cluster runtime workspace at ${cluster_out_dir}..."
@@ -637,106 +783,7 @@ prefix_value="$(disk_by_id_prefix "${cluster_constants_path}")"
 validate_disk_by_id_prefix "${worker_ip}" "${prefix_value}"
 reboot_nodes_with_pending_kubelet_max_pods "${cluster_constants_path}"
 message "k8s cluster is up and running. Current nodes:"
-NODE_JSON="$(kubectl get nodes -o json)"
-NODE_JSON="${NODE_JSON}" python3 - <<'PY'
-import json
-import os
-import sys
-from datetime import datetime, timezone
-
-
-def parse_rfc3339(value):
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
-
-
-def render_age(created_at):
-    delta = datetime.now(timezone.utc) - parse_rfc3339(created_at)
-    seconds = int(delta.total_seconds())
-    days, rem = divmod(seconds, 86400)
-    hours, rem = divmod(rem, 3600)
-    minutes, _ = divmod(rem, 60)
-
-    if days > 0:
-        return f"{days}d"
-    if hours > 0:
-        return f"{hours}h"
-    return f"{minutes}m"
-
-
-def ready_status(conditions):
-    for condition in conditions:
-        if condition.get("type") == "Ready":
-            return "Ready" if condition.get("status") == "True" else "NotReady"
-    return "Unknown"
-
-
-def node_roles(labels):
-    roles = []
-    for key in labels:
-        if key.startswith("node-role.kubernetes.io/"):
-            role = key.split("/", 1)[1]
-            roles.append(role if role else "<none>")
-
-    if not roles:
-        legacy_role = labels.get("kubernetes.io/role")
-        if legacy_role:
-            roles.append(legacy_role)
-
-    return ",".join(sorted(set(roles))) if roles else "<none>"
-
-
-def internal_ip(addresses):
-    for address in addresses:
-        if address.get("type") == "InternalIP":
-            return address.get("address", "")
-    return ""
-
-payload = json.loads(os.environ["NODE_JSON"])
-headers = [
-    "NAME",
-    "STATUS",
-    "ROLES",
-    "AGE",
-    "INTERNAL-IP",
-    "VERSION",
-    "OS-IMAGE",
-    "KERNEL-VERSION",
-    "CONTAINER-RUNTIME",
-    "MAX-PODS",
-]
-rows = []
-
-for item in sorted(payload.get("items", []), key=lambda node: node["metadata"]["name"]):
-    metadata = item.get("metadata", {})
-    status = item.get("status", {})
-    node_info = status.get("nodeInfo", {})
-    rows.append(
-        [
-            metadata.get("name", ""),
-            ready_status(status.get("conditions", [])),
-            node_roles(metadata.get("labels", {})),
-            render_age(metadata.get("creationTimestamp", datetime.now(timezone.utc).isoformat())),
-            internal_ip(status.get("addresses", [])),
-            node_info.get("kubeletVersion", ""),
-            node_info.get("osImage", ""),
-            node_info.get("kernelVersion", ""),
-            node_info.get("containerRuntimeVersion", ""),
-            status.get("capacity", {}).get("pods", ""),
-        ]
-    )
-
-widths = [len(header) for header in headers]
-for row in rows:
-    for index, value in enumerate(row):
-        widths[index] = max(widths[index], len(value))
-
-def format_row(values):
-    return "  ".join(value.ljust(widths[index]) for index, value in enumerate(values))
-
-print(format_row(headers))
-for row in rows:
-    print(format_row(row))
-PY
+"${script_dir}/render-k8s-nodes.sh" --kubeconfig "${cluster_kubeconfig_path}"
 
 if [[ "${skip_k8s_net}" == "true" ]]; then
   message "Skipping k8s networking and ingress (k8s-net) steps."
@@ -778,6 +825,11 @@ else
   message "Deploying Rook Ceph CSI storage classes..."
   run_tofu_init "${cluster_rook_04_workspace}"
   run tofu -chdir="${cluster_rook_04_workspace}" apply -auto-approve
+  if [[ "${ceph_mode_value}" == "external" ]]; then
+    message "Restarting Rook Ceph CSI RBD provisioner to reload external Ceph monitor configuration..."
+    kubectl -n rook-ceph rollout restart deploy/csi-rbdplugin-provisioner 1>/dev/null
+    kubectl -n rook-ceph rollout status deploy/csi-rbdplugin-provisioner --timeout=180s 1>/dev/null
+  fi
   kubectl -n rook-ceph get storageclasses.storage.k8s.io
 fi
 
@@ -790,7 +842,15 @@ else
   run tofu -chdir="${cluster_monitoring_workspace}" apply -auto-approve -var="skip_portainer=${skip_portainer}"
   message "Restarting Grafana to reload provisioned dashboards..."
   kubectl -n monitoring rollout restart deploy/grafana 1>/dev/null
+  message "Waiting for monitoring PVCs, workloads, and endpoints to become ready..."
+  wait_for_pvcs_bound "monitoring" "600" "grafana-data" "loki-data" "prometheus-data"
+  wait_for_deployments_ready "monitoring" "600s" "grafana" "loki" "prometheus" "kube-state-metrics"
+  wait_for_service_endpoints "monitoring" "600" "grafana" "loki" "prometheus" "kube-state-metrics"
   if [[ "${skip_portainer}" != "true" ]]; then
+    message "Waiting for Portainer PVC, workload, and endpoints to become ready..."
+    wait_for_pvcs_bound "portainer" "600" "portainer"
+    wait_for_deployments_ready "portainer" "600s" "portainer"
+    wait_for_service_endpoints "portainer" "600" "portainer"
     portainer_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw portainer_url)"
     message "Portainer URL: ${URL_FMT_START}${portainer_url}${URL_FMT_END}"
   else

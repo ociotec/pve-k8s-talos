@@ -23,6 +23,14 @@ Environment:
 EOF
 }
 
+require_cmd() {
+  local cmd="$1"
+  if ! command -v "${cmd}" >/dev/null 2>&1; then
+    echo "Missing required command: ${cmd}" >&2
+    exit 1
+  fi
+}
+
 require_env() {
   local name="$1"
   if [[ -z "${!name:-}" ]]; then
@@ -71,34 +79,7 @@ api_put() {
 
 json_extract() {
   local expr="$1"
-  local payload
-  payload="$(cat)"
-  JSON_INPUT="${payload}" python3 - "$expr" <<'PY'
-import json
-import os
-import sys
-
-expr = sys.argv[1]
-payload = json.loads(os.environ["JSON_INPUT"])
-
-value = payload
-for part in expr.split("."):
-    if part == "":
-        continue
-    if isinstance(value, dict):
-        value = value.get(part)
-    else:
-        value = None
-        break
-
-if value is None:
-    sys.exit(1)
-
-if isinstance(value, (dict, list)):
-    print(json.dumps(value))
-else:
-    print(value)
-PY
+  jq -er ".${expr}"
 }
 
 pool_exists() {
@@ -107,37 +88,14 @@ pool_exists() {
   local payload
 
   payload="$(api_get "/nodes/${node}/ceph/pool")"
-  JSON_INPUT="${payload}" python3 - "${pool_name}" <<'PY'
-import json
-import os
-import sys
-
-pool_name = sys.argv[1]
-payload = json.loads(os.environ["JSON_INPUT"])
-for item in payload.get("data", []):
-    name = item.get("pool_name") or item.get("pool") or item.get("name")
-    if name == pool_name:
-        raise SystemExit(0)
-raise SystemExit(1)
-PY
+  printf '%s' "${payload}" \
+    | jq -er --arg pool_name "${pool_name}" '.data[] | (.pool_name // .pool // .name) | select(. == $pool_name)' >/dev/null
 }
 
 discover_ceph_node() {
   local payload
   payload="$(api_get "/nodes")"
-  JSON_INPUT="${payload}" python3 - <<'PY'
-import json
-import os
-
-payload = json.loads(os.environ["JSON_INPUT"])
-for item in payload.get("data", []):
-    if item.get("status") == "online":
-        name = item.get("node")
-        if name:
-            print(name)
-            raise SystemExit(0)
-raise SystemExit(1)
-PY
+  printf '%s' "${payload}" | jq -er '.data[] | select(.status == "online") | .node' | head -n 1
 }
 
 wait_for_task() {
@@ -208,10 +166,13 @@ set_pool_allow_ec_overwrites() {
   local pool_name="$2"
   local response upid
 
-  response="$(
+  if ! response="$(
     api_put "/nodes/${node}/ceph/pool/${pool_name}" \
-      --data-urlencode "allow_ec_overwrites=1"
-  )"
+      --data-urlencode "allow_ec_overwrites=1" 2>/dev/null
+  )"; then
+    echo "Skipping allow_ec_overwrites tuning for EC pool ${pool_name}: Proxmox Ceph API rejected the update." >&2
+    return 0
+  fi
   upid="$(printf '%s' "${response}" | json_extract "data")"
   wait_for_task "${node}" "${upid}"
   echo "Pool ${pool_name} allow_ec_overwrites set to on."
@@ -350,6 +311,9 @@ ensure_rbd_pool() {
 }
 
 main() {
+  require_cmd curl
+  require_cmd jq
+
   if [[ $# -lt 1 ]]; then
     usage >&2
     exit 1

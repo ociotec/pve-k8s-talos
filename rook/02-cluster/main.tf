@@ -84,15 +84,8 @@ locals {
       }
     } : {},
     try(local.block_ec.enabled, false) ? {
-      (local.block_ec.metadata_pool_name) = {
-        name     = local.block_ec.metadata_pool_name
-        type     = "replicated"
-        pg_num   = local.block_ec.pg_num
-        size     = local.block_ec.metadata_size
-        min_size = local.block_ec.metadata_min_size
-      }
-      (local.block_ec.data_pool_name) = {
-        name     = local.block_ec.data_pool_name
+      (local.block_ec.pool_name) = {
+        name     = local.block_ec.pool_name
         type     = "ec"
         pg_num   = local.block_ec.pg_num
         size     = local.block_ec.metadata_size
