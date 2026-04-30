@@ -21,10 +21,10 @@ variable "kubeconfig_path" {
   description = "Path to the kubeconfig file."
 }
 
-variable "skip_portainer" {
+variable "skip_platform" {
   type        = bool
   default     = false
-  description = "Skip Portainer deployment."
+  description = "Skip platform services."
 }
 
 provider "kubernetes" {
@@ -44,7 +44,7 @@ locals {
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
   ]
 
-  platform_resources = slice(local.portainer_manifests, 0, var.skip_portainer ? 0 : length(local.portainer_manifests))
+  platform_resources = slice(local.portainer_manifests, 0, var.skip_platform ? 0 : length(local.portainer_manifests))
 
   platform_certificates = [
     for m in local.platform_resources : m
@@ -73,7 +73,7 @@ locals {
       }
     )
   }
-  expected_preissued_tls_secret_targets = local.tls_source == "preissued" && !var.skip_portainer ? [
+  expected_preissued_tls_secret_targets = local.tls_source == "preissued" && !var.skip_platform ? [
     for secret in local.tls_secrets : format("%s/%s", secret.namespace, secret.secret_name)
   ] : []
   missing_preissued_tls_secret_targets = [
@@ -98,14 +98,14 @@ check "preissued_tls_secrets_unique" {
 
 check "preissued_tls_secrets_required" {
   assert {
-    condition     = local.tls_source != "preissued" || var.skip_portainer || length(local.missing_preissued_tls_secret_targets) == 0
+    condition     = local.tls_source != "preissued" || var.skip_platform || length(local.missing_preissued_tls_secret_targets) == 0
     error_message = format("Missing preissued TLS secret definitions for: %s", join(", ", local.missing_preissued_tls_secret_targets))
   }
 }
 
 check "preissued_tls_secrets_files" {
   assert {
-    condition = local.tls_source != "preissued" || var.skip_portainer || alltrue([
+    condition = local.tls_source != "preissued" || var.skip_platform || alltrue([
       for secret in values(local.preissued_tls_secrets_by_target) :
       trimspace(secret.cert_content) != "" && trimspace(secret.key_content) != ""
     ])
@@ -144,7 +144,7 @@ resource "null_resource" "cert_manager_webhook_ready" {
 }
 
 resource "kubernetes_secret_v1" "preissued_tls" {
-  for_each = local.tls_source == "preissued" && !var.skip_portainer ? local.preissued_tls_secrets_by_target : {}
+  for_each = local.tls_source == "preissued" && !var.skip_platform ? local.preissued_tls_secrets_by_target : {}
 
   metadata {
     name      = each.value.secret_name
@@ -187,5 +187,5 @@ resource "kubernetes_manifest" "platform_ingress" {
 }
 
 output "portainer_url" {
-  value = var.skip_portainer ? null : "https://${local.portainer_hostname}"
+  value = var.skip_platform ? null : "https://${local.portainer_hostname}"
 }

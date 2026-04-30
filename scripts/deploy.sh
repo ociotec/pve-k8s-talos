@@ -27,7 +27,8 @@ Options:
   -g, --debug               Enable shell tracing + verbose output (sets TF_LOG=DEBUG).
   -c, --skip-ceph           Skip all Rook Ceph steps (operator, cluster, dashboard, CSI).
   -n, --skip-k8s-net        Skip k8s networking and ingress (k8s-net) steps (ingress, MetalLB, cert-manager).
-  -p, --skip-portainer      Skip Portainer deployment.
+  -p, --skip-platform       Skip platform services.
+      --skip-portainer      Deprecated alias for --skip-platform.
   -m, --skip-monitoring     Skip monitoring stack (Prometheus, Loki, Grafana).
   -h, --help                Show this help message.
 
@@ -45,7 +46,7 @@ debug=false
 verbose=false
 skip_ceph=false
 skip_k8s_net=false
-skip_portainer=false
+skip_platform=false
 skip_monitoring=false
 gen_talos_args=()
 
@@ -72,8 +73,8 @@ while [[ $# -gt 0 ]]; do
       skip_k8s_net=true
       shift
       ;;
-    -p|--skip-portainer)
-      skip_portainer=true
+    -p|--skip-platform|--skip-portainer)
+      skip_platform=true
       shift
       ;;
     -m|--skip-monitoring)
@@ -114,8 +115,8 @@ fi
 if [[ "${skip_k8s_net}" == "true" ]]; then
   gen_talos_args+=(--skip-k8s-net)
 fi
-if [[ "${skip_portainer}" == "true" ]]; then
-  gen_talos_args+=(--skip-portainer)
+if [[ "${skip_platform}" == "true" ]]; then
+  gen_talos_args+=(--skip-platform)
 fi
 if [[ "${skip_monitoring}" == "true" ]]; then
   gen_talos_args+=(--skip-monitoring)
@@ -841,7 +842,7 @@ else
   message "Grafana admin password: ${DATA_FMT_START}${grafana_password}${DATA_FMT_END}"
 fi
 
-if [[ "${skip_portainer}" == "true" ]]; then
+if [[ "${skip_platform}" == "true" ]]; then
   message "Skipping platform services."
 else
   prepare_platform_workspace

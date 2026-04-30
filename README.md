@@ -102,7 +102,7 @@ Whenever you change `vms.auto.tfvars`, `constants.auto.tfvars`, or `patches/mach
 If you deploy with skip flags and want generated assets to match, pass the same flags here too, for example:
 
 ```bash
-../../scripts/gen-talos-assets.sh --cluster <cluster> --skip-ceph --skip-portainer --skip-monitoring
+../../scripts/gen-talos-assets.sh --cluster <cluster> --skip-ceph --skip-platform --skip-monitoring
 ```
 
 For low-level generation behavior and contributor rules, see [AGENTS.md](AGENTS.md).
@@ -507,7 +507,7 @@ Run with `-h` or `--help` to see help documentation. Common options:
 --destroy         Destroy the cluster first and purge local state files.
 --skip-ceph       Skip Rook Ceph operator/cluster/dashboard/CSI.
 --skip-k8s-net    Skip MetalLB, ingress-nginx, and cert-manager.
---skip-portainer  Skip Portainer deployment.
+--skip-platform   Skip platform services.
 --skip-monitoring Skip Prometheus/Loki/Grafana stack.
 ```
 
