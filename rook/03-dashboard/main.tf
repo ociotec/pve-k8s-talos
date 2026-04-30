@@ -2,7 +2,7 @@ terraform {
   required_providers {
     kubernetes = {
       source  = "hashicorp/kubernetes"
-      version = ">= 3.0.1"
+      version = ">= 3.1.0"
     }
     null = {
       source  = "hashicorp/null"
@@ -22,9 +22,11 @@ provider "kubernetes" {
 
 locals {
   effective_ceph_mode = try(local.ceph_mode, "internal")
-  effective_ceph_hostname = try(local.ceph_dashboard_hostname, "ceph.${local.domain}")
+  ceph_constants_source = file("${path.module}/ceph_constants.tf")
+  ceph_dashboard_hostname_value = can(regex("(?m)^\\s*ceph_dashboard_hostname\\s*=\\s*\"([^\"]*)\"", local.ceph_constants_source)[0]) ? regex("(?m)^\\s*ceph_dashboard_hostname\\s*=\\s*\"([^\"]*)\"", local.ceph_constants_source)[0] : ""
+  effective_ceph_hostname = local.ceph_dashboard_hostname_value != "" ? local.ceph_dashboard_hostname_value : "ceph.${local.domain}"
   ceph_tls_secret_name = "rook-ceph-dashboard-tls"
-  ceph_dashboard_resources = local.effective_ceph_mode == "external" ? [] : concat(
+  internal_ceph_dashboard_resources = concat(
     [
       for doc in split("\n---\n", file("${path.module}/../manifests/dashboard-external-https.yaml")) :
       yamldecode(doc)
@@ -39,6 +41,10 @@ locals {
       if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
     ]
   )
+  ceph_dashboard_resources = [
+    for m in local.internal_ceph_dashboard_resources : m
+    if local.effective_ceph_mode != "external"
+  ]
   rook_dashboard_certificates = [
     for m in local.ceph_dashboard_resources : m
     if try(m.kind, "") == "Certificate" && local.tls_source == "ca_issuer"

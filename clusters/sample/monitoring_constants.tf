@@ -8,7 +8,7 @@ locals {
 
   storage_class = "${local.ceph_name_prefix}-rbd-ec"
 
-  portainer_image_tag     = "2.33.6"
+  portainer_image_tag     = "2.40.0"
   portainer_storage_class = local.storage_class
   portainer_pvc_size      = "10Gi"
 
@@ -19,10 +19,10 @@ locals {
   prometheus_retention = "15d"
   loki_retention       = "168h" # 7 days
 
-  grafana_image_tag    = "12.4.0-20648027705-ubuntu"
-  prometheus_image_tag = "v3.8.1"
-  loki_image_tag       = "3.6.3"
-  promtail_image_tag   = "3.6.3"
+  grafana_image_tag    = "13.0.1"
+  prometheus_image_tag = "v3.11.2"
+  loki_image_tag       = "3.7.1"
+  promtail_image_tag   = "3.7.1"
   kube_state_metrics_image_tag = "v2.17.0"
 
   grafana_admin_user            = "admin"

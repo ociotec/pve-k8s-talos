@@ -45,7 +45,7 @@ constants = {
     # Generate new ISO & Talos factory image IDs from https://factory.talos.dev/
     "version"                    = "v1.12.6"
     # Keep this compatible with your Talos version.
-    "kubernetes_version"         = "v1.35.0"
+    "kubernetes_version"         = "v1.36.0"
     "factory_image_id"           = "ce4c980550dd2ab1b17bbf2b08801c7eb59418eafe8f279833297925d67c7515"
     "cluster_name"               = "talos"
     # Optional kubelet max pods per node. Leave empty to keep Kubernetes default (110).
