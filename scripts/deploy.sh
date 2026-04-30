@@ -256,6 +256,7 @@ prepare_platform_workspace() {
   link_into_workspace "${cluster_ceph_constants_path}" "${workspace}/ceph_constants.tf"
   link_into_workspace "${cluster_certs_dir}" "${workspace}/certs"
   link_into_workspace "${repo_root}/platform/portainer.yaml" "${workspace}/portainer.yaml"
+  link_into_workspace "${repo_root}/platform/rancher.yaml" "${workspace}/rancher.yaml"
   if [[ -r "${repo_root}/platform/.terraform.lock.hcl" ]]; then
     link_into_workspace "${repo_root}/platform/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
   fi
@@ -855,6 +856,16 @@ else
   wait_for_service_endpoints "portainer" "600" "portainer"
   portainer_url="$(tofu -chdir="${cluster_platform_workspace}" output -raw portainer_url)"
   message "Portainer URL: ${URL_FMT_START}${portainer_url}${URL_FMT_END}"
+  rancher_enabled="$(tofu -chdir="${cluster_platform_workspace}" output -raw rancher_enabled)"
+  if [[ "${rancher_enabled}" == "true" ]]; then
+    message "Waiting for Rancher workload and endpoints to become ready..."
+    wait_for_deployments_ready "cattle-system" "900s" "rancher"
+    wait_for_service_endpoints "cattle-system" "900" "rancher"
+    rancher_url="$(tofu -chdir="${cluster_platform_workspace}" output -raw rancher_url)"
+    rancher_bootstrap_password="$(tofu -chdir="${cluster_platform_workspace}" output -raw rancher_bootstrap_password)"
+    message "Rancher URL: ${URL_FMT_START}${rancher_url}${URL_FMT_END}"
+    message "Rancher bootstrap password: ${DATA_FMT_START}${rancher_bootstrap_password}${DATA_FMT_END}"
+  fi
 fi
 
 ceph_mode_value="$(ceph_mode_from_constants "${cluster_ceph_constants_path}")"

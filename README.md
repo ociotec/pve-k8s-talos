@@ -80,7 +80,7 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
   - Certificate catalog (`available_certificates`) and default certificate entry.
 - `monitoring_constants.tf`
 - `platform_constants.tf`
-  - Storage class, image versions, and hostnames for platform services such as Portainer.
+  - Storage class, image versions, and hostnames for platform services such as Portainer and optional Rancher.
   - `tls_secrets` maps namespaces/secret names to entries from `available_certificates`.
 - `ceph_constants.tf`
   - `ceph_mode = "internal"` to run a full Rook-managed Ceph cluster in Kubernetes.
@@ -448,7 +448,8 @@ If you don't have internal DNS, add an `/etc/hosts` entry using `ingress_lb_ip` 
 
 Define your constants in `clusters/<cluster>/monitoring_constants.tf`: monitoring hostnames, storage class, PVC sizes, retention settings, and image versions.
 
-Define Portainer-specific constants in `clusters/<cluster>/platform_constants.tf`.
+Define Portainer/Rancher constants in `clusters/<cluster>/platform_constants.tf`.
+Rancher is enabled when `rancher_hostname` is non-empty and uses one replica by default in the sample constants.
 This stack also includes kube-state-metrics (requests/limits) and kubelet cAdvisor scrape for CPU/RAM usage.
 The manifests are rendered from templates using those values.
 Use the same domain as `k8s_net_constants.tf` so TLS and DNS align.
