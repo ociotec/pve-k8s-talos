@@ -92,6 +92,16 @@ For any non-trivial change:
 - Keep progress output minimal in normal mode.
 - Emit detailed progress/debug logs only in verbose/debug mode.
 
+## Repo-Specific Agent Workflows
+
+- When the user asks to audit or update pinned versions across the repository, follow `docs/agent-workflows/update-versions.md`.
+- Treat files under `docs/agent-workflows/` as repo-local operating procedures for agents:
+  - use them when the user request clearly matches the workflow
+  - apply them together with this `AGENTS.md`, not instead of it
+  - prefer them over any project-local `skills/` directory, since local skills are not auto-installed for users
+- Keep workflow documents focused on reusable execution patterns, output shape, and decision rules.
+- Keep repository safety and validation policy centralized in this `AGENTS.md`.
+
 ## Cluster Directory Hygiene
 
 - Each real cluster must have its own dedicated directory under `clusters/<cluster>/`.
