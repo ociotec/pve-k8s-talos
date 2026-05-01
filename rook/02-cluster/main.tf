@@ -24,7 +24,7 @@ locals {
   effective_ceph_mode          = try(local.ceph_mode, "internal")
   effective_ceph_namespace     = try(local.ceph_namespace, "rook-ceph")
   effective_ceph_cluster_name  = try(local.ceph_cluster_name, "rook-ceph")
-  effective_ceph_cluster_image = try(local.ceph_cluster_image, "quay.io/ceph/ceph:v19.2.3")
+  effective_ceph_cluster_image = try(local.ceph_cluster_image, "quay.io/ceph/ceph:v20.2.1")
   effective_ceph_name_prefix   = try(local.ceph_name_prefix, "cluster")
 
   external_ceph = try(local.ceph_external, {})

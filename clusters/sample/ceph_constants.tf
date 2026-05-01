@@ -2,7 +2,7 @@ locals {
   ceph_mode = "internal"
   ceph_namespace    = "rook-ceph"
   ceph_cluster_name = "rook-ceph"
-  ceph_cluster_image = "quay.io/ceph/ceph:v19.2.3"
+  ceph_cluster_image = "quay.io/ceph/ceph:v20.2.1"
 
   ceph_name_prefix = "sample"
 

@@ -17,7 +17,7 @@ locals {
   prometheus_image_tag = "v3.11.2"
   loki_image_tag       = "3.7.1"
   promtail_image_tag   = "3.7.1"
-  kube_state_metrics_image_tag = "v2.17.0"
+  kube_state_metrics_image_tag = "v2.18.0"
 
   grafana_admin_user            = "admin"
   grafana_admin_password_length = 24
