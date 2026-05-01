@@ -638,6 +638,13 @@ wait_for_k8s_api_ready() {
   done
 }
 
+set_kubeconfig_server() {
+  local kubeconfig_path="$1"
+  local endpoint_ip="$2"
+
+  kubectl config set-cluster talos --server="https://${endpoint_ip}:6443" --kubeconfig "${kubeconfig_path}" 1>/dev/null
+}
+
 disk_by_id_prefix() {
   awk -F'"' '/"disk_by_id_prefix"/ { print $4; exit }' "$1"
 }
@@ -851,7 +858,7 @@ if [[ -n "${controlplane_vip}" ]]; then
   bootstrap_kubeconfig_path="$(mktemp)"
   cp "${cluster_kubeconfig_path}" "${bootstrap_kubeconfig_path}"
   chmod 600 "${bootstrap_kubeconfig_path}"
-  kubectl config set-cluster talos --server="https://${primary_controlplane_ip}:6443" --kubeconfig "${bootstrap_kubeconfig_path}" 1>/dev/null
+  set_kubeconfig_server "${bootstrap_kubeconfig_path}" "${primary_controlplane_ip}"
   active_kubeconfig_path="${bootstrap_kubeconfig_path}"
 fi
 export KUBECONFIG="${active_kubeconfig_path}"
@@ -862,15 +869,17 @@ if [[ -z "${worker_ip}" ]]; then
 fi
 prefix_value="$(disk_by_id_prefix "${cluster_constants_path}")"
 validate_disk_by_id_prefix "${worker_ip}" "${prefix_value}"
+if [[ -n "${controlplane_vip}" ]]; then
+  wait_for_k8s_api_ready "${controlplane_vip}" "120"
+  set_kubeconfig_server "${cluster_kubeconfig_path}" "${controlplane_vip}"
+  active_kubeconfig_path="${cluster_kubeconfig_path}"
+  export KUBECONFIG="${active_kubeconfig_path}"
+  rm -f "${bootstrap_kubeconfig_path}"
+  bootstrap_kubeconfig_path=""
+fi
 reboot_nodes_with_pending_kubelet_max_pods "${cluster_constants_path}"
 message "k8s cluster is up and running. Current nodes:"
 "${script_dir}/render-k8s-nodes.sh" --kubeconfig "${active_kubeconfig_path}"
-if [[ -n "${controlplane_vip}" ]]; then
-  wait_for_k8s_api_ready "${controlplane_vip}" "120"
-  kubectl config set-cluster talos --server="https://${controlplane_vip}:6443" --kubeconfig "${cluster_kubeconfig_path}" 1>/dev/null
-  export KUBECONFIG="${cluster_kubeconfig_path}"
-  rm -f "${bootstrap_kubeconfig_path}"
-fi
 
 if [[ "${skip_k8s_net}" == "true" ]]; then
   message "Skipping k8s networking and ingress (k8s-net) steps."
