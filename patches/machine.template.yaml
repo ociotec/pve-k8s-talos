@@ -13,6 +13,7 @@ machine:
           busPath: "0*"
         addresses:
           - ${ip}/${cidr}
+${vip_section}
         routes:
           - network: 0.0.0.0/0
             gateway: ${gateway}

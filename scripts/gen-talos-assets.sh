@@ -182,6 +182,7 @@ talos_version="$(awk -F'"' '/"version"/ { print $4; exit }' "${constants_path}")
 talos_factory_image_id="$(awk -F'"' '/"factory_image_id"/ { print $4; exit }' "${constants_path}")"
 talos_discovery_service_disabled="$(awk -F'"' '/"discovery_service_disabled"/ { print $4; exit }' "${constants_path}")"
 talos_max_pods="$(awk -F'"' '/"max_pods"/ { print $4; exit }' "${constants_path}")"
+controlplane_vip="$(awk -F'"' '/"controlplane_vip"/ { print $4; exit }' "${constants_path}")"
 disk_by_id_prefix="$(awk -F'"' '/"disk_by_id_prefix"/ { print $4; exit }' "${constants_path}")"
 proxy_url="$(awk -F'"' '/"proxy_url"/ { print $4; exit }' "${constants_path}")"
 no_proxy_extra="$(awk -F'"' '/"no_proxy_extra"/ { print $4; exit }' "${constants_path}")"
@@ -620,8 +621,8 @@ fi
 template="$(cat "${template_path}")"
 
 # Basic template sanity check.
-if [[ "${template}" != *'${ip}'* || "${template}" != *'${cidr}'* || "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${kubelet_extra_args_section}'* || "${template}" != *'${machine_registries_section}'* || "${template}" != *'${k8s_node_labels_section}'* || "${template}" != *'${proxy_env_section}'* || "${template}" != *'${cert_files_section}'* || "${template}" != *'${talos_discovery_service_disabled}'* ]]; then
-  echo "Error: template is missing required placeholders (\${ip}, \${cidr}, \${machine_disks_section}, \${kubelet_extra_mounts_section}, \${kubelet_extra_args_section}, \${machine_registries_section}, \${k8s_node_labels_section}, \${proxy_env_section}, \${cert_files_section}, \${talos_discovery_service_disabled})." >&2
+if [[ "${template}" != *'${ip}'* || "${template}" != *'${cidr}'* || "${template}" != *'${vip_section}'* || "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${kubelet_extra_args_section}'* || "${template}" != *'${machine_registries_section}'* || "${template}" != *'${k8s_node_labels_section}'* || "${template}" != *'${proxy_env_section}'* || "${template}" != *'${cert_files_section}'* || "${template}" != *'${talos_discovery_service_disabled}'* ]]; then
+  echo "Error: template is missing required placeholders (\${ip}, \${cidr}, \${vip_section}, \${machine_disks_section}, \${kubelet_extra_mounts_section}, \${kubelet_extra_args_section}, \${machine_registries_section}, \${k8s_node_labels_section}, \${proxy_env_section}, \${cert_files_section}, \${talos_discovery_service_disabled})." >&2
   echo "Fix: restore patches/machine.template.yaml or add the missing placeholders." >&2
   exit 1
 fi
@@ -1383,6 +1384,13 @@ for name in "${!vm_ips[@]}"; do
   else
     kubelet_extra_args_section=""
   fi
+  if [[ " ${controlplane_names[*]} " == *" ${name} "* && -n "${controlplane_vip}" ]]; then
+    vip_section=$'\n'
+    vip_section+=$'        vip:\n'
+    vip_section+=$'          ip: "'"${controlplane_vip}"'"'
+  else
+    vip_section=""
+  fi
 
   for key in "${!resource_labels[@]}"; do
     if [[ "${key}" == "${resource_type}|"* ]]; then
@@ -1409,6 +1417,7 @@ for name in "${!vm_ips[@]}"; do
   rendered="${template}"
   rendered="${rendered//'${ip}'/${ip}}"
   rendered="${rendered//'${cidr}'/${net_size}}"
+  rendered="${rendered//'${vip_section}'/${vip_section}}"
   rendered="${rendered//'${gateway}'/${gateway}}"
   rendered="${rendered//'${dns_servers_section}'/${dns_servers_section}}"
   rendered="${rendered//'${ntp_servers_section}'/${ntp_servers_section}}"

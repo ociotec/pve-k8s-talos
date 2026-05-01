@@ -1,6 +1,6 @@
 data "talos_machine_configuration" "machineconfig___SAFE_NAME__" {
   cluster_name     = var.constants["talos"]["cluster_name"]
-  cluster_endpoint = "https://${local.controlplane_vms["__PRIMARY_CONTROLPLANE__"].ip}:6443"
+  cluster_endpoint = "https://${try(var.constants["talos"]["controlplane_vip"], local.controlplane_vms["__PRIMARY_CONTROLPLANE__"].ip)}:6443"
   kubernetes_version = try(var.constants["talos"]["kubernetes_version"], "v1.35.0")
   machine_type     = "controlplane"
   machine_secrets  = talos_machine_secrets.machine_secrets.machine_secrets

@@ -48,6 +48,9 @@ constants = {
     "kubernetes_version"         = "v1.36.0"
     "factory_image_id"           = "ce4c980550dd2ab1b17bbf2b08801c7eb59418eafe8f279833297925d67c7515"
     "cluster_name"               = "talos"
+    # Shared Talos control-plane VIP for the Kubernetes API endpoint.
+    # Keep it on the same L2/subnet as the control planes and outside the MetalLB pool.
+    "controlplane_vip"           = "192.168.1.50"
     # Optional kubelet max pods per node. Leave empty to keep Kubernetes default (110).
     "max_pods"                   = ""
     # Optional Talos registry mirror settings. The generator renders these under

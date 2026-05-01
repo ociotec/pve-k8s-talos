@@ -109,6 +109,8 @@ fi
 
 setup_cluster_context "${script_dir}" ""
 
+controlplane_vip="$(awk -F'"' '/"controlplane_vip"/ { print $4; exit }' "${cluster_constants_path}")"
+
 if [[ "${skip_ceph}" == "true" ]]; then
   gen_talos_args+=(--skip-ceph)
 fi
@@ -559,6 +561,53 @@ first_worker_ip() {
   ' "${vms_file}"
 }
 
+first_controlplane_ip() {
+  local vms_file="${1:-${cluster_vms_path}}"
+
+  awk '
+    /^[[:space:]]*#/ { next }
+    match($0, /"[^"]+"[[:space:]]*=[[:space:]]*{/) { in_block=1; is_controlplane=0; next }
+    in_block && match($0, /type[[:space:]]*=[[:space:]]*"[^"]+"/) {
+      t = $0
+      sub(/^[^"]*"/, "", t)
+      sub(/".*/, "", t)
+      if (t == "controlplane") { is_controlplane=1 }
+    }
+    in_block && match($0, /ip[[:space:]]*=[[:space:]]*"[^"]+"/) {
+      if (is_controlplane) {
+        ip = $0
+        sub(/^[^"]*"/, "", ip)
+        sub(/".*/, "", ip)
+        print ip
+        exit
+      }
+      in_block=0
+      is_controlplane=0
+    }
+    in_block && /}/ { in_block=0; is_controlplane=0 }
+  ' "${vms_file}"
+}
+
+wait_for_k8s_api_ready() {
+  local endpoint_ip="$1"
+  local timeout_seconds="${2:-120}"
+  local start
+
+  start="$(date +%s)"
+  while true; do
+    if curl --silent --show-error --insecure --max-time 5 "https://${endpoint_ip}:6443/readyz" >/dev/null 2>&1; then
+      return 0
+    fi
+
+    if (( $(date +%s) - start >= timeout_seconds )); then
+      error "Timed out waiting for Kubernetes API on ${endpoint_ip}:6443 to become ready." >&2
+      exit 1
+    fi
+
+    sleep 5
+  done
+}
+
 disk_by_id_prefix() {
   awk -F'"' '/"disk_by_id_prefix"/ { print $4; exit }' "$1"
 }
@@ -761,7 +810,21 @@ else
 fi
 
 export TALOSCONFIG="${cluster_talosconfig_path}"
-export KUBECONFIG="${cluster_kubeconfig_path}"
+active_kubeconfig_path="${cluster_kubeconfig_path}"
+bootstrap_kubeconfig_path=""
+if [[ -n "${controlplane_vip}" ]]; then
+  primary_controlplane_ip="$(first_controlplane_ip)"
+  if [[ -z "${primary_controlplane_ip}" ]]; then
+    error "Failed to determine the first controlplane IP from vms.auto.tfvars." >&2
+    exit 1
+  fi
+  bootstrap_kubeconfig_path="$(mktemp)"
+  cp "${cluster_kubeconfig_path}" "${bootstrap_kubeconfig_path}"
+  chmod 600 "${bootstrap_kubeconfig_path}"
+  kubectl config set-cluster talos --server="https://${primary_controlplane_ip}:6443" --kubeconfig "${bootstrap_kubeconfig_path}" 1>/dev/null
+  active_kubeconfig_path="${bootstrap_kubeconfig_path}"
+fi
+export KUBECONFIG="${active_kubeconfig_path}"
 worker_ip="$(first_worker_ip)"
 if [[ -z "${worker_ip}" ]]; then
   error "Failed to determine the first worker name/IP from vms.auto.tfvars." >&2
@@ -771,7 +834,13 @@ prefix_value="$(disk_by_id_prefix "${cluster_constants_path}")"
 validate_disk_by_id_prefix "${worker_ip}" "${prefix_value}"
 reboot_nodes_with_pending_kubelet_max_pods "${cluster_constants_path}"
 message "k8s cluster is up and running. Current nodes:"
-"${script_dir}/render-k8s-nodes.sh" --kubeconfig "${cluster_kubeconfig_path}"
+"${script_dir}/render-k8s-nodes.sh" --kubeconfig "${active_kubeconfig_path}"
+if [[ -n "${controlplane_vip}" ]]; then
+  wait_for_k8s_api_ready "${controlplane_vip}" "120"
+  kubectl config set-cluster talos --server="https://${controlplane_vip}:6443" --kubeconfig "${cluster_kubeconfig_path}" 1>/dev/null
+  export KUBECONFIG="${cluster_kubeconfig_path}"
+  rm -f "${bootstrap_kubeconfig_path}"
+fi
 
 if [[ "${skip_k8s_net}" == "true" ]]; then
   message "Skipping k8s networking and ingress (k8s-net) steps."
