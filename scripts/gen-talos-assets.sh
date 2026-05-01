@@ -8,6 +8,7 @@ source "${script_dir}/common.sh"
 cluster_arg=""
 skip_ceph=false
 skip_k8s_net=false
+skip_identity=false
 skip_platform=false
 skip_monitoring=false
 
@@ -29,6 +30,10 @@ while [[ $# -gt 0 ]]; do
       skip_k8s_net=true
       shift
       ;;
+    --skip-identity)
+      skip_identity=true
+      shift
+      ;;
     --skip-platform|--skip-portainer)
       skip_platform=true
       shift
@@ -45,6 +50,7 @@ Options:
   --cluster <name>    Cluster name. Must match the current clusters/<name> directory.
   --skip-ceph         Exclude Rook Ceph hostnames from generated no_proxy values.
   --skip-k8s-net      Exclude k8s-net ingress IP/hostnames from generated no_proxy values.
+  --skip-identity     Exclude identity hostnames from generated no_proxy values.
   --skip-platform     Exclude platform hostnames from generated no_proxy values.
   --skip-portainer    Deprecated alias for --skip-platform.
   --skip-monitoring   Exclude monitoring hostnames from generated no_proxy values.
@@ -866,11 +872,12 @@ if [[ -n "${proxy_url}" ]]; then
       while IFS= read -r hostname; do
         add_no_proxy_entry "${hostname}"
       done < <(
-        awk -v domain="${k8s_net_domain}" -v skip_platform="${skip_platform}" -v skip_ceph="${skip_ceph}" -F'"' '
+        awk -v domain="${k8s_net_domain}" -v skip_identity="${skip_identity}" -v skip_platform="${skip_platform}" -v skip_ceph="${skip_ceph}" -F'"' '
           /_hostname[[:space:]]*=/ {
             key=$1
             gsub(/^[[:space:]]+/, "", key)
             gsub(/[[:space:]]*=[[:space:]]*$/, "", key)
+            if (skip_identity == "true" && key == "keycloak_hostname") next
             if (skip_platform == "true" && key == "portainer_hostname") next
             if (skip_ceph == "true" && key == "ceph_hostname") next
             val=$2
@@ -880,6 +887,15 @@ if [[ -n "${proxy_url}" ]]; then
         ' "${k8s_net_constants_path}"
       )
     fi
+  fi
+
+  identity_constants_path="${cluster_identity_constants_path}"
+  if [[ "${skip_identity}" != "true" && -r "${identity_constants_path}" && -n "${k8s_net_domain}" ]]; then
+    while IFS= read -r hostname; do
+      add_no_proxy_entry "${hostname}"
+    done < <(
+      awk -v domain="${k8s_net_domain}" -F'"' '/_hostname[[:space:]]*=/{val=$2; gsub("\\$\\{local.domain\\}", domain, val); print val}' "${identity_constants_path}"
+    )
   fi
 
   platform_constants_path="${cluster_platform_constants_path}"

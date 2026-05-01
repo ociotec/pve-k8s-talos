@@ -27,6 +27,7 @@ Options:
   -g, --debug               Enable shell tracing + verbose output (sets TF_LOG=DEBUG).
   -c, --skip-ceph           Skip all Rook Ceph steps (operator, cluster, dashboard, CSI).
   -n, --skip-k8s-net        Skip k8s networking and ingress (k8s-net) steps (ingress, MetalLB, cert-manager).
+  -i, --skip-identity       Skip identity services (Keycloak and its database).
   -p, --skip-platform       Skip platform services.
       --skip-portainer      Deprecated alias for --skip-platform.
   -m, --skip-monitoring     Skip monitoring stack (Prometheus, Loki, Grafana).
@@ -46,6 +47,7 @@ debug=false
 verbose=false
 skip_ceph=false
 skip_k8s_net=false
+skip_identity=false
 skip_platform=false
 skip_monitoring=false
 gen_talos_args=()
@@ -71,6 +73,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     -n|--skip-k8s-net)
       skip_k8s_net=true
+      shift
+      ;;
+    -i|--skip-identity)
+      skip_identity=true
       shift
       ;;
     -p|--skip-platform|--skip-portainer)
@@ -116,6 +122,9 @@ if [[ "${skip_ceph}" == "true" ]]; then
 fi
 if [[ "${skip_k8s_net}" == "true" ]]; then
   gen_talos_args+=(--skip-k8s-net)
+fi
+if [[ "${skip_identity}" == "true" ]]; then
+  gen_talos_args+=(--skip-identity)
 fi
 if [[ "${skip_platform}" == "true" ]]; then
   gen_talos_args+=(--skip-platform)
@@ -241,6 +250,27 @@ prepare_monitoring_workspace() {
   link_into_workspace "${repo_root}/monitoring/grafana" "${workspace}/grafana"
   if [[ -r "${repo_root}/monitoring/.terraform.lock.hcl" ]]; then
     link_into_workspace "${repo_root}/monitoring/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
+  fi
+}
+
+prepare_identity_workspace() {
+  local workspace="${cluster_identity_workspace}"
+
+  require_cluster_file "${cluster_identity_constants_path}" "identity constants"
+  require_cluster_file "${cluster_k8s_net_constants_path}" "k8s-net constants"
+  require_cluster_file "${cluster_ceph_constants_path}" "ceph constants"
+  mkdir -p "${workspace}" "${cluster_certs_dir}"
+  if [[ -d "${repo_root}/identity/.terraform" ]]; then
+    link_into_workspace "${repo_root}/identity/.terraform" "${workspace}/.terraform"
+  fi
+  link_into_workspace "${repo_root}/identity/main.tf" "${workspace}/main.tf"
+  link_into_workspace "${repo_root}/identity/keycloak.yaml" "${workspace}/keycloak.yaml"
+  link_into_workspace "${cluster_identity_constants_path}" "${workspace}/constants.tf"
+  link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/k8s_net_constants.tf"
+  link_into_workspace "${cluster_ceph_constants_path}" "${workspace}/ceph_constants.tf"
+  link_into_workspace "${cluster_certs_dir}" "${workspace}/certs"
+  if [[ -r "${repo_root}/identity/.terraform.lock.hcl" ]]; then
+    link_into_workspace "${repo_root}/identity/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
   fi
 }
 
@@ -888,6 +918,26 @@ else
     kubectl -n rook-ceph rollout status deploy/csi-rbdplugin-provisioner --timeout=180s 1>/dev/null
   fi
   kubectl -n rook-ceph get storageclasses.storage.k8s.io
+fi
+
+if [[ "${skip_identity}" == "true" ]]; then
+  message "Skipping identity services."
+else
+  prepare_identity_workspace
+  message "Deploying identity services..."
+  run_tofu_init "${cluster_identity_workspace}"
+  run tofu -chdir="${cluster_identity_workspace}" apply -auto-approve
+  message "Waiting for identity PVCs, workloads, and endpoints to become ready..."
+  wait_for_pvcs_bound "identity" "600" "keycloak-postgres-data"
+  wait_for_deployments_ready "identity" "900s" "keycloak-postgres" "keycloak"
+  wait_for_service_endpoints "identity" "900" "keycloak-postgres" "keycloak"
+  kubectl -n identity wait --for=condition=Complete job/keycloak-bootstrap-admin --timeout=300s
+  keycloak_url="$(tofu -chdir="${cluster_identity_workspace}" output -raw keycloak_url)"
+  keycloak_admin_user="$(tofu -chdir="${cluster_identity_workspace}" output -raw keycloak_admin_user)"
+  keycloak_admin_password="$(tofu -chdir="${cluster_identity_workspace}" output -raw keycloak_admin_password)"
+  message "Keycloak URL: ${URL_FMT_START}${keycloak_url}${URL_FMT_END}"
+  message "Keycloak admin user: ${DATA_FMT_START}${keycloak_admin_user}${DATA_FMT_END}"
+  message "Keycloak admin password: ${DATA_FMT_START}${keycloak_admin_password}${DATA_FMT_END}"
 fi
 
 if [[ "${skip_monitoring}" == "true" ]]; then
