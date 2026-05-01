@@ -12,11 +12,18 @@ provider "kubernetes" {
 }
 
 locals {
-  rook_crds = [
-    for doc in split("\n---\n", file("${path.module}/../manifests/crds.yaml")) :
-    yamldecode(doc)
-    if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
-  ]
+  rook_crds = concat(
+    [
+      for doc in split("\n---\n", file("${path.module}/../manifests/crds.yaml")) :
+      yamldecode(doc)
+      if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
+    ],
+    [
+      for doc in split("\n---\n", file("${path.module}/../manifests/crds-nvmeof.yaml")) :
+      yamldecode(doc)
+      if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
+    ],
+  )
   rook_common = [
     for doc in split("\n---\n", file("${path.module}/../manifests/common.yaml")) :
     yamldecode(doc)
