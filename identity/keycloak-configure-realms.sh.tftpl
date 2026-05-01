@@ -1,0 +1,124 @@
+set -eu
+
+KEYCLOAK_URL="http://keycloak:8080"
+KCADM="/opt/keycloak/bin/kcadm.sh"
+ADMIN_USER="$(cat /keycloak-admin/username)"
+ADMIN_PASSWORD="$(cat /keycloak-admin/password)"
+TEMP_USER="temp_admin"
+TMPDIR="$(mktemp -d)"
+trap 'rm -rf "$TMPDIR"' EXIT
+
+login() {
+  "$KCADM" config credentials \
+    --server "$KEYCLOAK_URL" \
+    --realm master \
+    --user "$1" \
+    --password "$ADMIN_PASSWORD" >/dev/null 2>&1
+}
+
+first_id() {
+  sed -n 's/.*"id" : "\([^"]*\)".*/\1/p' | head -n1
+}
+
+realm_exists() {
+  "$KCADM" get "realms/$1" >/dev/null 2>&1
+}
+
+realm_id() {
+  "$KCADM" get "realms/$1" | first_id
+}
+
+provider_id() {
+  "$KCADM" get components -r "$1" -q type=org.keycloak.storage.UserStorageProvider -q name="$2" | first_id
+}
+
+mapper_id() {
+  "$KCADM" get components -r "$1" -q parent="$2" -q name="$3" | first_id
+}
+
+upsert_realm() {
+  realm_name="$1"
+  payload_file="$2"
+
+  if realm_exists "$realm_name"; then
+    "$KCADM" update "realms/$realm_name" -f "$payload_file"
+  else
+    "$KCADM" create realms -f "$payload_file"
+  fi
+}
+
+upsert_provider() {
+  realm_name="$1"
+  provider_name="$2"
+  payload_file="$3"
+
+  existing_id="$(provider_id "$realm_name" "$provider_name")"
+  if [ -n "$existing_id" ]; then
+    "$KCADM" update "components/$existing_id" -r "$realm_name" -f "$payload_file"
+  else
+    "$KCADM" create components -r "$realm_name" -f "$payload_file"
+  fi
+}
+
+upsert_mapper() {
+  realm_name="$1"
+  provider_component_id="$2"
+  mapper_name="$3"
+  payload_file="$4"
+
+  existing_id="$(mapper_id "$realm_name" "$provider_component_id" "$mapper_name")"
+  if [ -n "$existing_id" ]; then
+    "$KCADM" update "components/$existing_id" -r "$realm_name" -f "$payload_file"
+  else
+    "$KCADM" create components -r "$realm_name" -f "$payload_file"
+  fi
+}
+
+until login "$TEMP_USER" || login "$ADMIN_USER"; do
+  sleep 5
+done
+
+%{ for realm_index, realm in keycloak_realms ~}
+cat > "$TMPDIR/realm-${realm_index}.json" <<'EOF_REALM_${realm_index}'
+${jsonencode({
+  realm                    = realm.name
+  enabled                  = true
+  eventsEnabled            = realm.settings.save_user_events
+  adminEventsEnabled       = realm.settings.save_admin_events
+  adminEventsDetailsEnabled = realm.settings.save_admin_events
+})}
+EOF_REALM_${realm_index}
+upsert_realm '${replace(realm.name, "'", "'\"'\"'")}' "$TMPDIR/realm-${realm_index}.json"
+
+REALM_ID="$(realm_id '${replace(realm.name, "'", "'\"'\"'")}')"
+[ -n "$REALM_ID" ]
+%{ for federation_index, federation in realm.user_federation ~}
+cat > "$TMPDIR/provider-${realm_index}-${federation_index}.json" <<'EOF_PROVIDER_${realm_index}_${federation_index}'
+${jsonencode({
+  name         = federation.name
+  providerId   = federation.provider_id
+  providerType = federation.provider_type
+  parentId     = "__REALM_ID__"
+  config       = { for k, v in federation.component_config : k => [tostring(v)] }
+})}
+EOF_PROVIDER_${realm_index}_${federation_index}
+sed -i "s/__REALM_ID__/$REALM_ID/g" "$TMPDIR/provider-${realm_index}-${federation_index}.json"
+upsert_provider '${replace(realm.name, "'", "'\"'\"'")}' '${replace(federation.name, "'", "'\"'\"'")}' "$TMPDIR/provider-${realm_index}-${federation_index}.json"
+
+PROVIDER_ID="$(provider_id '${replace(realm.name, "'", "'\"'\"'")}' '${replace(federation.name, "'", "'\"'\"'")}')"
+[ -n "$PROVIDER_ID" ]
+%{ for mapper_index, mapper in federation.mappers ~}
+cat > "$TMPDIR/mapper-${realm_index}-${federation_index}-${mapper_index}.json" <<'EOF_MAPPER_${realm_index}_${federation_index}_${mapper_index}'
+${jsonencode({
+  name         = mapper.name
+  providerId   = mapper.provider_id
+  providerType = mapper.provider_type
+  parentId     = "__PROVIDER_ID__"
+  config       = { for k, v in mapper.config : k => [tostring(v)] }
+})}
+EOF_MAPPER_${realm_index}_${federation_index}_${mapper_index}
+sed -i "s/__PROVIDER_ID__/$PROVIDER_ID/g" "$TMPDIR/mapper-${realm_index}-${federation_index}-${mapper_index}.json"
+upsert_mapper '${replace(realm.name, "'", "'\"'\"'")}' "$PROVIDER_ID" '${replace(mapper.name, "'", "'\"'\"'")}' "$TMPDIR/mapper-${realm_index}-${federation_index}-${mapper_index}.json"
+%{ endfor ~}
+%{ endfor ~}
+%{ endfor ~}

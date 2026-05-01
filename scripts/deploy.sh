@@ -265,6 +265,7 @@ prepare_identity_workspace() {
   fi
   link_into_workspace "${repo_root}/identity/main.tf" "${workspace}/main.tf"
   link_into_workspace "${repo_root}/identity/keycloak.yaml" "${workspace}/keycloak.yaml"
+  link_into_workspace "${repo_root}/identity/keycloak-configure-realms.sh.tftpl" "${workspace}/keycloak-configure-realms.sh.tftpl"
   link_into_workspace "${cluster_identity_constants_path}" "${workspace}/constants.tf"
   link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/k8s_net_constants.tf"
   link_into_workspace "${cluster_ceph_constants_path}" "${workspace}/ceph_constants.tf"
@@ -935,12 +936,17 @@ else
   prepare_identity_workspace
   message "Deploying identity services..."
   run_tofu_init "${cluster_identity_workspace}"
+  message "Refreshing one-shot Keycloak jobs before apply..."
+  kubectl -n identity delete job keycloak-bootstrap-admin keycloak-configure-realms --ignore-not-found >/dev/null 2>&1 || true
   run tofu -chdir="${cluster_identity_workspace}" apply -auto-approve
   message "Waiting for identity PVCs, workloads, and endpoints to become ready..."
   wait_for_pvcs_bound "identity" "600" "keycloak-postgres-data"
   wait_for_deployments_ready "identity" "900s" "keycloak-postgres" "keycloak"
   wait_for_service_endpoints "identity" "900" "keycloak-postgres" "keycloak"
   kubectl -n identity wait --for=condition=Complete job/keycloak-bootstrap-admin --timeout=300s
+  if kubectl -n identity get job/keycloak-configure-realms >/dev/null 2>&1; then
+    kubectl -n identity wait --for=condition=Complete job/keycloak-configure-realms --timeout=300s
+  fi
   keycloak_url="$(tofu -chdir="${cluster_identity_workspace}" output -raw keycloak_url)"
   keycloak_admin_user="$(tofu -chdir="${cluster_identity_workspace}" output -raw keycloak_admin_user)"
   keycloak_admin_password="$(tofu -chdir="${cluster_identity_workspace}" output -raw keycloak_admin_password)"

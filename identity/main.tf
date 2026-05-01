@@ -32,6 +32,74 @@ provider "kubernetes" {
 }
 
 locals {
+  configured_keycloak_realms = try(local.keycloak_realms, [])
+  keycloak_realm_definitions = [
+    for realm in local.configured_keycloak_realms : {
+      name = realm.name
+      settings = {
+        save_user_events  = try(realm.settings.save_user_events, false)
+        save_admin_events = try(realm.settings.save_admin_events, false)
+      }
+      user_federation = [
+        for federation in try(realm.user_federation, []) : {
+          name        = federation.name
+          provider_id = try(federation.provider_id, "ldap")
+          provider_type = try(
+            federation.provider_type,
+            "org.keycloak.storage.UserStorageProvider"
+          )
+          component_config = {
+            pagination                              = tostring(try(federation.connection.pagination, true))
+            fullSyncPeriod                          = tostring(try(federation.sync.full_sync_period, -1))
+            connectionTrace                         = tostring(try(federation.connection.connection_trace, false))
+            startTls                                = tostring(try(federation.connection.start_tls, false))
+            usersDn                                 = federation.connection.users_dn
+            connectionPooling                       = tostring(try(federation.connection.connection_pooling, true))
+            cachePolicy                             = try(federation.cache_policy, "DEFAULT")
+            useKerberosForPasswordAuthentication    = tostring(try(federation.kerberos.use_kerberos_for_password_authentication, false))
+            importEnabled                           = tostring(try(federation.import_users, true))
+            enabled                                 = tostring(try(federation.enabled, true))
+            bindCredential                          = federation.bind_credential
+            bindDn                                  = federation.bind_dn
+            changedSyncPeriod                       = tostring(try(federation.sync.changed_sync_period, -1))
+            usernameLDAPAttribute                   = federation.ldap_user.username_ldap_attribute
+            vendor                                  = federation.vendor
+            uuidLDAPAttribute                       = federation.ldap_user.uuid_ldap_attribute
+            connectionUrl                           = federation.connection.url
+            allowKerberosAuthentication             = tostring(try(federation.kerberos.allow_kerberos_authentication, false))
+            syncRegistrations                       = tostring(try(federation.sync.sync_registrations, true))
+            authType                                = try(federation.connection.auth_type, "simple")
+            krbPrincipalAttribute                   = try(federation.kerberos.kerberos_principal_attribute, "userPrincipalName")
+            searchScope                             = tostring(try(federation.connection.search_scope, 2))
+            useTruststoreSpi                        = try(federation.connection.use_truststore_spi, "always")
+            usePasswordModifyExtendedOp             = tostring(try(federation.ldap_user.use_password_modify_extended_op, false))
+            trustEmail                              = tostring(try(federation.ldap_user.trust_email, false))
+            userObjectClasses                       = federation.ldap_user.user_object_classes
+            removeInvalidUsersEnabled               = tostring(try(federation.sync.remove_invalid_users, true))
+            rdnLDAPAttribute                        = federation.ldap_user.rdn_ldap_attribute
+            editMode                                = try(federation.edit_mode, "READ_ONLY")
+            readTimeout                             = tostring(try(federation.connection.read_timeout, 10000))
+            validatePasswordPolicy                  = tostring(try(federation.ldap_user.validate_password_policy, false))
+            enableLdapPasswordPolicy                = tostring(try(federation.ldap_user.enable_ldap_password_policy, false))
+          }
+          mappers = [
+            for mapper in try(federation.mappers, []) : {
+              name          = mapper.name
+              provider_id   = mapper.provider_id
+              provider_type = try(
+                mapper.provider_type,
+                "org.keycloak.storage.ldap.mappers.LDAPStorageMapper"
+              )
+              config        = try(mapper.config, {})
+            }
+          ]
+        }
+      ]
+    }
+  ]
+  keycloak_realm_config_script = trimspace(templatefile("${path.module}/keycloak-configure-realms.sh.tftpl", {
+    keycloak_realms = local.keycloak_realm_definitions
+  }))
   keycloak_enabled = trimspace(local.keycloak_hostname) != ""
   identity_resources = [
     for doc in split("\n---\n", templatefile("${path.module}/keycloak.yaml", {
@@ -43,6 +111,8 @@ locals {
       postgres_image_tag     = local.postgres_image_tag
       postgres_pvc_size      = local.postgres_pvc_size
       postgres_storage_class = local.postgres_storage_class
+      keycloak_realms        = local.keycloak_realm_definitions
+      keycloak_realms_script = replace(local.keycloak_realm_config_script, "\n", "\n              ")
     })) :
     yamldecode(doc)
     if local.keycloak_enabled && length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
