@@ -33,6 +33,15 @@ locals {
         save_admin_events = true
       }
 
+      groups = [
+        {
+          name        = "admins"
+          description = "Realm administrators"
+          realm_admin = true
+          members     = []
+        },
+      ]
+
       user_federation = [
         {
           name         = "company-ldap"

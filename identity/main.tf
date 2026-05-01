@@ -40,6 +40,14 @@ locals {
         save_user_events  = try(realm.settings.save_user_events, false)
         save_admin_events = try(realm.settings.save_admin_events, false)
       }
+      groups = [
+        for group in try(realm.groups, []) : {
+          name        = group.name
+          description = try(group.description, "")
+          realm_admin = try(group.realm_admin, false)
+          members     = try(group.members, [])
+        }
+      ]
       user_federation = [
         for federation in try(realm.user_federation, []) : {
           name        = federation.name
