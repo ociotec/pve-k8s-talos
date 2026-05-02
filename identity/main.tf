@@ -45,7 +45,17 @@ locals {
           name        = group.name
           description = try(group.description, "")
           realm_admin = try(group.realm_admin, false)
-          members     = try(group.members, [])
+          extra_members = distinct(concat(
+            try(group.extra_members, []),
+            try(group.members, [])
+          ))
+          included_ldap_groups = [
+            for ldap_group in try(group.included_ldap_groups, []) : {
+              federation_name = try(ldap_group.federation_name, "")
+              group_dn        = ldap_group.group_dn
+              group_name      = trimspace(try(ldap_group.group_name, "")) != "" ? ldap_group.group_name : try(regex("^CN=([^,]+)", ldap_group.group_dn)[0], ldap_group.group_dn)
+            }
+          ]
         }
       ]
       user_federation = [
@@ -101,6 +111,28 @@ locals {
               config        = try(mapper.config, {})
             }
           ]
+          group_federation = try(federation.group_federation, null) == null ? null : {
+            name          = try(federation.group_federation.name, format("%s-groups", federation.name))
+            provider_id   = "group-ldap-mapper"
+            provider_type = "org.keycloak.storage.ldap.mappers.LDAPStorageMapper"
+            config = {
+              "groups.dn"                           = federation.group_federation.groups_dn
+              "group.name.ldap.attribute"          = try(federation.group_federation.group_name_ldap_attribute, "cn")
+              "group.object.classes"               = try(federation.group_federation.group_object_classes, "group")
+              "preserve.group.inheritance"         = tostring(try(federation.group_federation.preserve_group_inheritance, false))
+              "membership.ldap.attribute"          = try(federation.group_federation.membership_ldap_attribute, "member")
+              "membership.attribute.type"          = try(federation.group_federation.membership_attribute_type, "DN")
+              "membership.user.ldap.attribute"     = try(federation.group_federation.membership_user_ldap_attribute, "distinguishedName")
+              "groups.ldap.filter"                 = try(federation.group_federation.groups_ldap_filter, "")
+              "mode"                               = try(federation.group_federation.mode, "READ_ONLY")
+              "user.roles.retrieve.strategy"       = try(federation.group_federation.user_groups_retrieve_strategy, "GET_GROUPS_FROM_USER_MEMBEROF_ATTRIBUTE")
+              "memberof.ldap.attribute"            = try(federation.group_federation.memberof_ldap_attribute, "memberOf")
+              "mapped.group.attributes"            = try(federation.group_federation.mapped_group_attributes, "")
+              "drop.non.existing.groups.during.sync" = tostring(try(federation.group_federation.drop_non_existing_groups_during_sync, false))
+              "ignore.missing.groups"              = tostring(try(federation.group_federation.ignore_missing_groups, true))
+              "groups.path"                        = try(federation.group_federation.groups_path, "/")
+            }
+          }
         }
       ]
     }

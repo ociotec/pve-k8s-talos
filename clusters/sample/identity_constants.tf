@@ -38,7 +38,13 @@ locals {
           name        = "admins"
           description = "Realm administrators"
           realm_admin = true
-          members     = []
+          extra_members = []
+          included_ldap_groups = [
+            {
+              federation_name = "company-ldap"
+              group_dn        = "CN=KC_COMPANY_ADMINS,OU=Groups,DC=company,DC=com"
+            },
+          ]
         },
       ]
 
@@ -88,6 +94,25 @@ locals {
             validate_password_policy        = false
             enable_ldap_password_policy     = false
             use_password_modify_extended_op = false
+          }
+
+          group_federation = {
+            name                            = "company-groups"
+            groups_dn                       = "OU=Groups,DC=company,DC=com"
+            group_name_ldap_attribute       = "cn"
+            group_object_classes            = "group"
+            preserve_group_inheritance      = false
+            membership_ldap_attribute       = "member"
+            membership_attribute_type       = "DN"
+            membership_user_ldap_attribute  = "distinguishedName"
+            groups_ldap_filter              = ""
+            mode                            = "READ_ONLY"
+            user_groups_retrieve_strategy   = "GET_GROUPS_FROM_USER_MEMBEROF_ATTRIBUTE"
+            memberof_ldap_attribute         = "memberOf"
+            mapped_group_attributes         = ""
+            drop_non_existing_groups_during_sync = false
+            ignore_missing_groups           = true
+            groups_path                     = "/"
           }
 
           mappers = [

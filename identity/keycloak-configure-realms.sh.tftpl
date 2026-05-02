@@ -20,6 +20,11 @@ first_id() {
   sed -n 's/.*"id" : "\([^"]*\)".*/\1/p' | head -n1
 }
 
+extract_json_field() {
+  field_name="$1"
+  sed -n 's/.*"'"$field_name"'" : "\([^"]*\)".*/\1/p'
+}
+
 realm_exists() {
   "$KCADM" get "realms/$1" >/dev/null 2>&1
 }
@@ -37,7 +42,22 @@ mapper_id() {
 }
 
 group_id() {
-  "$KCADM" get groups -r "$1" -q search="$2" | sed -n '/"name" : "'"$2"'"/{x;p;}; h' | first_id
+  current_id=""
+  current_name=""
+  "$KCADM" get groups -r "$1" -q exact=true -q search="$2" | while IFS= read -r line; do
+    case "$line" in
+      *'"id" : "'*)
+        current_id="$(printf '%s\n' "$line" | extract_json_field id)"
+        ;;
+      *'"name" : "'*)
+        current_name="$(printf '%s\n' "$line" | extract_json_field name)"
+        if [ "$current_name" = "$2" ]; then
+          printf '%s\n' "$current_id"
+          exit 0
+        fi
+        ;;
+    esac
+  done
 }
 
 user_id() {
@@ -106,8 +126,29 @@ ensure_group_membership() {
 
   existing_user_id="$(user_id "$realm_name" "$username")"
   if [ -n "$existing_user_id" ]; then
-    "$KCADM" update "users/$existing_user_id/groups/$group_id_value" -r "$realm_name"
+    "$KCADM" update "users/$existing_user_id/groups/$group_id_value" -r "$realm_name" >/dev/null 2>&1 || true
   fi
+}
+
+ensure_child_group() {
+  realm_name="$1"
+  parent_group_id="$2"
+  child_group_id="$3"
+  child_group_name="$4"
+  payload_file="$TMPDIR/group-child.json"
+
+  cat > "$payload_file" <<EOF_GROUP_CHILD
+{"id":"$child_group_id","name":"$child_group_name"}
+EOF_GROUP_CHILD
+  "$KCADM" create "groups/$parent_group_id/children" -r "$realm_name" -f "$payload_file" >/dev/null 2>&1 || true
+}
+
+sync_group_mapper() {
+  realm_name="$1"
+  provider_component_id="$2"
+  mapper_component_id="$3"
+
+  "$KCADM" create "user-storage/$provider_component_id/mappers/$mapper_component_id/sync?direction=fedToKeycloak" -r "$realm_name" >/dev/null 2>&1 || true
 }
 
 assign_group_realm_admin() {
@@ -129,10 +170,10 @@ done
 %{ for realm_index, realm in keycloak_realms ~}
 cat > "$TMPDIR/realm-${realm_index}.json" <<'EOF_REALM_${realm_index}'
 ${jsonencode({
-  realm                    = realm.name
-  enabled                  = true
-  eventsEnabled            = realm.settings.save_user_events
-  adminEventsEnabled       = realm.settings.save_admin_events
+  realm                     = realm.name
+  enabled                   = true
+  eventsEnabled             = realm.settings.save_user_events
+  adminEventsEnabled        = realm.settings.save_admin_events
   adminEventsDetailsEnabled = realm.settings.save_admin_events
 })}
 EOF_REALM_${realm_index}
@@ -141,27 +182,6 @@ upsert_realm '${replace(realm.name, "'", "'\"'\"'")}' "$TMPDIR/realm-${realm_ind
 REALM_ID="$(realm_id '${replace(realm.name, "'", "'\"'\"'")}')"
 [ -n "$REALM_ID" ]
 REALM_MANAGEMENT_CLIENT_ID="$(realm_management_client_id '${replace(realm.name, "'", "'\"'\"'")}')"
-%{ for group_index, group in realm.groups ~}
-cat > "$TMPDIR/group-${realm_index}-${group_index}.json" <<'EOF_GROUP_${realm_index}_${group_index}'
-${jsonencode({
-  name        = group.name
-  path        = "/${group.name}"
-  attributes  = {}
-  subGroups   = []
-  description = group.description
-})}
-EOF_GROUP_${realm_index}_${group_index}
-upsert_group '${replace(realm.name, "'", "'\"'\"'")}' '${replace(group.name, "'", "'\"'\"'")}' "$TMPDIR/group-${realm_index}-${group_index}.json"
-GROUP_ID="$(group_id '${replace(realm.name, "'", "'\"'\"'")}' '${replace(group.name, "'", "'\"'\"'")}')"
-[ -n "$GROUP_ID" ]
-%{ if group.realm_admin ~}
-[ -n "$REALM_MANAGEMENT_CLIENT_ID" ]
-assign_group_realm_admin '${replace(realm.name, "'", "'\"'\"'")}' "$GROUP_ID" "$REALM_MANAGEMENT_CLIENT_ID"
-%{ endif ~}
-%{ for member in group.members ~}
-ensure_group_membership '${replace(realm.name, "'", "'\"'\"'")}' "$GROUP_ID" '${replace(member, "'", "'\"'\"'")}'
-%{ endfor ~}
-%{ endfor ~}
 %{ for federation_index, federation in realm.user_federation ~}
 cat > "$TMPDIR/provider-${realm_index}-${federation_index}.json" <<'EOF_PROVIDER_${realm_index}_${federation_index}'
 ${jsonencode({
@@ -189,6 +209,49 @@ ${jsonencode({
 EOF_MAPPER_${realm_index}_${federation_index}_${mapper_index}
 sed -i "s/__PROVIDER_ID__/$PROVIDER_ID/g" "$TMPDIR/mapper-${realm_index}-${federation_index}-${mapper_index}.json"
 upsert_mapper '${replace(realm.name, "'", "'\"'\"'")}' "$PROVIDER_ID" '${replace(mapper.name, "'", "'\"'\"'")}' "$TMPDIR/mapper-${realm_index}-${federation_index}-${mapper_index}.json"
+%{ endfor ~}
+%{ if federation.group_federation != null ~}
+cat > "$TMPDIR/group-mapper-${realm_index}-${federation_index}.json" <<'EOF_GROUP_MAPPER_${realm_index}_${federation_index}'
+${jsonencode({
+  name         = federation.group_federation.name
+  providerId   = federation.group_federation.provider_id
+  providerType = federation.group_federation.provider_type
+  parentId     = "__PROVIDER_ID__"
+  config       = { for k, v in federation.group_federation.config : k => [tostring(v)] }
+})}
+EOF_GROUP_MAPPER_${realm_index}_${federation_index}
+sed -i "s/__PROVIDER_ID__/$PROVIDER_ID/g" "$TMPDIR/group-mapper-${realm_index}-${federation_index}.json"
+upsert_mapper '${replace(realm.name, "'", "'\"'\"'")}' "$PROVIDER_ID" '${replace(federation.group_federation.name, "'", "'\"'\"'")}' "$TMPDIR/group-mapper-${realm_index}-${federation_index}.json"
+GROUP_MAPPER_ID="$(mapper_id '${replace(realm.name, "'", "'\"'\"'")}' "$PROVIDER_ID" '${replace(federation.group_federation.name, "'", "'\"'\"'")}')"
+[ -n "$GROUP_MAPPER_ID" ]
+sync_group_mapper '${replace(realm.name, "'", "'\"'\"'")}' "$PROVIDER_ID" "$GROUP_MAPPER_ID"
+%{ endif ~}
+%{ endfor ~}
+%{ for group_index, group in realm.groups ~}
+cat > "$TMPDIR/group-${realm_index}-${group_index}.json" <<'EOF_GROUP_${realm_index}_${group_index}'
+${jsonencode({
+  name        = group.name
+  path        = "/${group.name}"
+  attributes  = {}
+  subGroups   = []
+  description = group.description
+})}
+EOF_GROUP_${realm_index}_${group_index}
+upsert_group '${replace(realm.name, "'", "'\"'\"'")}' '${replace(group.name, "'", "'\"'\"'")}' "$TMPDIR/group-${realm_index}-${group_index}.json"
+GROUP_ID="$(group_id '${replace(realm.name, "'", "'\"'\"'")}' '${replace(group.name, "'", "'\"'\"'")}')"
+[ -n "$GROUP_ID" ]
+%{ for ldap_group in group.included_ldap_groups ~}
+LDAP_CHILD_ID="$(group_id '${replace(realm.name, "'", "'\"'\"'")}' '${replace(ldap_group.group_name, "'", "'\"'\"'")}')"
+if [ -n "$LDAP_CHILD_ID" ]; then
+  ensure_child_group '${replace(realm.name, "'", "'\"'\"'")}' "$GROUP_ID" "$LDAP_CHILD_ID" '${replace(ldap_group.group_name, "'", "'\"'\"'")}'
+fi
+%{ endfor ~}
+%{ if group.realm_admin ~}
+[ -n "$REALM_MANAGEMENT_CLIENT_ID" ]
+assign_group_realm_admin '${replace(realm.name, "'", "'\"'\"'")}' "$GROUP_ID" "$REALM_MANAGEMENT_CLIENT_ID"
+%{ endif ~}
+%{ for member in group.extra_members ~}
+ensure_group_membership '${replace(realm.name, "'", "'\"'\"'")}' "$GROUP_ID" '${replace(member, "'", "'\"'\"'")}'
 %{ endfor ~}
 %{ endfor ~}
 %{ endfor ~}
