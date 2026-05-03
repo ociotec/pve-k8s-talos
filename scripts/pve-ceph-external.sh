@@ -20,6 +20,7 @@ Environment:
   PROXMOX_VE_ENDPOINT      Example: https://pve.example.com:8006/
   PROXMOX_VE_API_TOKEN     Example: root@pam!token=secret
   PROXMOX_VE_INSECURE      Set to true/1 to skip TLS verification
+  CEPH_SSH_USER            SSH user for Ceph CLI fallback. Default: root
 EOF
 }
 
@@ -80,6 +81,11 @@ api_put() {
 json_extract() {
   local expr="$1"
   jq -er ".${expr}"
+}
+
+shell_quote() {
+  local value="$1"
+  printf "'%s'" "${value//\'/\'\\\'\'}"
 }
 
 pool_exists() {
@@ -150,32 +156,106 @@ wait_for_pool_exists() {
 set_pool_autoscale_on() {
   local node="$1"
   local pool_name="$2"
+  set_pool_properties "${node}" "${pool_name}" \
+    "autoscale mode set to on" \
+    --data-urlencode "pg_autoscale_mode=on"
+}
+
+set_pool_size_settings() {
+  local node="$1"
+  local pool_name="$2"
+  local size="$3"
+  local min_size="$4"
+
+  set_pool_properties "${node}" "${pool_name}" \
+    "size set to ${size}, min_size set to ${min_size}" \
+    --data-urlencode "size=${size}" \
+    --data-urlencode "min_size=${min_size}"
+}
+
+set_pool_properties() {
+  local node="$1"
+  local pool_name="$2"
+  local description="$3"
+  shift 3
+  local started_at last_error
+  started_at="$(date +%s)"
+
+  while true; do
+    if try_set_pool_properties "${node}" "${pool_name}" "$@"; then
+      echo "Pool ${pool_name} ${description}."
+      return 0
+    fi
+
+    last_error="${pool_update_error}"
+    if (( $(date +%s) - started_at > 120 )); then
+      echo "Timed out updating Ceph pool ${pool_name}: ${last_error}" >&2
+      exit 1
+    fi
+
+    sleep 3
+  done
+}
+
+try_set_pool_properties() {
+  local node="$1"
+  local pool_name="$2"
+  shift 2
   local response upid
 
-  response="$(
-    api_put "/nodes/${node}/ceph/pool/${pool_name}" \
-      --data-urlencode "pg_autoscale_mode=on"
-  )"
-  upid="$(printf '%s' "${response}" | json_extract "data")"
+  pool_update_error=""
+  if ! response="$(api_put "/nodes/${node}/ceph/pool/${pool_name}" "$@" 2>&1)"; then
+    pool_update_error="${response}"
+    return 1
+  fi
+
+  if ! upid="$(printf '%s' "${response}" | json_extract "data" 2>/dev/null)"; then
+    pool_update_error="Unexpected Proxmox API response while updating pool ${pool_name}: ${response}"
+    return 1
+  fi
+
   wait_for_task "${node}" "${upid}"
-  echo "Pool ${pool_name} autoscale mode set to on."
 }
 
 set_pool_allow_ec_overwrites() {
   local node="$1"
   local pool_name="$2"
-  local response upid
 
-  if ! response="$(
-    api_put "/nodes/${node}/ceph/pool/${pool_name}" \
-      --data-urlencode "allow_ec_overwrites=1" 2>/dev/null
-  )"; then
-    echo "Skipping allow_ec_overwrites tuning for EC pool ${pool_name}: Proxmox Ceph API rejected the update." >&2
+  if try_set_pool_properties "${node}" "${pool_name}" --data-urlencode "allow_ec_overwrites=1"; then
+    echo "Pool ${pool_name} allow_ec_overwrites set to on."
     return 0
   fi
-  upid="$(printf '%s' "${response}" | json_extract "data")"
-  wait_for_task "${node}" "${upid}"
-  echo "Pool ${pool_name} allow_ec_overwrites set to on."
+
+  echo "Proxmox Ceph API rejected allow_ec_overwrites for pool ${pool_name}; falling back to Ceph CLI over SSH." >&2
+  set_pool_allow_ec_overwrites_via_ssh "${node}" "${pool_name}"
+}
+
+set_pool_allow_ec_overwrites_via_ssh() {
+  local node="$1"
+  local pool_name="$2"
+  local ssh_user="${CEPH_SSH_USER:-root}"
+  local quoted_pool
+
+  require_cmd ssh
+  quoted_pool="$(shell_quote "${pool_name}")"
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${node}" \
+    "ceph osd pool set ${quoted_pool} allow_ec_overwrites true" 1>/dev/null
+  echo "Pool ${pool_name} allow_ec_overwrites set to on via Ceph CLI."
+}
+
+converge_rbd_pool() {
+  local node="$1"
+  local pool_name="$2"
+  local pool_type="$3"
+  local size="$4"
+  local min_size="$5"
+
+  set_pool_size_settings "${node}" "${pool_name}" "${size}" "${min_size}"
+  set_pool_autoscale_on "${node}" "${pool_name}"
+
+  if [[ "${pool_type}" == "ec" ]]; then
+    set_pool_allow_ec_overwrites "${node}" "${pool_name}"
+  fi
 }
 
 ensure_rbd_pool() {
@@ -257,12 +337,8 @@ ensure_rbd_pool() {
   fi
 
   if pool_exists "${node}" "${pool_name}"; then
-    echo "Pool ${pool_name} already exists on ${node}, skipping."
-    if [[ "${pool_type}" == "replicated" ]]; then
-      set_pool_autoscale_on "${node}" "${pool_name}"
-    else
-      echo "Skipping EC pool post-create tuning for existing pool ${pool_name}."
-    fi
+    echo "Pool ${pool_name} already exists on ${node}, converging settings."
+    converge_rbd_pool "${node}" "${pool_name}" "${pool_type}" "${size}" "${min_size}"
     return 0
   fi
 
@@ -298,16 +374,13 @@ ensure_rbd_pool() {
   wait_for_task "${node}" "${upid}"
   echo "Pool ${pool_name} created on ${node}."
 
-  # Replicated pools show up consistently in the Proxmox Ceph pool API right away,
-  # but EC data pools can lag or be omitted there even after the creation task
-  # reports success. Avoid turning that into a hard failure for the external mode
-  # bootstrap flow.
+  # Replicated pools show up consistently in the Proxmox Ceph pool list right
+  # away. EC pools can lag there, so their convergence uses the retrying pool
+  # update endpoint directly instead of depending on the list endpoint.
   if [[ "${pool_type}" == "replicated" ]]; then
     wait_for_pool_exists "${node}" "${pool_name}"
-    set_pool_autoscale_on "${node}" "${pool_name}"
-  else
-    set_pool_allow_ec_overwrites "${node}" "${pool_name}"
   fi
+  converge_rbd_pool "${node}" "${pool_name}" "${pool_type}" "${size}" "${min_size}"
 }
 
 main() {

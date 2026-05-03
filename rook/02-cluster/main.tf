@@ -27,7 +27,7 @@ locals {
   effective_ceph_cluster_image = try(local.ceph_cluster_image, "quay.io/ceph/ceph:v20.2.1")
   effective_ceph_name_prefix   = try(local.ceph_name_prefix, "cluster")
 
-  external_ceph = try(local.ceph_external, {})
+  external_ceph     = try(local.ceph_external, {})
   external_monitors = try(local.external_ceph.monitors, [])
   external_mon_data = join(",", [for monitor in local.external_monitors : format("%s=%s", monitor.id, monitor.endpoint)])
   external_mon_mapping = jsonencode({
@@ -73,6 +73,8 @@ locals {
     },
     try(local.ceph_block_ec, {})
   )
+  block_ec_data_size     = try(local.block_ec.data_size, local.block_ec.k + local.block_ec.m)
+  block_ec_data_min_size = try(local.block_ec.data_min_size, local.block_ec.k)
   external_block_pools = local.effective_ceph_mode == "external" ? merge(
     try(local.block_replicated.enabled, false) ? {
       (local.block_replicated.pool_name) = {
@@ -84,12 +86,19 @@ locals {
       }
     } : {},
     try(local.block_ec.enabled, false) ? {
-      (local.block_ec.pool_name) = {
-        name     = local.block_ec.pool_name
-        type     = "ec"
+      (local.block_ec.metadata_pool_name) = {
+        name     = local.block_ec.metadata_pool_name
+        type     = "replicated"
         pg_num   = local.block_ec.pg_num
         size     = local.block_ec.metadata_size
         min_size = local.block_ec.metadata_min_size
+      }
+      (local.block_ec.data_pool_name) = {
+        name     = local.block_ec.data_pool_name
+        type     = "ec"
+        pg_num   = local.block_ec.pg_num
+        size     = local.block_ec_data_size
+        min_size = local.block_ec_data_min_size
         k        = local.block_ec.k
         m        = local.block_ec.m
       }
@@ -154,7 +163,8 @@ resource "null_resource" "external_rbd_pools" {
   for_each = local.external_block_pools
 
   triggers = {
-    pool_spec    = jsonencode(each.value)
+    pool_spec      = jsonencode(each.value)
+    converge_every = timestamp()
   }
 
   provisioner "local-exec" {
@@ -197,9 +207,9 @@ resource "kubernetes_config_map_v1" "rook_ceph_mon_endpoints" {
   }
 
   data = {
-    "data"                  = local.external_mon_data
-    "mapping"               = local.external_mon_mapping
-    "maxMonId"              = tostring(max(length(local.external_monitors) - 1, 0))
+    "data"                    = local.external_mon_data
+    "mapping"                 = local.external_mon_mapping
+    "maxMonId"                = tostring(max(length(local.external_monitors) - 1, 0))
     "csi-cluster-config-json" = local.external_csi_cluster_config
   }
 }
