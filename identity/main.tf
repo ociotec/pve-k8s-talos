@@ -62,6 +62,7 @@ locals {
         for federation in try(realm.user_federation, []) : {
           name        = federation.name
           provider_id = try(federation.provider_id, "ldap")
+          enabled     = try(federation.enabled, true)
           provider_type = try(
             federation.provider_type,
             "org.keycloak.storage.UserStorageProvider"
@@ -240,6 +241,28 @@ locals {
     keycloak_realms = local.keycloak_realm_definitions
   }))
   keycloak_enabled = trimspace(local.keycloak_hostname) != ""
+  keycloak_realm_console_definitions = [
+    for realm in local.keycloak_realm_definitions : {
+      name              = realm.name
+      admin_console_url = "https://${local.keycloak_hostname}/admin/${realm.name}/console/"
+      account_url       = "https://${local.keycloak_hostname}/realms/${realm.name}/account/"
+      ldap_federations = [
+        for federation in realm.user_federation : federation.name
+        if federation.provider_id == "ldap" && federation.enabled
+      ]
+    }
+  ]
+  keycloak_realm_console_summary = join("\n", flatten([
+    for realm in local.keycloak_realm_console_definitions : [
+      format("  - %s", realm.name),
+      format("    Admin console: %s", realm.admin_console_url),
+      format("    Account URL:   %s", realm.account_url),
+      format(
+        "    LDAP:          %s",
+        length(realm.ldap_federations) > 0 ? format("enabled (%s)", join(", ", realm.ldap_federations)) : "not configured"
+      ),
+    ]
+  ]))
   identity_resources = [
     for doc in split("\n---\n", templatefile("${path.module}/keycloak.yaml", {
       identity_namespace     = local.identity_namespace
@@ -558,6 +581,21 @@ output "keycloak_admin_user" {
 output "keycloak_admin_password" {
   value     = local.keycloak_enabled && !var.skip_identity ? random_password.keycloak_admin_password[0].result : null
   sensitive = true
+}
+
+output "keycloak_realm_console_metadata" {
+  value = local.keycloak_enabled && !var.skip_identity ? {
+    for realm in local.keycloak_realm_console_definitions :
+    realm.name => {
+      admin_console_url = realm.admin_console_url
+      account_url       = realm.account_url
+      ldap_federations  = realm.ldap_federations
+    }
+  } : {}
+}
+
+output "keycloak_realm_console_summary" {
+  value = local.keycloak_enabled && !var.skip_identity ? local.keycloak_realm_console_summary : ""
 }
 
 output "keycloak_oidc_client_metadata" {

@@ -519,6 +519,30 @@ Run with `-h` or `--help` to see help documentation. Common options:
 --skip-monitoring Skip Prometheus/Loki/Grafana stack.
 ```
 
+### Inspect service URLs and credentials
+
+After deploying a cluster, use [`scripts/urls-and-credentials.sh`](scripts/urls-and-credentials.sh) to print the URLs and generated access credentials for installed services:
+
+```bash
+cd clusters/<cluster>
+../../scripts/urls-and-credentials.sh
+```
+
+The script reports services that have local OpenTofu state under `out/*`, including Keycloak, Grafana, Prometheus, Portainer, Rancher, and the Rook Ceph dashboard when installed. For Keycloak, it also prints each configured realm admin console URL, account URL, and whether enabled LDAP federations exist for that realm.
+
+To show URLs and usernames without printing passwords:
+
+```bash
+../../scripts/urls-and-credentials.sh --hide-secrets
+```
+
+Limitations:
+
+- Run it from `clusters/<cluster>`, not from the repository root or `clusters/sample`.
+- It reads generated values from local `out/*/terraform.tfstate`; services deployed outside this repository or without local state are skipped.
+- The Rook Ceph dashboard NodePort URL and password require a readable `out/kubeconfig` and a reachable Kubernetes API.
+- The command prints sensitive values by default; use a trusted terminal or `--hide-secrets`.
+
 ## References
 
 ### OpenTofu

@@ -357,6 +357,25 @@ URL_FMT_END="\033[24m\033[23m\033[22m"
 DATA_FMT_START="\033[1m\033[3m"
 DATA_FMT_END="\033[23m\033[22m"
 
+message_keycloak_realm_console_line() {
+  local line="$1"
+  local url
+
+  case "${line}" in
+    "    Admin console: "*)
+      url="${line#"    Admin console: "}"
+      message "    Admin console: ${URL_FMT_START}${url}${URL_FMT_END}"
+      ;;
+    "    Account URL:   "*)
+      url="${line#"    Account URL:   "}"
+      message "    Account URL:   ${URL_FMT_START}${url}${URL_FMT_END}"
+      ;;
+    *)
+      message "${line}"
+      ;;
+  esac
+}
+
 wait_for_pods_ready() {
   local namespace="$1"
   local selector_input="${2:-}"
@@ -952,9 +971,16 @@ else
   keycloak_url="$(tofu -chdir="${cluster_identity_workspace}" output -raw keycloak_url)"
   keycloak_admin_user="$(tofu -chdir="${cluster_identity_workspace}" output -raw keycloak_admin_user)"
   keycloak_admin_password="$(tofu -chdir="${cluster_identity_workspace}" output -raw keycloak_admin_password)"
+  keycloak_realm_console_summary="$(tofu -chdir="${cluster_identity_workspace}" output -raw keycloak_realm_console_summary)"
   message "Keycloak URL: ${URL_FMT_START}${keycloak_url}${URL_FMT_END}"
   message "Keycloak admin user: ${DATA_FMT_START}${keycloak_admin_user}${DATA_FMT_END}"
   message "Keycloak admin password: ${DATA_FMT_START}${keycloak_admin_password}${DATA_FMT_END}"
+  if [[ -n "${keycloak_realm_console_summary}" ]]; then
+    message "Configured Keycloak realms:"
+    while IFS= read -r keycloak_realm_console_line; do
+      message_keycloak_realm_console_line "${keycloak_realm_console_line}"
+    done <<< "${keycloak_realm_console_summary}"
+  fi
 fi
 
 if [[ "${skip_monitoring}" == "true" ]]; then

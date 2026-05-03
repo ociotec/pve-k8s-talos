@@ -91,6 +91,7 @@ For any non-trivial change:
 - Errors must always be shown in console output.
 - Keep progress output minimal in normal mode.
 - Emit detailed progress/debug logs only in verbose/debug mode.
+- In deployment scripts, format user-facing URLs consistently with the existing URL style variables instead of printing raw URLs.
 
 ## Repo-Specific Agent Workflows
 
