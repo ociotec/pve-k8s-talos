@@ -79,11 +79,13 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
   - Domain, TLS mode, root CA path, MetalLB range, and ingress fixed IP.
   - Certificate catalog (`available_certificates`) and default certificate entry.
 - `identity_constants.tf`
-  - Keycloak hostname, TLS secret, PostgreSQL sizing/image, and bootstrap admin settings.
+  - Keycloak hostname, TLS secret, PostgreSQL sizing/image, bootstrap admin settings, realm groups, and optional OIDC clients for consumers such as Rancher.
 - `monitoring_constants.tf`
 - `platform_constants.tf`
   - Storage class, image versions, and hostnames for platform services such as Portainer and optional Rancher.
   - `tls_secrets` maps namespaces/secret names to entries from `available_certificates`.
+
+For the Rancher + Keycloak authentication split of responsibilities and the shared `k8s-admins` access model, see [docs/rancher-keycloak-auth.md](docs/rancher-keycloak-auth.md).
 - `ceph_constants.tf`
   - `ceph_mode = "internal"` to run a full Rook-managed Ceph cluster in Kubernetes.
   - `ceph_mode = "external"` to consume a native PVE Ceph cluster from Rook after `k8s-net`.

@@ -68,6 +68,10 @@ realm_management_client_id() {
   "$KCADM" get clients -r "$1" -q clientId=realm-management | first_id
 }
 
+client_uuid() {
+  "$KCADM" get clients -r "$1" -q clientId="$2" | first_id
+}
+
 upsert_realm() {
   realm_name="$1"
   payload_file="$2"
@@ -89,6 +93,19 @@ upsert_provider() {
     "$KCADM" update "components/$existing_id" -r "$realm_name" -f "$payload_file"
   else
     "$KCADM" create components -r "$realm_name" -f "$payload_file"
+  fi
+}
+
+upsert_client() {
+  realm_name="$1"
+  client_identifier="$2"
+  payload_file="$3"
+
+  existing_id="$(client_uuid "$realm_name" "$client_identifier")"
+  if [ -n "$existing_id" ]; then
+    "$KCADM" update "clients/$existing_id" -r "$realm_name" -f "$payload_file"
+  else
+    "$KCADM" create clients -r "$realm_name" -f "$payload_file"
   fi
 }
 
@@ -163,6 +180,15 @@ EOF_GROUP_REALM_ADMIN
     "$KCADM" add-roles -r "$realm_name" --gid "$group_id_value" --cid "$client_id_value" -f "$TMPDIR/group-realm-admin.json"
 }
 
+assign_group_realm_management_query_roles() {
+  realm_name="$1"
+  group_id_value="$2"
+
+  "$KCADM" add-roles -r "$realm_name" --gid "$group_id_value" --cclientid realm-management --rolename query-users >/dev/null 2>&1 || true
+  "$KCADM" add-roles -r "$realm_name" --gid "$group_id_value" --cclientid realm-management --rolename query-groups >/dev/null 2>&1 || true
+  "$KCADM" add-roles -r "$realm_name" --gid "$group_id_value" --cclientid realm-management --rolename view-users >/dev/null 2>&1 || true
+}
+
 until login "$TEMP_USER" || login "$ADMIN_USER"; do
   sleep 5
 done
@@ -227,6 +253,57 @@ GROUP_MAPPER_ID="$(mapper_id '${replace(realm.name, "'", "'\"'\"'")}' "$PROVIDER
 sync_group_mapper '${replace(realm.name, "'", "'\"'\"'")}' "$PROVIDER_ID" "$GROUP_MAPPER_ID"
 %{ endif ~}
 %{ endfor ~}
+%{ for client_index, client in realm.oidc_clients ~}
+cat > "$TMPDIR/client-${realm_index}-${client_index}.json" <<'EOF_CLIENT_${realm_index}_${client_index}'
+${jsonencode(merge(
+  {
+    clientId                  = client.client_id
+    name                      = client.name
+    description               = client.description
+    enabled                   = client.enabled
+    protocol                  = "openid-connect"
+    publicClient              = client.access_type == "public"
+    bearerOnly                = client.access_type == "bearer-only"
+    standardFlowEnabled       = client.standard_flow_enabled
+    directAccessGrantsEnabled = client.direct_access_grants_enabled
+    serviceAccountsEnabled    = client.service_accounts_enabled
+    fullScopeAllowed          = client.full_scope_allowed
+    redirectUris              = client.valid_redirect_uris
+    webOrigins                = client.web_origins
+    defaultClientScopes       = client.default_scopes
+    optionalClientScopes      = client.optional_scopes
+    protocolMappers = [
+      for mapper in client.mappers : {
+        name            = mapper.name
+        protocol        = "openid-connect"
+        protocolMapper  = mapper.protocol_mapper
+        consentRequired = false
+        config          = mapper.config
+      }
+    ]
+  },
+  client.access_type == "confidential" ? {
+    clientAuthenticatorType = "client-secret"
+    secret                  = client.client_secret
+  } : {},
+  trimspace(client.base_url) != "" ? {
+    baseUrl = client.base_url
+  } : {},
+  trimspace(client.admin_url) != "" ? {
+    adminUrl = client.admin_url
+  } : {},
+  trimspace(client.root_url) != "" ? {
+    rootUrl = client.root_url
+  } : {},
+  length(client.post_logout_redirect_uris) > 0 ? {
+    attributes = {
+      "post.logout.redirect.uris" = join("##", client.post_logout_redirect_uris)
+    }
+  } : {}
+))}
+EOF_CLIENT_${realm_index}_${client_index}
+upsert_client '${replace(realm.name, "'", "'\"'\"'")}' '${replace(client.client_id, "'", "'\"'\"'")}' "$TMPDIR/client-${realm_index}-${client_index}.json"
+%{ endfor ~}
 %{ for group_index, group in realm.groups ~}
 cat > "$TMPDIR/group-${realm_index}-${group_index}.json" <<'EOF_GROUP_${realm_index}_${group_index}'
 ${jsonencode({
@@ -244,11 +321,15 @@ GROUP_ID="$(group_id '${replace(realm.name, "'", "'\"'\"'")}' '${replace(group.n
 LDAP_CHILD_ID="$(group_id '${replace(realm.name, "'", "'\"'\"'")}' '${replace(ldap_group.group_name, "'", "'\"'\"'")}')"
 if [ -n "$LDAP_CHILD_ID" ]; then
   ensure_child_group '${replace(realm.name, "'", "'\"'\"'")}' "$GROUP_ID" "$LDAP_CHILD_ID" '${replace(ldap_group.group_name, "'", "'\"'\"'")}'
+  assign_group_realm_management_query_roles '${replace(realm.name, "'", "'\"'\"'")}' "$LDAP_CHILD_ID"
 fi
 %{ endfor ~}
 %{ if group.realm_admin ~}
 [ -n "$REALM_MANAGEMENT_CLIENT_ID" ]
 assign_group_realm_admin '${replace(realm.name, "'", "'\"'\"'")}' "$GROUP_ID" "$REALM_MANAGEMENT_CLIENT_ID"
+%{ endif ~}
+%{ if length(group.included_ldap_groups) > 0 ~}
+assign_group_realm_management_query_roles '${replace(realm.name, "'", "'\"'\"'")}' "$GROUP_ID"
 %{ endif ~}
 %{ for member in group.extra_members ~}
 ensure_group_membership '${replace(realm.name, "'", "'\"'\"'")}' "$GROUP_ID" '${replace(member, "'", "'\"'\"'")}'

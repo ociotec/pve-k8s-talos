@@ -13,6 +13,10 @@ locals {
   rancher_replicas                  = 1
   rancher_private_ca                = true
   rancher_bootstrap_password_length = 24
+  rancher_auth_keycloak_realm       = "company"
+  rancher_auth_allowed_group        = "k8s-admins"
+  rancher_auth_global_role          = "admin"
+  rancher_auth_access_mode          = "restricted"
 
   tls_secrets = [
     {

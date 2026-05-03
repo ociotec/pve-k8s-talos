@@ -1,0 +1,29 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-configure-realms
+  namespace: ${identity_namespace}
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: keycloak-configure-realms
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: keycloak-configure-realms
+          image: quay.io/keycloak/keycloak:${keycloak_image_tag}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              ${keycloak_realms_script}
+          volumeMounts:
+            - name: keycloak-admin
+              mountPath: /keycloak-admin
+              readOnly: true
+      volumes:
+        - name: keycloak-admin
+          secret:
+            secretName: keycloak-admin

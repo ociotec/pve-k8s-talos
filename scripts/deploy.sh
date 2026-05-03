@@ -265,6 +265,7 @@ prepare_identity_workspace() {
   fi
   link_into_workspace "${repo_root}/identity/main.tf" "${workspace}/main.tf"
   link_into_workspace "${repo_root}/identity/keycloak.yaml" "${workspace}/keycloak.yaml"
+  link_into_workspace "${repo_root}/identity/keycloak-realms-job.yaml" "${workspace}/keycloak-realms-job.yaml"
   link_into_workspace "${repo_root}/identity/keycloak-configure-realms.sh.tftpl" "${workspace}/keycloak-configure-realms.sh.tftpl"
   link_into_workspace "${cluster_identity_constants_path}" "${workspace}/constants.tf"
   link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/k8s_net_constants.tf"

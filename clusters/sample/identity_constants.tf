@@ -35,9 +35,9 @@ locals {
 
       groups = [
         {
-          name        = "admins"
-          description = "Realm administrators"
-          realm_admin = true
+          name          = "admins"
+          description   = "Realm administrators"
+          realm_admin   = true
           extra_members = []
           included_ldap_groups = [
             {
@@ -46,17 +46,78 @@ locals {
             },
           ]
         },
+        {
+          name          = "k8s-admins"
+          description   = "Shared Kubernetes platform administrators for Rancher and Portainer"
+          extra_members = []
+          included_ldap_groups = [
+            {
+              federation_name = "company-ldap"
+              group_dn        = "CN=KC_K8S_ADMINS,OU=Groups,DC=company,DC=com"
+            },
+          ]
+        },
+      ]
+
+      oidc_clients = [
+        {
+          client_id                    = "rancher"
+          name                         = "Rancher"
+          description                  = "OIDC client for Rancher login"
+          access_type                  = "confidential"
+          client_secret_length         = 32
+          valid_redirect_uris          = ["https://${local.rancher_hostname}/verify-auth"]
+          post_logout_redirect_uris    = ["https://${local.rancher_hostname}/*"]
+          web_origins                  = ["https://${local.rancher_hostname}"]
+          base_url                     = "https://${local.rancher_hostname}"
+          admin_url                    = "https://${local.rancher_hostname}"
+          standard_flow_enabled        = true
+          direct_access_grants_enabled = false
+          service_accounts_enabled     = false
+          full_scope_allowed           = false
+          include_groups_claim         = true
+          groups_claim_name            = "groups"
+          groups_claim_full_path       = false
+          default_scopes               = ["profile", "email", "roles"]
+          optional_scopes              = ["offline_access"]
+          mappers = [
+            {
+              name            = "full_group_path"
+              protocol_mapper = "oidc-group-membership-mapper"
+              config = {
+                "access.token.claim"        = "true"
+                "claim.name"                = "full_group_path"
+                "full.path"                 = "true"
+                "id.token.claim"            = "true"
+                "introspection.token.claim" = "true"
+                "jsonType.label"            = "String"
+                "multivalued"               = "true"
+                "userinfo.token.claim"      = "true"
+              }
+            },
+            {
+              name            = "client-audience"
+              protocol_mapper = "oidc-audience-mapper"
+              config = {
+                "access.token.claim"        = "true"
+                "included.client.audience"  = "rancher"
+                "id.token.claim"            = "false"
+                "introspection.token.claim" = "false"
+              }
+            },
+          ]
+        },
       ]
 
       user_federation = [
         {
-          name         = "company-ldap"
-          provider_id  = "ldap"
-          vendor       = "ad"
-          enabled      = true
-          edit_mode    = "READ_ONLY"
-          import_users = true
-          bind_dn      = "bind-user"
+          name            = "company-ldap"
+          provider_id     = "ldap"
+          vendor          = "ad"
+          enabled         = true
+          edit_mode       = "READ_ONLY"
+          import_users    = true
+          bind_dn         = "bind-user"
           bind_credential = "replace-me"
 
           connection = {
@@ -97,22 +158,22 @@ locals {
           }
 
           group_federation = {
-            name                            = "company-groups"
-            groups_dn                       = "OU=Groups,DC=company,DC=com"
-            group_name_ldap_attribute       = "cn"
-            group_object_classes            = "group"
-            preserve_group_inheritance      = false
-            membership_ldap_attribute       = "member"
-            membership_attribute_type       = "DN"
-            membership_user_ldap_attribute  = "distinguishedName"
-            groups_ldap_filter              = ""
-            mode                            = "READ_ONLY"
-            user_groups_retrieve_strategy   = "GET_GROUPS_FROM_USER_MEMBEROF_ATTRIBUTE"
-            memberof_ldap_attribute         = "memberOf"
-            mapped_group_attributes         = ""
+            name                                 = "company-groups"
+            groups_dn                            = "OU=Groups,DC=company,DC=com"
+            group_name_ldap_attribute            = "cn"
+            group_object_classes                 = "group"
+            preserve_group_inheritance           = false
+            membership_ldap_attribute            = "member"
+            membership_attribute_type            = "DN"
+            membership_user_ldap_attribute       = "distinguishedName"
+            groups_ldap_filter                   = ""
+            mode                                 = "READ_ONLY"
+            user_groups_retrieve_strategy        = "GET_GROUPS_FROM_USER_MEMBEROF_ATTRIBUTE"
+            memberof_ldap_attribute              = "memberOf"
+            mapped_group_attributes              = ""
             drop_non_existing_groups_during_sync = false
-            ignore_missing_groups           = true
-            groups_path                     = "/"
+            ignore_missing_groups                = true
+            groups_path                          = "/"
           }
 
           mappers = [
