@@ -122,12 +122,26 @@ spec:
         - name: "data"
           persistentVolumeClaim:
             claimName: portainer
+        - name: portainer-admin
+          secret:
+            secretName: ${portainer_admin_secret_name}
+%{ if portainer_oauth_ca_enabled ~}
+        - name: portainer-oauth-ca
+          secret:
+            secretName: ${portainer_oauth_ca_secret_name}
+%{ endif ~}
       containers:
         - name: portainer
           image: "portainer/portainer-ce:${portainer_image}"
           imagePullPolicy: Always
           args:
-          - '--tunnel-port=30776'          
+          - '--tunnel-port=30776'
+          - '--admin-password-file=/run/secrets/portainer-admin/password'
+%{ if portainer_oauth_ca_enabled ~}
+          env:
+            - name: SSL_CERT_FILE
+              value: /run/secrets/portainer-oauth-ca/ca.crt
+%{ endif ~}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -138,6 +152,14 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data              
+            - name: portainer-admin
+              mountPath: /run/secrets/portainer-admin
+              readOnly: true
+%{ if portainer_oauth_ca_enabled ~}
+            - name: portainer-oauth-ca
+              mountPath: /run/secrets/portainer-oauth-ca
+              readOnly: true
+%{ endif ~}
           ports:
             - name: http
               containerPort: 9000

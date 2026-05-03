@@ -72,6 +72,82 @@ client_uuid() {
   "$KCADM" get clients -r "$1" -q clientId="$2" | first_id
 }
 
+flow_id_by_alias() {
+  realm_name="$1"
+  flow_alias="$2"
+  current_id=""
+
+  "$KCADM" get authentication/flows -r "$realm_name" | while IFS= read -r line; do
+    case "$line" in
+      *'"id" : "'*)
+        current_id="$(printf '%s\n' "$line" | extract_json_field id)"
+        ;;
+      *'"alias" : "'*)
+        current_alias="$(printf '%s\n' "$line" | extract_json_field alias)"
+        if [ "$current_alias" = "$flow_alias" ]; then
+          printf '%s\n' "$current_id"
+          exit 0
+        fi
+        ;;
+    esac
+  done
+}
+
+execution_id_by_provider() {
+  realm_name="$1"
+  flow_alias="$2"
+  provider_id="$3"
+  executions_file="$TMPDIR/executions-provider-$(printf '%s' "$realm_name-$flow_alias-$provider_id" | tr -c '[:alnum:]' '-').json"
+  current_id=""
+
+  "$KCADM" get "authentication/flows/$flow_alias/executions" -r "$realm_name" > "$executions_file"
+  while IFS= read -r line; do
+    case "$line" in
+      *'"id" : "'*)
+        current_id="$(printf '%s\n' "$line" | extract_json_field id)"
+        ;;
+      *'"providerId" : "'*)
+        current_provider_id="$(printf '%s\n' "$line" | extract_json_field providerId)"
+        if [ "$current_provider_id" = "$provider_id" ]; then
+          printf '%s\n' "$current_id"
+          return 0
+        fi
+        ;;
+    esac
+  done < "$executions_file"
+}
+
+execution_id_by_display() {
+  realm_name="$1"
+  flow_alias="$2"
+  display_name="$3"
+  executions_file="$TMPDIR/executions-display-$(printf '%s' "$realm_name-$flow_alias-$display_name" | tr -c '[:alnum:]' '-').json"
+  current_id=""
+
+  "$KCADM" get "authentication/flows/$flow_alias/executions" -r "$realm_name" > "$executions_file"
+  while IFS= read -r line; do
+    case "$line" in
+      *'"id" : "'*)
+        current_id="$(printf '%s\n' "$line" | extract_json_field id)"
+        ;;
+      *'"displayName" : "'*)
+        current_display_name="$(printf '%s\n' "$line" | extract_json_field displayName)"
+        if [ "$current_display_name" = "$display_name" ]; then
+          printf '%s\n' "$current_id"
+          return 0
+        fi
+        ;;
+      *'"alias" : "'*)
+        current_alias="$(printf '%s\n' "$line" | extract_json_field alias)"
+        if [ "$current_alias" = "$display_name" ]; then
+          printf '%s\n' "$current_id"
+          return 0
+        fi
+        ;;
+    esac
+  done < "$executions_file"
+}
+
 upsert_realm() {
   realm_name="$1"
   payload_file="$2"
@@ -187,6 +263,91 @@ assign_group_realm_management_query_roles() {
   "$KCADM" add-roles -r "$realm_name" --gid "$group_id_value" --cclientid realm-management --rolename query-users >/dev/null 2>&1 || true
   "$KCADM" add-roles -r "$realm_name" --gid "$group_id_value" --cclientid realm-management --rolename query-groups >/dev/null 2>&1 || true
   "$KCADM" add-roles -r "$realm_name" --gid "$group_id_value" --cclientid realm-management --rolename view-users >/dev/null 2>&1 || true
+}
+
+ensure_client_role() {
+  realm_name="$1"
+  client_uuid_value="$2"
+  role_name="$3"
+
+  if ! "$KCADM" get "clients/$client_uuid_value/roles/$role_name" -r "$realm_name" >/dev/null 2>&1; then
+    "$KCADM" create "clients/$client_uuid_value/roles" -r "$realm_name" -s name="$role_name" -s description="OIDC login gate role" >/dev/null
+  fi
+}
+
+ensure_group_client_role() {
+  realm_name="$1"
+  group_name="$2"
+  client_identifier="$3"
+  role_name="$4"
+
+  group_id_value="$(group_id "$realm_name" "$group_name")"
+  [ -n "$group_id_value" ]
+  "$KCADM" add-roles -r "$realm_name" --gid "$group_id_value" --cclientid "$client_identifier" --rolename "$role_name" >/dev/null 2>&1 || true
+}
+
+ensure_client_login_gate() {
+  realm_name="$1"
+  client_identifier="$2"
+  role_name="$3"
+  flow_alias="$4"
+  shift 4
+  subflow_alias="$flow_alias-group-gate"
+  condition_config_alias="$flow_alias-group-condition"
+  deny_config_alias="$flow_alias-group-deny"
+
+  client_uuid_value="$(client_uuid "$realm_name" "$client_identifier")"
+  [ -n "$client_uuid_value" ]
+  ensure_client_role "$realm_name" "$client_uuid_value" "$role_name"
+
+  flow_id_value="$(flow_id_by_alias "$realm_name" "$flow_alias" | head -n1)"
+  if [ -z "$flow_id_value" ]; then
+    "$KCADM" create authentication/flows/browser/copy -r "$realm_name" -s newName="$flow_alias" >/dev/null
+    flow_id_value="$(flow_id_by_alias "$realm_name" "$flow_alias" | head -n1)"
+  fi
+  [ -n "$flow_id_value" ]
+
+  subflow_execution_id="$(execution_id_by_display "$realm_name" "$flow_alias" "$subflow_alias" | head -n1)"
+  if [ -z "$subflow_execution_id" ]; then
+    "$KCADM" create "authentication/flows/$flow_alias/executions/flow" -r "$realm_name" \
+      -s alias="$subflow_alias" \
+      -s type=basic-flow \
+      -s provider=basic-flow \
+      -s description="Deny $client_identifier login unless the configured group role is present" >/dev/null
+    subflow_execution_id="$(execution_id_by_display "$realm_name" "$flow_alias" "$subflow_alias" | head -n1)"
+  fi
+  [ -n "$subflow_execution_id" ]
+  "$KCADM" update "authentication/flows/$flow_alias/executions" -r "$realm_name" -n -s id="$subflow_execution_id" -s requirement=CONDITIONAL >/dev/null
+
+  condition_execution_id="$(execution_id_by_provider "$realm_name" "$subflow_alias" conditional-user-role | head -n1)"
+  if [ -z "$condition_execution_id" ]; then
+    "$KCADM" create "authentication/flows/$subflow_alias/executions/execution" -r "$realm_name" -s provider=conditional-user-role >/dev/null
+    condition_execution_id="$(execution_id_by_provider "$realm_name" "$subflow_alias" conditional-user-role | head -n1)"
+  fi
+  [ -n "$condition_execution_id" ]
+
+  deny_execution_id="$(execution_id_by_provider "$realm_name" "$subflow_alias" deny-access-authenticator | head -n1)"
+  if [ -z "$deny_execution_id" ]; then
+    "$KCADM" create "authentication/flows/$subflow_alias/executions/execution" -r "$realm_name" -s provider=deny-access-authenticator >/dev/null
+    deny_execution_id="$(execution_id_by_provider "$realm_name" "$subflow_alias" deny-access-authenticator | head -n1)"
+  fi
+  [ -n "$deny_execution_id" ]
+
+  "$KCADM" update "authentication/flows/$subflow_alias/executions" -r "$realm_name" -n -s id="$condition_execution_id" -s requirement=REQUIRED >/dev/null
+  "$KCADM" update "authentication/flows/$subflow_alias/executions" -r "$realm_name" -n -s id="$deny_execution_id" -s requirement=REQUIRED >/dev/null
+  "$KCADM" create "authentication/executions/$condition_execution_id/config" -r "$realm_name" \
+    -s alias="$condition_config_alias" \
+    -s "config.condUserRole=$client_identifier.$role_name" \
+    -s "config.negate=true" >/dev/null 2>&1 || true
+  "$KCADM" create "authentication/executions/$deny_execution_id/config" -r "$realm_name" \
+    -s alias="$deny_config_alias" \
+    -s "config.denyErrorMessage=$client_identifier-group-required" >/dev/null 2>&1 || true
+
+  "$KCADM" update "clients/$client_uuid_value" -r "$realm_name" -s "authenticationFlowBindingOverrides.browser=$flow_id_value" >/dev/null
+
+  for group_name in "$@"; do
+    ensure_group_client_role "$realm_name" "$group_name" "$client_identifier" "$role_name"
+  done
 }
 
 until login "$TEMP_USER" || login "$ADMIN_USER"; do
@@ -334,5 +495,18 @@ assign_group_realm_management_query_roles '${replace(realm.name, "'", "'\"'\"'")
 %{ for member in group.extra_members ~}
 ensure_group_membership '${replace(realm.name, "'", "'\"'\"'")}' "$GROUP_ID" '${replace(member, "'", "'\"'\"'")}'
 %{ endfor ~}
+%{ endfor ~}
+%{ for client_index, client in realm.oidc_clients ~}
+%{ if length(client.login_allowed_groups) > 0 ~}
+ensure_client_login_gate \
+  '${replace(realm.name, "'", "'\"'\"'")}' \
+  '${replace(client.client_id, "'", "'\"'\"'")}' \
+  '${replace(client.login_role_name, "'", "'\"'\"'")}' \
+  '${replace(client.login_browser_flow_alias, "'", "'\"'\"'")}' \
+%{ for group_name in client.login_allowed_groups ~}
+  '${replace(group_name, "'", "'\"'\"'")}' \
+%{ endfor ~}
+  >/dev/null
+%{ endif ~}
 %{ endfor ~}
 %{ endfor ~}

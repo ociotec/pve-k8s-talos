@@ -79,13 +79,13 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
   - Domain, TLS mode, root CA path, MetalLB range, and ingress fixed IP.
   - Certificate catalog (`available_certificates`) and default certificate entry.
 - `identity_constants.tf`
-  - Keycloak hostname, TLS secret, PostgreSQL sizing/image, bootstrap admin settings, realm groups, and optional OIDC clients for consumers such as Rancher.
+  - Keycloak hostname, TLS secret, PostgreSQL sizing/image, bootstrap admin settings, realm groups, and optional OIDC clients for consumers such as Rancher and Portainer.
 - `monitoring_constants.tf`
 - `platform_constants.tf`
-  - Storage class, image versions, and hostnames for platform services such as Portainer and optional Rancher.
+  - Storage class, image versions, hostnames, and optional Keycloak auth settings for platform services such as Portainer and Rancher.
   - `tls_secrets` maps namespaces/secret names to entries from `available_certificates`.
 
-For the Rancher + Keycloak authentication split of responsibilities and the shared `k8s-admins` access model, see [docs/rancher-keycloak-auth.md](docs/rancher-keycloak-auth.md).
+For the Rancher/Portainer + Keycloak authentication split of responsibilities and the shared `k8s-admins` access model, see [docs/rancher-keycloak-auth.md](docs/rancher-keycloak-auth.md).
 - `ceph_constants.tf`
   - `ceph_mode = "internal"` to run a full Rook-managed Ceph cluster in Kubernetes.
   - `ceph_mode = "external"` to consume a native PVE Ceph cluster from Rook after `k8s-net`.
@@ -433,6 +433,8 @@ If you don't have internal DNS, add an `/etc/hosts` entry using `ingress_lb_ip` 
 ```bash
 192.168.1.70 portainer.home.arpa
 ```
+
+When `portainer_auth_keycloak_realm` is set in `platform_constants.tf`, OpenTofu configures Portainer custom OAuth against the generated Keycloak `portainer` client. Restrict Portainer OAuth login by setting `login_allowed_groups` on the `portainer` OIDC client in `identity_constants.tf`; Keycloak denies browser login for users outside those groups before Portainer creates a local OAuth user.
 
 #### Rook Ceph dashboard
 

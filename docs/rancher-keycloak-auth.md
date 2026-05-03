@@ -1,6 +1,6 @@
-# Rancher + Keycloak authentication
+# Rancher, Portainer + Keycloak authentication
 
-This repository automates the Keycloak side of Rancher authentication and keeps the Rancher-side authorization setup explicit.
+This repository automates the Keycloak side of Rancher and Portainer authentication.
 
 ## Automation boundary
 
@@ -9,22 +9,29 @@ Automated in `identity`:
 - A shared Keycloak realm group named `k8s-admins`.
 - LDAP-to-Keycloak group mapping for that group.
 - The Rancher OIDC client, including redirect URIs and a generated confidential client secret.
+- The Portainer OIDC client, including redirect URI and a generated confidential client secret.
+- Optional Keycloak-side Portainer login restriction by OIDC client `login_allowed_groups`.
 - The `groups` OIDC claim with full group path enabled.
 
-Manual in Rancher:
+Automated in `platform`:
 
-- Enabling Keycloak OIDC as the Rancher auth provider.
-- Restricting site access to approved groups.
-- Binding Rancher groups to global, cluster, project, or namespace roles.
+- Rancher Keycloak OIDC `AuthConfig`.
+- Rancher global role binding for the configured group.
+- Portainer local bootstrap admin password.
+- Portainer custom OAuth settings via the Portainer API.
+
+Manual recovery paths:
+
 - Keeping local Rancher users for break-glass recovery.
+- Keeping the local Portainer admin password for recovery.
 
 ## Keycloak configuration model
 
 Declare Rancher access groups under `keycloak_realms[*].groups` in `clusters/<cluster>/identity_constants.tf`.
 
-Declare the Rancher client under `keycloak_realms[*].oidc_clients`.
+Declare the Rancher and Portainer clients under `keycloak_realms[*].oidc_clients`.
 
-The sample cluster already includes `k8s-admins` and an OIDC client with redirect URI `https://<rancher-host>/verify-auth`.
+The sample cluster already includes `k8s-admins`, a Rancher client with redirect URI `https://<rancher-host>/verify-auth`, and a Portainer client with redirect URI `https://<portainer-host>/`.
 
 ## Retrieving generated OIDC settings
 
@@ -38,26 +45,35 @@ tofu -chdir=out/identity output -json keycloak_oidc_client_secrets
 Use:
 
 - issuer URL: `https://<keycloak-host>/realms/<realm>`
-- client ID: `rancher`
+- client ID: `rancher` or `portainer`
 - client secret: from `keycloak_oidc_client_secrets`
 
-## Rancher configuration
+## Platform configuration
 
-In Rancher:
+In `clusters/<cluster>/platform_constants.tf`, enable the integrations by setting:
 
-1. Log in with the local bootstrap admin and keep that local user enabled.
-2. Optionally create a second local admin as a break-glass account.
-3. Configure `Keycloak (OIDC)` as the auth provider.
-4. Use the Keycloak realm issuer URL and the generated Rancher client credentials.
-5. Set site access to only authorized users and groups.
-6. Add `k8s-admins` as the allowed group.
+```hcl
+rancher_auth_keycloak_realm   = "company"
+rancher_auth_allowed_group    = "k8s-admins"
+portainer_auth_keycloak_realm = "company"
+```
 
-Do not remove local Rancher admins after external auth is enabled.
+Do not remove local Rancher or Portainer admins after external auth is enabled.
+
+For an existing Portainer data volume, deployment treats the OpenTofu-generated admin password as authoritative. If the local Portainer database has drifted, the OAuth configuration step reconciles the local admin password back to the generated state value before calling the Portainer API.
+
+Restrict Portainer OAuth login in `clusters/<cluster>/identity_constants.tf` by setting the `portainer` OIDC client groups:
+
+```hcl
+login_allowed_groups = ["k8s-admins"]
+```
+
+The identity job creates a `login` client role on the `portainer` client, assigns it to the configured groups, copies Keycloak's browser flow for that client, and adds a conditional deny step for users that do not inherit the role.
 
 ## Role model
 
 Current simplified mapping:
 
-- `k8s-admins`: shared administrative access group for Rancher now and Portainer later.
+- `k8s-admins`: shared administrative access group for Rancher and Portainer.
 
-For Rancher, bind `k8s-admins` to the administrative role you want to start with. If you later need lower-privilege operator or read-only access, add separate Keycloak groups at that point instead of overloading `k8s-admins`.
+For Rancher, `k8s-admins` is bound to the configured global role. For Portainer, Keycloak restricts login for the `portainer` client to the configured `login_allowed_groups`. Portainer CE then keeps its usual local authorization model; initialize the local cluster once with the local `admin` user so newly auto-created OAuth users can see it. Keep local Portainer admin access for break-glass recovery.

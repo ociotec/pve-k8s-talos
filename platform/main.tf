@@ -32,7 +32,10 @@ variable "skip_platform" {
 }
 
 data "terraform_remote_state" "identity" {
-  count = !var.skip_platform && trimspace(try(local.rancher_auth_keycloak_realm, "")) != "" ? 1 : 0
+  count = !var.skip_platform && (
+    trimspace(try(local.rancher_auth_keycloak_realm, "")) != "" ||
+    trimspace(try(local.portainer_auth_keycloak_realm, "")) != ""
+  ) ? 1 : 0
 
   backend = "local"
   config = {
@@ -45,26 +48,36 @@ provider "kubernetes" {
 }
 
 locals {
-  rancher_enabled                   = trimspace(local.rancher_hostname) != ""
-  rancher_hostname_value            = local.rancher_hostname
-  rancher_tls_secret_name_value     = local.rancher_tls_secret_name
-  rancher_replicas_value            = local.rancher_replicas
-  rancher_private_ca_value          = local.rancher_private_ca
-  rancher_bootstrap_length_value    = local.rancher_bootstrap_password_length
-  rancher_auth_keycloak_realm_value = trimspace(try(local.rancher_auth_keycloak_realm, ""))
-  rancher_auth_allowed_group_value  = trimspace(try(local.rancher_auth_allowed_group, ""))
-  rancher_auth_global_role_value    = trimspace(try(local.rancher_auth_global_role, "admin"))
-  rancher_auth_access_mode_value    = trimspace(try(local.rancher_auth_access_mode, "restricted"))
-  rancher_auth_enabled              = local.rancher_enabled && !var.skip_platform && local.rancher_auth_keycloak_realm_value != "" && local.rancher_auth_allowed_group_value != ""
-  identity_realm_groups = local.rancher_auth_enabled ? try(
+  rancher_enabled                        = trimspace(local.rancher_hostname) != ""
+  rancher_hostname_value                 = local.rancher_hostname
+  rancher_tls_secret_name_value          = local.rancher_tls_secret_name
+  rancher_replicas_value                 = local.rancher_replicas
+  rancher_private_ca_value               = local.rancher_private_ca
+  rancher_bootstrap_length_value         = local.rancher_bootstrap_password_length
+  rancher_auth_keycloak_realm_value      = trimspace(try(local.rancher_auth_keycloak_realm, ""))
+  rancher_auth_allowed_group_value       = trimspace(try(local.rancher_auth_allowed_group, ""))
+  rancher_auth_global_role_value         = trimspace(try(local.rancher_auth_global_role, "admin"))
+  rancher_auth_access_mode_value         = trimspace(try(local.rancher_auth_access_mode, "restricted"))
+  rancher_auth_enabled                   = local.rancher_enabled && !var.skip_platform && local.rancher_auth_keycloak_realm_value != "" && local.rancher_auth_allowed_group_value != ""
+  portainer_admin_secret_name_value      = try(local.portainer_admin_secret_name, "portainer-admin")
+  portainer_admin_password_length_value  = try(local.portainer_admin_password_length, 24)
+  portainer_oauth_ca_secret_name_value   = try(local.portainer_oauth_ca_secret_name, "portainer-oauth-ca")
+  portainer_auth_keycloak_realm_value    = trimspace(try(local.portainer_auth_keycloak_realm, ""))
+  portainer_auth_user_identifier_value   = trimspace(try(local.portainer_auth_user_identifier, "preferred_username"))
+  portainer_auth_scopes_value            = trimspace(try(local.portainer_auth_scopes, "openid profile email"))
+  portainer_auth_sso_value               = try(local.portainer_auth_sso, true)
+  portainer_auth_auto_create_users_value = try(local.portainer_auth_auto_create_users, true)
+  portainer_auth_enabled                 = !var.skip_platform && trimspace(local.portainer_hostname) != "" && local.portainer_auth_keycloak_realm_value != ""
+  identity_auth_enabled                  = local.rancher_auth_enabled || local.portainer_auth_enabled
+  identity_realm_groups = local.identity_auth_enabled ? try(
     data.terraform_remote_state.identity[0].outputs.keycloak_realm_groups,
     {}
   ) : {}
-  identity_oidc_metadata = local.rancher_auth_enabled ? try(
+  identity_oidc_metadata = local.identity_auth_enabled ? try(
     data.terraform_remote_state.identity[0].outputs.keycloak_oidc_client_metadata,
     {}
   ) : {}
-  identity_oidc_secrets = local.rancher_auth_enabled ? try(
+  identity_oidc_secrets = local.identity_auth_enabled ? try(
     data.terraform_remote_state.identity[0].outputs.keycloak_oidc_client_secrets,
     {}
   ) : {}
@@ -98,7 +111,50 @@ locals {
   rancher_auth_allowed_principal_ids = [
     for group_name in local.rancher_auth_allowed_group_names : format("keycloakoidc_group://%s", group_name)
   ]
-  rancher_auth_ca_content           = local.rancher_auth_enabled ? try(file(local.root_ca_crt), "") : ""
+  rancher_auth_ca_content = local.rancher_auth_enabled ? try(file(local.root_ca_crt), "") : ""
+  portainer_oidc_issuer = local.portainer_auth_enabled ? try(
+    local.identity_oidc_metadata[local.portainer_auth_keycloak_realm_value].issuer_url,
+    ""
+  ) : ""
+  portainer_oidc_client_id = local.portainer_auth_enabled ? try(
+    local.identity_oidc_metadata[local.portainer_auth_keycloak_realm_value].clients["portainer"].client_id,
+    ""
+  ) : ""
+  portainer_oidc_client_secret = local.portainer_auth_enabled ? try(
+    local.identity_oidc_secrets[local.portainer_auth_keycloak_realm_value]["portainer"],
+    ""
+  ) : ""
+  portainer_oidc_auth_endpoint        = local.portainer_oidc_issuer != "" ? format("%s/protocol/openid-connect/auth", local.portainer_oidc_issuer) : ""
+  portainer_oidc_token_endpoint       = local.portainer_oidc_issuer != "" ? format("%s/protocol/openid-connect/token", local.portainer_oidc_issuer) : ""
+  portainer_oidc_userinfo_endpoint    = local.portainer_oidc_issuer != "" ? format("%s/protocol/openid-connect/userinfo", local.portainer_oidc_issuer) : ""
+  portainer_oidc_end_session_endpoint = local.portainer_oidc_issuer != "" ? format("%s/protocol/openid-connect/logout", local.portainer_oidc_issuer) : ""
+  portainer_oauth_redirect_uri        = format("https://%s/", local.portainer_hostname)
+  portainer_oauth_logout_uri = local.portainer_oidc_end_session_endpoint != "" ? format(
+    "%s?client_id=%s&post_logout_redirect_uri=%s",
+    local.portainer_oidc_end_session_endpoint,
+    urlencode(local.portainer_oidc_client_id),
+    urlencode(local.portainer_oauth_redirect_uri)
+  ) : ""
+  portainer_auth_ca_content = local.portainer_auth_enabled ? try(file(local.root_ca_crt), "") : ""
+  portainer_auth_ca_enabled = trimspace(local.portainer_auth_ca_content) != ""
+  portainer_oauth_settings = local.portainer_auth_enabled ? {
+    ClientID             = local.portainer_oidc_client_id
+    ClientSecret         = local.portainer_oidc_client_secret
+    AuthorizationURI     = local.portainer_oidc_auth_endpoint
+    AccessTokenURI       = local.portainer_oidc_token_endpoint
+    ResourceURI          = local.portainer_oidc_userinfo_endpoint
+    RedirectURI          = local.portainer_oauth_redirect_uri
+    UserIdentifier       = local.portainer_auth_user_identifier_value
+    Scopes               = local.portainer_auth_scopes_value
+    OAuthAutoCreateUsers = local.portainer_auth_auto_create_users_value
+    DefaultTeamID        = 0
+    SSO                  = local.portainer_auth_sso_value
+    LogoutURI            = local.portainer_oauth_logout_uri
+  } : null
+  portainer_oauth_payload = local.portainer_auth_enabled ? {
+    AuthenticationMethod = 3
+    OAuthSettings        = local.portainer_oauth_settings
+  } : null
   rancher_namespace_manifest = {
     apiVersion = "v1"
     kind       = "Namespace"
@@ -152,11 +208,14 @@ locals {
   ]
   portainer_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/portainer.yaml", {
-      portainer_hostname        = local.portainer_hostname
-      portainer_image           = local.portainer_image_tag
-      portainer_storage         = local.portainer_storage_class
-      portainer_size            = local.portainer_pvc_size
-      portainer_tls_secret_name = local.portainer_tls_secret_name
+      portainer_hostname             = local.portainer_hostname
+      portainer_image                = local.portainer_image_tag
+      portainer_storage              = local.portainer_storage_class
+      portainer_size                 = local.portainer_pvc_size
+      portainer_tls_secret_name      = local.portainer_tls_secret_name
+      portainer_admin_secret_name    = local.portainer_admin_secret_name_value
+      portainer_oauth_ca_enabled     = local.portainer_auth_ca_enabled
+      portainer_oauth_ca_secret_name = local.portainer_oauth_ca_secret_name_value
     })) :
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
@@ -326,6 +385,17 @@ check "rancher_auth_identity_outputs" {
   }
 }
 
+check "portainer_auth_identity_outputs" {
+  assert {
+    condition = !local.portainer_auth_enabled || (
+      trimspace(local.portainer_oidc_issuer) != "" &&
+      trimspace(local.portainer_oidc_client_id) != "" &&
+      trimspace(local.portainer_oidc_client_secret) != ""
+    )
+    error_message = "Portainer auth automation requires a populated identity workspace with Keycloak OIDC metadata and secret for the portainer client in the selected realm."
+  }
+}
+
 resource "kubernetes_manifest" "platform_namespaces" {
   for_each = { for i, m in local.platform_namespaces : i => m }
   manifest = each.value
@@ -346,7 +416,11 @@ resource "kubernetes_manifest" "platform_other" {
       manifest.metadata.annotations,
     ]
   }
-  depends_on = [kubernetes_manifest.platform_namespaces]
+  depends_on = [
+    kubernetes_manifest.platform_namespaces,
+    kubernetes_secret_v1.portainer_admin,
+    kubernetes_secret_v1.portainer_oauth_ca,
+  ]
 }
 
 resource "null_resource" "cert_manager_webhook_ready" {
@@ -371,6 +445,44 @@ resource "kubernetes_secret_v1" "preissued_tls" {
   }
 
   type       = "kubernetes.io/tls"
+  depends_on = [kubernetes_manifest.platform_namespaces]
+}
+
+resource "random_password" "portainer_admin" {
+  count   = !var.skip_platform ? 1 : 0
+  length  = local.portainer_admin_password_length_value
+  special = false
+}
+
+resource "kubernetes_secret_v1" "portainer_admin" {
+  count = !var.skip_platform ? 1 : 0
+
+  metadata {
+    name      = local.portainer_admin_secret_name_value
+    namespace = "portainer"
+  }
+
+  data = {
+    password = random_password.portainer_admin[0].result
+  }
+
+  type       = "Opaque"
+  depends_on = [kubernetes_manifest.platform_namespaces]
+}
+
+resource "kubernetes_secret_v1" "portainer_oauth_ca" {
+  count = local.portainer_auth_ca_enabled ? 1 : 0
+
+  metadata {
+    name      = local.portainer_oauth_ca_secret_name_value
+    namespace = "portainer"
+  }
+
+  data = {
+    "ca.crt" = local.portainer_auth_ca_content
+  }
+
+  type       = "Opaque"
   depends_on = [kubernetes_manifest.platform_namespaces]
 }
 
@@ -448,6 +560,35 @@ resource "null_resource" "rancher_auth_global_role_bindings" {
   depends_on = [local_file.rancher_auth_global_role_bindings]
 }
 
+resource "local_sensitive_file" "portainer_oauth_configure" {
+  count = local.portainer_auth_enabled ? 1 : 0
+
+  filename        = "${path.module}/.generated-portainer-oauth-configure.sh"
+  file_permission = "0700"
+  content = templatefile("${path.module}/configure-portainer-oauth.sh.tftpl", {
+    kubeconfig_path         = abspath("${path.module}/${var.kubeconfig_path}")
+    portainer_auth_body     = jsonencode({ username = "admin", password = random_password.portainer_admin[0].result })
+    portainer_oauth_payload = jsonencode(local.portainer_oauth_payload)
+  })
+  depends_on = [kubernetes_manifest.platform_ingress]
+}
+
+resource "null_resource" "portainer_oauth_configure" {
+  count = local.portainer_auth_enabled ? 1 : 0
+
+  triggers = {
+    script_sha = nonsensitive(sha256(local_sensitive_file.portainer_oauth_configure[0].content))
+  }
+
+  provisioner "local-exec" {
+    command = local_sensitive_file.portainer_oauth_configure[0].filename
+  }
+
+  depends_on = [
+    local_sensitive_file.portainer_oauth_configure,
+  ]
+}
+
 resource "random_password" "rancher_bootstrap" {
   count   = !var.skip_platform && local.rancher_enabled ? 1 : 0
   length  = local.rancher_bootstrap_length_value
@@ -503,6 +644,15 @@ output "rancher_enabled" {
 
 output "portainer_url" {
   value = var.skip_platform ? null : "https://${local.portainer_hostname}"
+}
+
+output "portainer_admin_password" {
+  value     = var.skip_platform ? null : random_password.portainer_admin[0].result
+  sensitive = true
+}
+
+output "portainer_auth_enabled" {
+  value = local.portainer_auth_enabled
 }
 
 output "rancher_url" {

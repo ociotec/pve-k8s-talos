@@ -1,12 +1,20 @@
 locals {
-  portainer_hostname        = "portainer.${local.domain}"
-  portainer_tls_secret_name = "portainer-tls"
+  portainer_hostname             = "portainer.${local.domain}"
+  portainer_tls_secret_name      = "portainer-tls"
+  portainer_admin_secret_name    = "portainer-admin"
+  portainer_oauth_ca_secret_name = "portainer-oauth-ca"
 
   storage_class = "${local.ceph_name_prefix}-rbd-ec"
 
-  portainer_image_tag     = "2.40.0"
-  portainer_storage_class = local.storage_class
-  portainer_pvc_size      = "10Gi"
+  portainer_image_tag              = "2.40.0"
+  portainer_storage_class          = local.storage_class
+  portainer_pvc_size               = "10Gi"
+  portainer_admin_password_length  = 24
+  portainer_auth_keycloak_realm    = "company"
+  portainer_auth_user_identifier   = "preferred_username"
+  portainer_auth_scopes            = "openid profile email"
+  portainer_auth_sso               = true
+  portainer_auth_auto_create_users = true
 
   rancher_hostname                  = "rancher.${local.domain}"
   rancher_tls_secret_name           = "tls-rancher-ingress"

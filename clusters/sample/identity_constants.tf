@@ -15,6 +15,8 @@ locals {
   postgres_password_length = 24
 
   postgres_storage_class = "${local.ceph_name_prefix}-rbd-ec"
+  rancher_url            = "https://rancher.${local.domain}"
+  portainer_url          = "https://portainer.${local.domain}"
 
   tls_secrets = [
     {
@@ -66,11 +68,11 @@ locals {
           description                  = "OIDC client for Rancher login"
           access_type                  = "confidential"
           client_secret_length         = 32
-          valid_redirect_uris          = ["https://${local.rancher_hostname}/verify-auth"]
-          post_logout_redirect_uris    = ["https://${local.rancher_hostname}/*"]
-          web_origins                  = ["https://${local.rancher_hostname}"]
-          base_url                     = "https://${local.rancher_hostname}"
-          admin_url                    = "https://${local.rancher_hostname}"
+          valid_redirect_uris          = ["${local.rancher_url}/verify-auth"]
+          post_logout_redirect_uris    = ["${local.rancher_url}/*"]
+          web_origins                  = [local.rancher_url]
+          base_url                     = local.rancher_url
+          admin_url                    = local.rancher_url
           standard_flow_enabled        = true
           direct_access_grants_enabled = false
           service_accounts_enabled     = false
@@ -101,6 +103,40 @@ locals {
               config = {
                 "access.token.claim"        = "true"
                 "included.client.audience"  = "rancher"
+                "id.token.claim"            = "false"
+                "introspection.token.claim" = "false"
+              }
+            },
+          ]
+        },
+        {
+          client_id                    = "portainer"
+          name                         = "Portainer"
+          description                  = "OIDC client for Portainer login"
+          access_type                  = "confidential"
+          client_secret_length         = 32
+          login_allowed_groups         = ["k8s-admins"]
+          valid_redirect_uris          = ["${local.portainer_url}/"]
+          post_logout_redirect_uris    = ["${local.portainer_url}/", "${local.portainer_url}/*"]
+          web_origins                  = [local.portainer_url]
+          base_url                     = local.portainer_url
+          admin_url                    = local.portainer_url
+          standard_flow_enabled        = true
+          direct_access_grants_enabled = false
+          service_accounts_enabled     = false
+          full_scope_allowed           = false
+          include_groups_claim         = true
+          groups_claim_name            = "groups"
+          groups_claim_full_path       = false
+          default_scopes               = ["profile", "email", "roles"]
+          optional_scopes              = ["offline_access"]
+          mappers = [
+            {
+              name            = "client-audience"
+              protocol_mapper = "oidc-audience-mapper"
+              config = {
+                "access.token.claim"        = "true"
+                "included.client.audience"  = "portainer"
                 "id.token.claim"            = "false"
                 "introspection.token.claim" = "false"
               }

@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+KUBECONFIG_PATH='${kubeconfig_path}'
+PORTAINER_AUTH_BODY='${portainer_auth_body}'
+PORTAINER_OAUTH_PAYLOAD='${portainer_oauth_payload}'
+
+if ! command -v kubectl >/dev/null 2>&1; then
+  echo "kubectl is required to configure Portainer OAuth." >&2
+  exit 1
+fi
+
+if ! command -v curl >/dev/null 2>&1; then
+  echo "curl is required to configure Portainer OAuth." >&2
+  exit 1
+fi
+
+auth_file="$(mktemp)"
+payload_file="$(mktemp)"
+port_forward_log="$(mktemp)"
+auth_error_log="$(mktemp)"
+reset_pod_manifest="$(mktemp)"
+port_forward_pid=""
+portainer_scaled_down="false"
+portainer_restore_replicas="1"
+
+cleanup() {
+  if [ -n "$port_forward_pid" ] && kill -0 "$port_forward_pid" >/dev/null 2>&1; then
+    kill "$port_forward_pid" >/dev/null 2>&1 || true
+    wait "$port_forward_pid" >/dev/null 2>&1 || true
+  fi
+  if [ "$portainer_scaled_down" = "true" ]; then
+    KUBECONFIG="$KUBECONFIG_PATH" kubectl -n portainer scale deploy/portainer --replicas="$portainer_restore_replicas" >/dev/null 2>&1 || true
+  fi
+  rm -f "$auth_file" "$payload_file" "$port_forward_log" "$auth_error_log" "$reset_pod_manifest"
+}
+trap cleanup EXIT
+
+printf '%s' "$PORTAINER_AUTH_BODY" > "$auth_file"
+printf '%s' "$PORTAINER_OAUTH_PAYLOAD" > "$payload_file"
+admin_password="$(sed -n 's/.*"password":"\([^"]*\)".*/\1/p' "$auth_file")"
+
+if [ -z "$admin_password" ]; then
+  echo "Could not extract generated Portainer admin password from auth payload." >&2
+  exit 1
+fi
+
+wait_for_portainer() {
+  KUBECONFIG="$KUBECONFIG_PATH" kubectl -n portainer rollout status deploy/portainer --timeout=600s >/dev/null
+  KUBECONFIG="$KUBECONFIG_PATH" kubectl -n portainer wait --for=condition=Available deploy/portainer --timeout=600s >/dev/null
+}
+
+stop_port_forward() {
+  if [ -n "$port_forward_pid" ] && kill -0 "$port_forward_pid" >/dev/null 2>&1; then
+    kill "$port_forward_pid" >/dev/null 2>&1 || true
+    wait "$port_forward_pid" >/dev/null 2>&1 || true
+  fi
+  port_forward_pid=""
+  portainer_api=""
+}
+
+open_port_forward() {
+  portainer_api=""
+
+  for local_port in {19000..19020}; do
+    : > "$port_forward_log"
+    KUBECONFIG="$KUBECONFIG_PATH" kubectl -n portainer port-forward --address 127.0.0.1 svc/portainer "$local_port:9000" >"$port_forward_log" 2>&1 &
+    port_forward_pid="$!"
+
+    for _ in {1..30}; do
+      if ! kill -0 "$port_forward_pid" >/dev/null 2>&1; then
+        break
+      fi
+      if curl -fsS "http://127.0.0.1:$local_port/api/system/status" >/dev/null 2>&1; then
+        portainer_api="http://127.0.0.1:$local_port/api"
+        return 0
+      fi
+      sleep 1
+    done
+
+    stop_port_forward
+  done
+
+  echo "Could not open a local port-forward to Portainer service." >&2
+  cat "$port_forward_log" >&2 || true
+  return 1
+}
+
+authenticate_portainer() {
+  auth_response="$(
+    curl -fsS \
+      -X POST \
+      -H 'Content-Type: application/json' \
+      --data-binary "@$auth_file" \
+      "$portainer_api/auth" 2>"$auth_error_log"
+  )" || return 1
+
+  jwt="$(printf '%s' "$auth_response" | sed -n 's/.*"jwt":"\([^"]*\)".*/\1/p')"
+  if [ -z "$jwt" ]; then
+    echo "Portainer auth response did not include a JWT." >&2
+    return 1
+  fi
+}
+
+wait_for_portainer_pods_removed() {
+  remaining="1"
+  for _ in {1..150}; do
+    remaining="$(
+      KUBECONFIG="$KUBECONFIG_PATH" kubectl -n portainer get pods \
+        -l app.kubernetes.io/name=portainer,app.kubernetes.io/instance=portainer \
+        --field-selector=status.phase!=Succeeded,status.phase!=Failed \
+        --no-headers 2>/dev/null | wc -l | tr -d ' '
+    )"
+    if [ "$${remaining:-0}" = "0" ]; then
+      return 0
+    fi
+    sleep 2
+  done
+
+  echo "Timed out waiting for Portainer running pods to stop before password reset." >&2
+  return 1
+}
+
+restore_portainer() {
+  KUBECONFIG="$KUBECONFIG_PATH" kubectl -n portainer scale deploy/portainer --replicas="$portainer_restore_replicas" >/dev/null
+  portainer_scaled_down="false"
+  if [ "$portainer_restore_replicas" != "0" ]; then
+    wait_for_portainer
+  fi
+}
+
+reset_portainer_admin_password() {
+  stop_port_forward
+
+  echo "Portainer local admin password differs from OpenTofu state; reconciling it to the generated state value..." >&2
+  portainer_restore_replicas="$(
+    KUBECONFIG="$KUBECONFIG_PATH" kubectl -n portainer get deploy/portainer -o jsonpath='{.spec.replicas}'
+  )"
+  if [ -z "$portainer_restore_replicas" ]; then
+    portainer_restore_replicas="1"
+  fi
+
+  KUBECONFIG="$KUBECONFIG_PATH" kubectl -n portainer scale deploy/portainer --replicas=0 >/dev/null
+  portainer_scaled_down="true"
+
+  if ! wait_for_portainer_pods_removed; then
+    restore_portainer || true
+    return 1
+  fi
+
+  KUBECONFIG="$KUBECONFIG_PATH" kubectl -n portainer delete pod portainer-password-reset --ignore-not-found >/dev/null 2>&1 || true
+
+  cat > "$reset_pod_manifest" <<EOF_RESET_POD
+apiVersion: v1
+kind: Pod
+metadata:
+  name: portainer-password-reset
+  namespace: portainer
+spec:
+  restartPolicy: Never
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: portainer
+  containers:
+    - name: reset
+      image: portainer/helper-reset-password:latest
+      args:
+        - --password
+        - "$admin_password"
+      volumeMounts:
+        - name: data
+          mountPath: /data
+EOF_RESET_POD
+
+  KUBECONFIG="$KUBECONFIG_PATH" kubectl apply -f "$reset_pod_manifest" >/dev/null
+  if ! KUBECONFIG="$KUBECONFIG_PATH" kubectl -n portainer wait --for=jsonpath='{.status.phase}'=Succeeded pod/portainer-password-reset --timeout=300s >/dev/null; then
+    KUBECONFIG="$KUBECONFIG_PATH" kubectl -n portainer logs pod/portainer-password-reset --tail=100 >&2 || true
+    restore_portainer || true
+    return 1
+  fi
+
+  KUBECONFIG="$KUBECONFIG_PATH" kubectl -n portainer logs pod/portainer-password-reset --tail=20 >&2 || true
+  KUBECONFIG="$KUBECONFIG_PATH" kubectl -n portainer delete pod portainer-password-reset --ignore-not-found >/dev/null 2>&1 || true
+  restore_portainer
+  open_port_forward
+}
+
+wait_for_portainer
+open_port_forward
+
+if ! authenticate_portainer; then
+  cat "$auth_error_log" >&2 || true
+  reset_portainer_admin_password
+  if ! authenticate_portainer; then
+    cat "$auth_error_log" >&2 || true
+    echo "Could not authenticate to Portainer after reconciling the local admin password." >&2
+    exit 1
+  fi
+fi
+
+curl -fsS \
+  -X PUT \
+  -H "Authorization: Bearer $jwt" \
+  -H 'Content-Type: application/json' \
+  --data-binary "@$payload_file" \
+  "$portainer_api/settings" >/dev/null

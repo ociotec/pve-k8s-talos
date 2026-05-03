@@ -154,8 +154,19 @@ locals {
           full_scope_allowed           = try(client.full_scope_allowed, false)
           client_secret                = try(client.client_secret, "")
           client_secret_length         = try(client.client_secret_length, 32)
-          default_scopes               = distinct(try(client.default_scopes, []))
-          optional_scopes              = distinct(try(client.optional_scopes, []))
+          login_allowed_groups = distinct(compact(concat(
+            try(client.login_allowed_groups, try(client.allowed_groups, [])),
+            flatten([
+              for group in try(realm.groups, []) : [
+                for ldap_group in try(group.included_ldap_groups, []) : trimspace(try(ldap_group.group_name, "")) != "" ? ldap_group.group_name : try(regex("^CN=([^,]+)", ldap_group.group_dn)[0], ldap_group.group_dn)
+              ]
+              if contains(try(client.login_allowed_groups, try(client.allowed_groups, [])), group.name)
+            ])
+          )))
+          login_role_name          = trimspace(try(client.login_role_name, "login")) != "" ? trimspace(try(client.login_role_name, "login")) : "login"
+          login_browser_flow_alias = trimspace(try(client.login_browser_flow_alias, format("%s-browser", client.client_id))) != "" ? trimspace(try(client.login_browser_flow_alias, format("%s-browser", client.client_id))) : format("%s-browser", client.client_id)
+          default_scopes           = distinct(try(client.default_scopes, []))
+          optional_scopes          = distinct(try(client.optional_scopes, []))
           mappers = concat(
             try(client.include_groups_claim, false) ? [
               {
@@ -185,17 +196,17 @@ locals {
       ]
     }
   ]
-  oidc_client_secret_requests = {
-    for client in flatten([
-      for realm in local.keycloak_realm_base_definitions : [
-        for oidc_client in realm.oidc_clients : merge(oidc_client, {
-          realm_name = realm.name
-          key        = format("%s/%s", realm.name, oidc_client.client_id)
-        })
-      ]
-    ]) : client.key => client
-    if client.access_type == "confidential" && trimspace(client.client_secret) == ""
-  }
+  oidc_client_secret_requests = merge(
+    {},
+    [
+      for realm in local.keycloak_realm_base_definitions : {
+        for client in realm.oidc_clients : format("%s/%s", realm.name, client.client_id) => {
+          client_secret_length = client.client_secret_length
+        }
+        if client.access_type == "confidential" && trimspace(client.client_secret) == ""
+      }
+    ]...
+  )
   keycloak_realm_definitions = [
     for realm in local.keycloak_realm_base_definitions : merge(realm, {
       oidc_clients = [
@@ -207,6 +218,24 @@ locals {
       ]
     })
   ]
+  keycloak_realm_group_names = {
+    for realm in local.keycloak_realm_base_definitions : realm.name => distinct(concat(
+      [for group in realm.groups : group.name],
+      flatten([
+        for group in realm.groups : [
+          for ldap_group in try(group.included_ldap_groups, []) : ldap_group.group_name
+        ]
+      ])
+    ))
+  }
+  missing_oidc_client_login_groups = flatten([
+    for realm in local.keycloak_realm_base_definitions : flatten([
+      for client in realm.oidc_clients : [
+        for group_name in client.login_allowed_groups : format("%s/%s/%s", realm.name, client.client_id, group_name)
+        if !contains(local.keycloak_realm_group_names[realm.name], group_name)
+      ]
+    ])
+  ])
   keycloak_realm_config_script = trimspace(templatefile("${path.module}/keycloak-configure-realms.sh.tftpl", {
     keycloak_realms = local.keycloak_realm_definitions
   }))
@@ -309,6 +338,13 @@ check "preissued_tls_secrets_files" {
       trimspace(secret.cert_content) != "" && trimspace(secret.key_content) != ""
     ])
     error_message = "Each preissued identity tls_secrets entry must have readable, non-empty cert_path and key_path files."
+  }
+}
+
+check "oidc_client_login_groups" {
+  assert {
+    condition     = !local.keycloak_enabled || var.skip_identity || length(local.missing_oidc_client_login_groups) == 0
+    error_message = format("OIDC client login_allowed_groups contains groups that do not exist in the selected Keycloak realm or its included LDAP group references: %s", join(", ", local.missing_oidc_client_login_groups))
   }
 }
 
@@ -449,6 +485,8 @@ resource "kubernetes_manifest" "identity_ingress" {
 resource "kubernetes_job_v1" "identity_realms_job" {
   count = !var.skip_identity && local.keycloak_realms_job_enabled ? 1 : 0
 
+  wait_for_completion = true
+
   metadata {
     name      = "keycloak-configure-realms"
     namespace = local.identity_namespace
@@ -498,6 +536,11 @@ resource "kubernetes_job_v1" "identity_realms_job" {
     kubernetes_manifest.identity_other,
     kubernetes_manifest.identity_ingress,
   ]
+
+  timeouts {
+    create = "10m"
+    update = "10m"
+  }
 }
 
 output "keycloak_enabled" {
