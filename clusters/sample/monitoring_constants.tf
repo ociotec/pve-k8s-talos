@@ -1,8 +1,10 @@
 locals {
-  grafana_hostname           = "grafana.${local.domain}"
-  prometheus_hostname        = "prometheus.${local.domain}"
-  grafana_tls_secret_name    = "grafana-tls"
-  prometheus_tls_secret_name = "prometheus-tls"
+  grafana_hostname               = "grafana.${local.domain}"
+  prometheus_hostname            = "prometheus.${local.domain}"
+  prometheus_api_hostname        = "prometheus-api.${local.domain}"
+  grafana_tls_secret_name        = "grafana-tls"
+  prometheus_tls_secret_name     = "prometheus-tls"
+  prometheus_api_tls_secret_name = local.prometheus_tls_secret_name
 
   storage_class = "${local.ceph_name_prefix}-rbd-ec"
 
@@ -30,15 +32,17 @@ locals {
   grafana_auth_allow_sign_up    = true
   grafana_auth_ca_secret_name   = "grafana-oauth-ca"
 
-  prometheus_auth_keycloak_realm      = ""
-  prometheus_auth_allowed_groups      = []
-  prometheus_auth_ca_secret_name      = "prometheus-oauth-ca"
-  prometheus_oauth2_proxy_image_tag   = "v7.12.0"
-  prometheus_oauth2_proxy_cookie_name = "_prometheus_oauth2_proxy"
-  prometheus_oauth2_proxy_cpu_request = "50m"
-  prometheus_oauth2_proxy_cpu_limit   = "200m"
-  prometheus_oauth2_proxy_mem_request = "64Mi"
-  prometheus_oauth2_proxy_mem_limit   = "256Mi"
+  prometheus_auth_keycloak_realm            = ""
+  prometheus_auth_allowed_groups            = []
+  prometheus_auth_ca_secret_name            = "prometheus-oauth-ca"
+  prometheus_oauth2_proxy_image_tag         = "v7.12.0"
+  prometheus_oauth2_proxy_cookie_name       = "_prometheus_oauth2_proxy"
+  prometheus_oauth2_proxy_cpu_request       = "50m"
+  prometheus_oauth2_proxy_cpu_limit         = "200m"
+  prometheus_oauth2_proxy_mem_request       = "64Mi"
+  prometheus_oauth2_proxy_mem_limit         = "256Mi"
+  prometheus_api_basic_auth_secret_name     = "prometheus-api-basic-auth"
+  prometheus_api_basic_auth_password_length = 32
 
   prometheus_cpu_request = "200m"
   prometheus_cpu_limit   = "1"

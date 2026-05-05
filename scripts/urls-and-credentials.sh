@@ -266,6 +266,9 @@ print_grafana() {
 
 print_prometheus() {
   local prometheus_url
+  local prometheus_api_url
+  local prometheus_api_user
+  local prometheus_api_password
 
   prometheus_url="$(output_raw "${cluster_monitoring_workspace}" prometheus_url)"
   if ! has_value "${prometheus_url}"; then
@@ -274,6 +277,12 @@ print_prometheus() {
 
   print_service "Prometheus"
   print_url_bullet "URL" "${prometheus_url}"
+  prometheus_api_url="$(output_raw "${cluster_monitoring_workspace}" prometheus_api_url)"
+  prometheus_api_user="$(output_raw "${cluster_monitoring_workspace}" prometheus_api_basic_auth_user)"
+  prometheus_api_password="$(output_raw "${cluster_monitoring_workspace}" prometheus_api_basic_auth_password)"
+  print_url_bullet "API URL" "${prometheus_api_url}"
+  print_data_bullet "API user" "${prometheus_api_user}"
+  print_secret_bullet "API password" "${prometheus_api_password}"
 }
 
 print_portainer() {
