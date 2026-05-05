@@ -79,13 +79,14 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
   - Domain, TLS mode, root CA path, MetalLB range, and ingress fixed IP.
   - Certificate catalog (`available_certificates`) and default certificate entry.
 - `identity_constants.tf`
-  - Keycloak hostname, TLS secret, PostgreSQL sizing/image, bootstrap admin settings, realm groups, and optional OIDC clients for consumers such as Rancher and Portainer.
+  - Keycloak hostname, TLS secret, PostgreSQL sizing/image, bootstrap admin settings, realm groups, and optional OIDC clients for consumers such as Rancher, Portainer, and Grafana.
 - `monitoring_constants.tf`
+  - Storage class, image versions, hostnames, and optional Keycloak auth settings for Grafana.
 - `platform_constants.tf`
   - Storage class, image versions, hostnames, and optional Keycloak auth settings for platform services such as Portainer and Rancher.
   - `tls_secrets` maps namespaces/secret names to entries from `available_certificates`.
 
-For the Rancher/Portainer + Keycloak authentication split of responsibilities and the shared `k8s-admins` access model, see [docs/rancher-keycloak-auth.md](docs/rancher-keycloak-auth.md).
+For the Rancher/Portainer/Grafana + Keycloak authentication split of responsibilities and the shared group model, see [docs/rancher-keycloak-auth.md](docs/rancher-keycloak-auth.md).
 - `ceph_constants.tf`
   - `ceph_mode = "internal"` to run a full Rook-managed Ceph cluster in Kubernetes.
   - `ceph_mode = "external"` to consume a native PVE Ceph cluster from Rook after `k8s-net`.
@@ -460,6 +461,8 @@ Rancher is enabled when `rancher_hostname` is non-empty and uses one replica by 
 This stack also includes kube-state-metrics (requests/limits) and kubelet cAdvisor scrape for CPU/RAM usage.
 The manifests are rendered from templates using those values.
 Use the same domain as `k8s_net_constants.tf` so TLS and DNS align.
+
+When `grafana_auth_keycloak_realm` is set in `monitoring_constants.tf`, OpenTofu configures Grafana generic OAuth against the generated Keycloak `grafana` client. Use `grafana_auth_view_groups` for Grafana `Viewer` access and `grafana_auth_edit_groups` for Grafana `Editor` access. Keep the local Grafana admin credentials for server administration and break-glass recovery.
 
 To deploy the monitoring stack:
 

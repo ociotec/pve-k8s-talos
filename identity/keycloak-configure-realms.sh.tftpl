@@ -83,6 +83,23 @@ client_uuid() {
   "$KCADM" get clients -r "$1" -q clientId="$2" | first_id
 }
 
+client_protocol_mapper_id() {
+  "$KCADM" get "clients/$2/protocol-mappers/models" -r "$1" | while IFS= read -r line; do
+    case "$line" in
+      *'"id" : "'*)
+        current_id="$(printf '%s\n' "$line" | extract_json_field id)"
+        ;;
+      *'"name" : "'*)
+        current_name="$(printf '%s\n' "$line" | extract_json_field name)"
+        if [ "$current_name" = "$3" ]; then
+          printf '%s\n' "$current_id"
+          exit 0
+        fi
+        ;;
+    esac
+  done
+}
+
 flow_id_by_alias() {
   realm_name="$1"
   flow_alias="$2"
@@ -196,6 +213,21 @@ upsert_client() {
   else
     "$KCADM" create clients -r "$realm_name" -f "$payload_file"
   fi
+}
+
+upsert_client_protocol_mapper() {
+  realm_name="$1"
+  client_identifier="$2"
+  mapper_name="$3"
+  payload_file="$4"
+
+  client_uuid_value="$(client_uuid "$realm_name" "$client_identifier")"
+  [ -n "$client_uuid_value" ]
+  existing_id="$(client_protocol_mapper_id "$realm_name" "$client_uuid_value" "$mapper_name")"
+  if [ -n "$existing_id" ]; then
+    "$KCADM" delete "clients/$client_uuid_value/protocol-mappers/models/$existing_id" -r "$realm_name"
+  fi
+  "$KCADM" create "clients/$client_uuid_value/protocol-mappers/models" -r "$realm_name" -f "$payload_file"
 }
 
 upsert_mapper() {
@@ -491,6 +523,22 @@ ${jsonencode(merge(
 ))}
 EOF_CLIENT_${realm_index}_${client_index}
 upsert_client '${replace(realm.name, "'", "'\"'\"'")}' '${replace(client.client_id, "'", "'\"'\"'")}' "$TMPDIR/client-${realm_index}-${client_index}.json"
+%{ for mapper_index, mapper in client.mappers ~}
+cat > "$TMPDIR/client-mapper-${realm_index}-${client_index}-${mapper_index}.json" <<'EOF_CLIENT_MAPPER_${realm_index}_${client_index}_${mapper_index}'
+${jsonencode({
+  name            = mapper.name
+  protocol        = "openid-connect"
+  protocolMapper  = mapper.protocol_mapper
+  consentRequired = false
+  config          = mapper.config
+})}
+EOF_CLIENT_MAPPER_${realm_index}_${client_index}_${mapper_index}
+upsert_client_protocol_mapper \
+  '${replace(realm.name, "'", "'\"'\"'")}' \
+  '${replace(client.client_id, "'", "'\"'\"'")}' \
+  '${replace(mapper.name, "'", "'\"'\"'")}' \
+  "$TMPDIR/client-mapper-${realm_index}-${client_index}-${mapper_index}.json"
+%{ endfor ~}
 %{ endfor ~}
 %{ for group_index, group in realm.groups ~}
 cat > "$TMPDIR/group-${realm_index}-${group_index}.json" <<'EOF_GROUP_${realm_index}_${group_index}'

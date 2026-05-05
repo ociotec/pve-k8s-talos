@@ -86,6 +86,55 @@ spec:
                   key: admin-password
             - name: GF_SERVER_ROOT_URL
               value: https://${grafana_hostname}
+%{ if grafana_auth_enabled ~}
+            - name: GF_AUTH_GENERIC_OAUTH_ENABLED
+              value: "true"
+            - name: GF_AUTH_GENERIC_OAUTH_NAME
+              value: "${grafana_auth_name}"
+            - name: GF_AUTH_GENERIC_OAUTH_CLIENT_ID
+              value: "${grafana_oidc_client_id}"
+            - name: GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: ${grafana_oauth_secret_name}
+                  key: client-secret
+            - name: GF_AUTH_GENERIC_OAUTH_SCOPES
+              value: "${grafana_auth_scopes}"
+            - name: GF_AUTH_GENERIC_OAUTH_AUTH_URL
+              value: "${grafana_oidc_auth_url}"
+            - name: GF_AUTH_GENERIC_OAUTH_TOKEN_URL
+              value: "${grafana_oidc_token_url}"
+            - name: GF_AUTH_GENERIC_OAUTH_API_URL
+              value: "${grafana_oidc_api_url}"
+            - name: GF_AUTH_GENERIC_OAUTH_USE_PKCE
+              value: "true"
+            - name: GF_AUTH_GENERIC_OAUTH_LOGIN_ATTRIBUTE_PATH
+              value: preferred_username
+            - name: GF_AUTH_GENERIC_OAUTH_NAME_ATTRIBUTE_PATH
+              value: name
+            - name: GF_AUTH_GENERIC_OAUTH_EMAIL_ATTRIBUTE_PATH
+              value: email
+            - name: GF_AUTH_GENERIC_OAUTH_GROUPS_ATTRIBUTE_PATH
+              value: groups
+            - name: GF_AUTH_GENERIC_OAUTH_ALLOWED_GROUPS
+              value: "${grafana_auth_allowed_groups}"
+            - name: GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_PATH
+              value: "${grafana_auth_role_attribute_path}"
+            - name: GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_STRICT
+              value: "true"
+            - name: GF_AUTH_GENERIC_OAUTH_ALLOW_SIGN_UP
+              value: "${grafana_auth_allow_sign_up}"
+            - name: GF_AUTH_OAUTH_AUTO_LOGIN
+              value: "${grafana_auth_auto_login}"
+            - name: GF_AUTH_GENERIC_OAUTH_JWK_SET_URL
+              value: "${grafana_oidc_jwk_set_url}"
+%{ if grafana_auth_ca_enabled ~}
+            - name: GF_AUTH_GENERIC_OAUTH_TLS_CLIENT_CA
+              value: /run/secrets/grafana-oauth-ca/ca.crt
+%{ endif ~}
+            - name: GF_AUTH_SIGNOUT_REDIRECT_URL
+              value: "${grafana_oauth_signout_redirect_url}"
+%{ endif ~}
           volumeMounts:
             - name: data
               mountPath: /var/lib/grafana
@@ -95,6 +144,11 @@ spec:
               mountPath: /etc/grafana/provisioning/dashboards
             - name: dashboards
               mountPath: /var/lib/grafana/dashboards
+%{ if grafana_auth_ca_enabled ~}
+            - name: grafana-oauth-ca
+              mountPath: /run/secrets/grafana-oauth-ca
+              readOnly: true
+%{ endif ~}
       volumes:
         - name: data
           persistentVolumeClaim:
@@ -108,6 +162,11 @@ spec:
         - name: dashboards
           configMap:
             name: grafana-dashboards
+%{ if grafana_auth_ca_enabled ~}
+        - name: grafana-oauth-ca
+          secret:
+            secretName: ${grafana_auth_ca_secret_name}
+%{ endif ~}
 ---
 apiVersion: v1
 kind: Service

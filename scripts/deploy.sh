@@ -520,6 +520,65 @@ wait_for_deployments_ready() {
   done
 }
 
+print_job_failure_context() {
+  local namespace="$1"
+  local job_name="$2"
+  local pod_names
+  local pod_name
+
+  error "Job ${namespace}/${job_name} did not complete. Current job state:" >&2
+  kubectl -n "${namespace}" get job "${job_name}" -o wide >&2 || true
+  error "Pods for job ${namespace}/${job_name}:" >&2
+  kubectl -n "${namespace}" get pods -l "job-name=${job_name}" -o wide >&2 || true
+  error "Recent ${namespace} events:" >&2
+  kubectl -n "${namespace}" get events --sort-by=.lastTimestamp | tail -n 40 >&2 || true
+
+  pod_names="$(kubectl -n "${namespace}" get pods -l "job-name=${job_name}" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)"
+  for pod_name in ${pod_names}; do
+    error "Logs for pod/${pod_name}:" >&2
+    kubectl -n "${namespace}" logs "pod/${pod_name}" --tail=200 >&2 || true
+    error "Previous logs for pod/${pod_name}:" >&2
+    kubectl -n "${namespace}" logs "pod/${pod_name}" --previous --tail=200 >&2 || true
+  done
+}
+
+wait_for_job_complete() {
+  local namespace="$1"
+  local job_name="$2"
+  local timeout_seconds="${3:-600}"
+  local start
+  local complete_status
+  local failed_status
+  local bad_pods
+
+  start="$(date +%s)"
+  while true; do
+    complete_status="$(kubectl -n "${namespace}" get job "${job_name}" -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || true)"
+    if [[ "${complete_status}" == "True" ]]; then
+      return 0
+    fi
+
+    failed_status="$(kubectl -n "${namespace}" get job "${job_name}" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)"
+    bad_pods="$(kubectl -n "${namespace}" get pods -l "job-name=${job_name}" --no-headers 2>/dev/null \
+      | awk '$3 ~ /^(CrashLoopBackOff|ImagePullBackOff|ErrImagePull)$/ || ($4 + 0) > 0 { print $1 " (" $3 ", restarts=" $4 ")" }' || true)"
+    if [[ "${failed_status}" == "True" || -n "${bad_pods}" ]]; then
+      if [[ -n "${bad_pods}" ]]; then
+        error "Detected failing pods for job ${namespace}/${job_name}: ${bad_pods}" >&2
+      fi
+      print_job_failure_context "${namespace}" "${job_name}"
+      exit 1
+    fi
+
+    if (( $(date +%s) - start >= timeout_seconds )); then
+      error "Timed out waiting for job ${namespace}/${job_name} to complete." >&2
+      print_job_failure_context "${namespace}" "${job_name}"
+      exit 1
+    fi
+
+    sleep 5
+  done
+}
+
 wait_for_service_endpoints() {
   local namespace="$1"
   local timeout_seconds="${2:-600}"
@@ -964,9 +1023,9 @@ else
   wait_for_pvcs_bound "identity" "600" "keycloak-postgres-data"
   wait_for_deployments_ready "identity" "900s" "keycloak-postgres" "keycloak"
   wait_for_service_endpoints "identity" "900" "keycloak-postgres" "keycloak"
-  kubectl -n identity wait --for=condition=Complete job/keycloak-bootstrap-admin --timeout=300s
+  wait_for_job_complete "identity" "keycloak-bootstrap-admin" "300"
   if kubectl -n identity get job/keycloak-configure-realms >/dev/null 2>&1; then
-    kubectl -n identity wait --for=condition=Complete job/keycloak-configure-realms --timeout=300s
+    wait_for_job_complete "identity" "keycloak-configure-realms" "900"
   fi
   keycloak_url="$(tofu -chdir="${cluster_identity_workspace}" output -raw keycloak_url)"
   keycloak_admin_user="$(tofu -chdir="${cluster_identity_workspace}" output -raw keycloak_admin_user)"

@@ -1,6 +1,6 @@
 locals {
-  grafana_hostname    = "grafana.${local.domain}"
-  prometheus_hostname = "prometheus.${local.domain}"
+  grafana_hostname           = "grafana.${local.domain}"
+  prometheus_hostname        = "prometheus.${local.domain}"
   grafana_tls_secret_name    = "grafana-tls"
   prometheus_tls_secret_name = "prometheus-tls"
 
@@ -13,14 +13,22 @@ locals {
   prometheus_retention = "15d"
   loki_retention       = "168h" # 7 days
 
-  grafana_image_tag    = "13.0.1"
-  prometheus_image_tag = "v3.11.2"
-  loki_image_tag       = "3.7.1"
-  promtail_image_tag   = "3.7.1"
+  grafana_image_tag            = "13.0.1"
+  prometheus_image_tag         = "v3.11.2"
+  loki_image_tag               = "3.7.1"
+  promtail_image_tag           = "3.7.1"
   kube_state_metrics_image_tag = "v2.18.0"
 
   grafana_admin_user            = "admin"
   grafana_admin_password_length = 24
+  grafana_auth_keycloak_realm   = ""
+  grafana_auth_view_groups      = []
+  grafana_auth_edit_groups      = []
+  grafana_auth_name             = "Keycloak"
+  grafana_auth_scopes           = "openid profile email"
+  grafana_auth_auto_login       = false
+  grafana_auth_allow_sign_up    = true
+  grafana_auth_ca_secret_name   = "grafana-oauth-ca"
 
   prometheus_cpu_request = "200m"
   prometheus_cpu_limit   = "1"

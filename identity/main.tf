@@ -508,7 +508,7 @@ resource "kubernetes_manifest" "identity_ingress" {
 resource "kubernetes_job_v1" "identity_realms_job" {
   count = !var.skip_identity && local.keycloak_realms_job_enabled ? 1 : 0
 
-  wait_for_completion = true
+  wait_for_completion = false
 
   metadata {
     name      = "keycloak-configure-realms"
