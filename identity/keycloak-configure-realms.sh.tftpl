@@ -4,7 +4,6 @@ KEYCLOAK_URL="http://keycloak:8080"
 KCADM="/opt/keycloak/bin/kcadm.sh"
 ADMIN_USER="$(cat /keycloak-admin/username)"
 ADMIN_PASSWORD="$(cat /keycloak-admin/password)"
-TEMP_USER="temp_admin"
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT
 
@@ -69,6 +68,32 @@ group_id_by_path() {
   group_path="$(url_path_segment "$${2#/}")"
 
   "$KCADM" get "group-by-path/$group_path" -r "$realm_name" 2>/dev/null | first_id
+}
+
+wait_for_group() {
+  realm_name="$1"
+  group_name="$2"
+  group_id_value=""
+  started_at="$(date +%s)"
+
+  while [ -z "$group_id_value" ]; do
+    group_id_value="$(group_id_by_path "$realm_name" "/$group_name")"
+    if [ -z "$group_id_value" ]; then
+      group_id_value="$(group_id "$realm_name" "$group_name")"
+    fi
+
+    if [ -n "$group_id_value" ]; then
+      printf '%s\n' "$group_id_value"
+      return 0
+    fi
+
+    if [ "$(( $(date +%s) - started_at ))" -gt 120 ]; then
+      echo "Timed out waiting for group $group_name in realm $realm_name" >&2
+      return 1
+    fi
+
+    sleep 5
+  done
 }
 
 user_id() {
@@ -326,12 +351,8 @@ ensure_group_client_role() {
   client_identifier="$3"
   role_name="$4"
 
-  group_id_value="$(group_id_by_path "$realm_name" "/$group_name")"
-  if [ -z "$group_id_value" ]; then
-    group_id_value="$(group_id "$realm_name" "$group_name")"
-  fi
-  [ -n "$group_id_value" ]
-  "$KCADM" add-roles -r "$realm_name" --gid "$group_id_value" --cclientid "$client_identifier" --rolename "$role_name" >/dev/null 2>&1 || true
+  group_id_value="$(wait_for_group "$realm_name" "$group_name")"
+  "$KCADM" add-roles -r "$realm_name" --gid "$group_id_value" --cclientid "$client_identifier" --rolename "$role_name" >/dev/null
 }
 
 ensure_client_login_gate() {
@@ -409,7 +430,7 @@ ensure_client_login_gate() {
   done
 }
 
-until login "$TEMP_USER" || login "$ADMIN_USER"; do
+until login "$ADMIN_USER"; do
   sleep 5
 done
 
@@ -554,11 +575,8 @@ upsert_group '${replace(realm.name, "'", "'\"'\"'")}' '${replace(group.name, "'"
 GROUP_ID="$(group_id '${replace(realm.name, "'", "'\"'\"'")}' '${replace(group.name, "'", "'\"'\"'")}')"
 [ -n "$GROUP_ID" ]
 %{ for ldap_group in group.included_ldap_groups ~}
-LDAP_CHILD_ID="$(group_id '${replace(realm.name, "'", "'\"'\"'")}' '${replace(ldap_group.group_name, "'", "'\"'\"'")}')"
-if [ -n "$LDAP_CHILD_ID" ]; then
-  ensure_child_group '${replace(realm.name, "'", "'\"'\"'")}' "$GROUP_ID" "$LDAP_CHILD_ID" '${replace(ldap_group.group_name, "'", "'\"'\"'")}'
-  assign_group_realm_management_query_roles '${replace(realm.name, "'", "'\"'\"'")}' "$LDAP_CHILD_ID"
-fi
+LDAP_GROUP_ID="$(wait_for_group '${replace(realm.name, "'", "'\"'\"'")}' '${replace(ldap_group.group_name, "'", "'\"'\"'")}')"
+assign_group_realm_management_query_roles '${replace(realm.name, "'", "'\"'\"'")}' "$LDAP_GROUP_ID"
 %{ endfor ~}
 %{ if group.realm_admin ~}
 [ -n "$REALM_MANAGEMENT_CLIENT_ID" ]

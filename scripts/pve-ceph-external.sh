@@ -98,6 +98,17 @@ pool_exists() {
     | jq -er --arg pool_name "${pool_name}" '.data[] | (.pool_name // .pool // .name) | select(. == $pool_name)' >/dev/null
 }
 
+ceph_pool_exists_via_ssh() {
+  local node="$1"
+  local pool_name="$2"
+  local ssh_user="${CEPH_SSH_USER:-root}"
+  local payload
+
+  payload="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${node}" \
+    "ceph osd pool ls --format json")"
+  printf '%s' "${payload}" | jq -er --arg pool_name "${pool_name}" '.[] | select(. == $pool_name)' >/dev/null
+}
+
 discover_ceph_node() {
   local payload
   payload="$(api_get "/nodes")"
@@ -109,6 +120,7 @@ wait_for_task() {
   local upid="$2"
   local started_at
   started_at="$(date +%s)"
+  task_wait_error=""
 
   while true; do
     local payload status exitstatus
@@ -120,13 +132,13 @@ wait_for_task() {
       if [[ "${exitstatus}" == "OK" ]]; then
         return 0
       fi
-      echo "PVE task ${upid} failed with exit status: ${exitstatus:-unknown}" >&2
-      exit 1
+      task_wait_error="PVE task ${upid} failed with exit status: ${exitstatus:-unknown}"
+      return 1
     fi
 
     if (( $(date +%s) - started_at > 600 )); then
-      echo "Timed out waiting for PVE task ${upid}" >&2
-      exit 1
+      task_wait_error="Timed out waiting for PVE task ${upid}"
+      return 1
     fi
 
     sleep 3
@@ -214,7 +226,10 @@ try_set_pool_properties() {
     return 1
   fi
 
-  wait_for_task "${node}" "${upid}"
+  if ! wait_for_task "${node}" "${upid}"; then
+    pool_update_error="${task_wait_error:-PVE task ${upid} failed}"
+    return 1
+  fi
 }
 
 set_pool_allow_ec_overwrites() {
@@ -241,6 +256,56 @@ set_pool_allow_ec_overwrites_via_ssh() {
   ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${node}" \
     "ceph osd pool set ${quoted_pool} allow_ec_overwrites true" 1>/dev/null
   echo "Pool ${pool_name} allow_ec_overwrites set to on via Ceph CLI."
+}
+
+run_ceph_via_ssh() {
+  local node="$1"
+  local ceph_args="$2"
+  local ssh_user="${CEPH_SSH_USER:-root}"
+
+  require_cmd ssh
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${node}" \
+    "ceph ${ceph_args}" 1>/dev/null
+}
+
+converge_ec_rbd_pool_via_ssh() {
+  local node="$1"
+  local pool_name="$2"
+  local min_size="$3"
+  local quoted_pool
+
+  quoted_pool="$(shell_quote "${pool_name}")"
+  run_ceph_via_ssh "${node}" "osd pool application enable ${quoted_pool} rbd --yes-i-really-mean-it"
+  run_ceph_via_ssh "${node}" "osd pool set ${quoted_pool} min_size ${min_size}"
+  run_ceph_via_ssh "${node}" "osd pool set ${quoted_pool} pg_autoscale_mode on"
+  run_ceph_via_ssh "${node}" "osd pool set ${quoted_pool} allow_ec_overwrites true"
+  echo "Pool ${pool_name} converged via Ceph CLI."
+}
+
+ensure_ec_rbd_pool_via_ssh() {
+  local node="$1"
+  local pool_name="$2"
+  local pg_num="$3"
+  local min_size="$4"
+  local k="$5"
+  local m="$6"
+  local profile_name="${pool_name}-profile"
+  local quoted_pool quoted_profile
+
+  require_cmd ssh
+  quoted_pool="$(shell_quote "${pool_name}")"
+  quoted_profile="$(shell_quote "${profile_name}")"
+
+  if ceph_pool_exists_via_ssh "${node}" "${pool_name}"; then
+    echo "Pool ${pool_name} already exists on ${node}, converging settings via Ceph CLI."
+    converge_ec_rbd_pool_via_ssh "${node}" "${pool_name}" "${min_size}"
+    return 0
+  fi
+
+  run_ceph_via_ssh "${node}" "osd erasure-code-profile set ${quoted_profile} k=${k} m=${m} crush-failure-domain=host --force"
+  run_ceph_via_ssh "${node}" "osd pool create ${quoted_pool} ${pg_num} ${pg_num} erasure ${quoted_profile}"
+  echo "Pool ${pool_name} created on ${node} via Ceph CLI."
+  converge_ec_rbd_pool_via_ssh "${node}" "${pool_name}" "${min_size}"
 }
 
 converge_rbd_pool() {
@@ -336,6 +401,16 @@ ensure_rbd_pool() {
     exit 1
   fi
 
+  if [[ "${pool_type}" == "ec" ]]; then
+    if [[ -z "${k}" || -z "${m}" ]]; then
+      echo "EC pools require --k and --m." >&2
+      exit 1
+    fi
+
+    ensure_ec_rbd_pool_via_ssh "${node}" "${pool_name}" "${pg_num}" "${min_size}" "${k}" "${m}"
+    return 0
+  fi
+
   if pool_exists "${node}" "${pool_name}"; then
     echo "Pool ${pool_name} already exists on ${node}, converging settings."
     converge_rbd_pool "${node}" "${pool_name}" "${pool_type}" "${size}" "${min_size}"
@@ -344,34 +419,20 @@ ensure_rbd_pool() {
 
   local response upid
 
-  if [[ "${pool_type}" == "replicated" ]]; then
-    response="$(
-      api_post "/nodes/${node}/ceph/pool" \
-        --data-urlencode "name=${pool_name}" \
-        --data-urlencode "pg_num=${pg_num}" \
-        --data-urlencode "size=${size}" \
-        --data-urlencode "min_size=${min_size}" \
-        --data-urlencode "add_storages=0"
-    )"
-  else
-    if [[ -z "${k}" || -z "${m}" ]]; then
-      echo "EC pools require --k and --m." >&2
-      exit 1
-    fi
-
-    response="$(
-      api_post "/nodes/${node}/ceph/pool" \
-        --data-urlencode "name=${pool_name}" \
-        --data-urlencode "pg_num=${pg_num}" \
-        --data-urlencode "size=${size}" \
-        --data-urlencode "min_size=${min_size}" \
-        --data-urlencode "erasure-coding=k=${k},m=${m}" \
-        --data-urlencode "add_storages=0"
-    )"
-  fi
+  response="$(
+    api_post "/nodes/${node}/ceph/pool" \
+      --data-urlencode "name=${pool_name}" \
+      --data-urlencode "pg_num=${pg_num}" \
+      --data-urlencode "size=${size}" \
+      --data-urlencode "min_size=${min_size}" \
+      --data-urlencode "add_storages=0"
+  )"
 
   upid="$(printf '%s' "${response}" | json_extract "data")"
-  wait_for_task "${node}" "${upid}"
+  if ! wait_for_task "${node}" "${upid}"; then
+    echo "${task_wait_error:-PVE task ${upid} failed}" >&2
+    exit 1
+  fi
   echo "Pool ${pool_name} created on ${node}."
 
   # Replicated pools show up consistently in the Proxmox Ceph pool list right
