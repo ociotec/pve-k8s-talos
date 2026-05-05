@@ -464,6 +464,8 @@ Use the same domain as `k8s_net_constants.tf` so TLS and DNS align.
 
 When `grafana_auth_keycloak_realm` is set in `monitoring_constants.tf`, OpenTofu configures Grafana generic OAuth against the generated Keycloak `grafana` client. Use `grafana_auth_view_groups` for Grafana `Viewer` access and `grafana_auth_edit_groups` for Grafana `Editor` access. Keep the local Grafana admin credentials for server administration and break-glass recovery.
 
+When `prometheus_auth_keycloak_realm` is set in `monitoring_constants.tf`, OpenTofu deploys an `oauth2-proxy` instance for Prometheus and protects the Prometheus ingress with ingress-nginx external auth annotations. The selected Keycloak realm must expose a confidential `prometheus` OIDC client with redirect URI `https://<prometheus-host>/oauth2/callback`. Use `prometheus_auth_allowed_groups` to restrict access.
+
 To deploy the monitoring stack:
 
 ```bash

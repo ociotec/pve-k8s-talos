@@ -17,6 +17,7 @@ locals {
   postgres_storage_class = "${local.ceph_name_prefix}-rbd-ec"
   rancher_url            = "https://rancher.${local.domain}"
   portainer_url          = "https://portainer.${local.domain}"
+  prometheus_url         = "https://prometheus.${local.domain}"
 
   tls_secrets = [
     {
@@ -138,6 +139,53 @@ locals {
                 "access.token.claim"        = "true"
                 "included.client.audience"  = "portainer"
                 "id.token.claim"            = "false"
+                "introspection.token.claim" = "false"
+              }
+            },
+          ]
+        },
+        {
+          client_id                    = "prometheus"
+          name                         = "Prometheus"
+          description                  = "OIDC client for Prometheus ingress oauth2-proxy"
+          access_type                  = "confidential"
+          client_secret_length         = 32
+          login_allowed_groups         = ["k8s-admins"]
+          valid_redirect_uris          = ["${local.prometheus_url}/oauth2/callback"]
+          post_logout_redirect_uris    = ["${local.prometheus_url}/", "${local.prometheus_url}/*"]
+          web_origins                  = [local.prometheus_url]
+          base_url                     = local.prometheus_url
+          admin_url                    = local.prometheus_url
+          standard_flow_enabled        = true
+          direct_access_grants_enabled = false
+          service_accounts_enabled     = false
+          full_scope_allowed           = false
+          groups_claim_name            = "groups"
+          groups_claim_full_path       = false
+          default_scopes               = ["profile", "email", "roles"]
+          optional_scopes              = ["offline_access"]
+          mappers = [
+            {
+              name            = "groups"
+              protocol_mapper = "oidc-group-membership-mapper"
+              config = {
+                "access.token.claim"        = "true"
+                "claim.name"                = "groups"
+                "full.path"                 = "false"
+                "id.token.claim"            = "true"
+                "introspection.token.claim" = "true"
+                "jsonType.label"            = "String"
+                "multivalued"               = "true"
+                "userinfo.token.claim"      = "true"
+              }
+            },
+            {
+              name            = "client-audience"
+              protocol_mapper = "oidc-audience-mapper"
+              config = {
+                "access.token.claim"        = "true"
+                "included.client.audience"  = "prometheus"
+                "id.token.claim"            = "true"
                 "introspection.token.claim" = "false"
               }
             },

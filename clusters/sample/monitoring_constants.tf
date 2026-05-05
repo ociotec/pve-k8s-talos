@@ -30,6 +30,16 @@ locals {
   grafana_auth_allow_sign_up    = true
   grafana_auth_ca_secret_name   = "grafana-oauth-ca"
 
+  prometheus_auth_keycloak_realm      = ""
+  prometheus_auth_allowed_groups      = []
+  prometheus_auth_ca_secret_name      = "prometheus-oauth-ca"
+  prometheus_oauth2_proxy_image_tag   = "v7.12.0"
+  prometheus_oauth2_proxy_cookie_name = "_prometheus_oauth2_proxy"
+  prometheus_oauth2_proxy_cpu_request = "50m"
+  prometheus_oauth2_proxy_cpu_limit   = "200m"
+  prometheus_oauth2_proxy_mem_request = "64Mi"
+  prometheus_oauth2_proxy_mem_limit   = "256Mi"
+
   prometheus_cpu_request = "200m"
   prometheus_cpu_limit   = "1"
   prometheus_mem_request = "1Gi"

@@ -243,6 +243,7 @@ prepare_monitoring_workspace() {
   link_into_workspace "${cluster_certs_dir}" "${workspace}/certs"
   link_into_workspace "${repo_root}/monitoring/namespace.yaml" "${workspace}/namespace.yaml"
   link_into_workspace "${repo_root}/monitoring/prometheus.yaml" "${workspace}/prometheus.yaml"
+  link_into_workspace "${repo_root}/monitoring/prometheus-oauth2-proxy.yaml" "${workspace}/prometheus-oauth2-proxy.yaml"
   link_into_workspace "${repo_root}/monitoring/grafana.yaml" "${workspace}/grafana.yaml"
   link_into_workspace "${repo_root}/monitoring/loki.yaml" "${workspace}/loki.yaml"
   link_into_workspace "${repo_root}/monitoring/promtail.yaml" "${workspace}/promtail.yaml"
@@ -1052,9 +1053,15 @@ else
   message "Restarting Grafana to reload provisioned dashboards..."
   kubectl -n monitoring rollout restart deploy/grafana 1>/dev/null
   message "Waiting for monitoring PVCs, workloads, and endpoints to become ready..."
+  monitoring_deployments=(grafana loki prometheus kube-state-metrics)
+  monitoring_services=(grafana loki prometheus kube-state-metrics)
+  if kubectl -n monitoring get deploy/prometheus-oauth2-proxy >/dev/null 2>&1; then
+    monitoring_deployments+=(prometheus-oauth2-proxy)
+    monitoring_services+=(prometheus-oauth2-proxy)
+  fi
   wait_for_pvcs_bound "monitoring" "600" "grafana-data" "loki-data" "prometheus-data"
-  wait_for_deployments_ready "monitoring" "600s" "grafana" "loki" "prometheus" "kube-state-metrics"
-  wait_for_service_endpoints "monitoring" "600" "grafana" "loki" "prometheus" "kube-state-metrics"
+  wait_for_deployments_ready "monitoring" "600s" "${monitoring_deployments[@]}"
+  wait_for_service_endpoints "monitoring" "600" "${monitoring_services[@]}"
   grafana_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw grafana_url)"
   prometheus_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw prometheus_url)"
   grafana_user="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw grafana_admin_user)"

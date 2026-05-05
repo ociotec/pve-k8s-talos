@@ -1,0 +1,125 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus-oauth2-proxy
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus-oauth2-proxy
+  template:
+    metadata:
+      labels:
+        app: prometheus-oauth2-proxy
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: oauth2-proxy
+          image: quay.io/oauth2-proxy/oauth2-proxy:${prometheus_oauth2_proxy_image_tag}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: ${prometheus_oauth2_proxy_cpu_request}
+              memory: ${prometheus_oauth2_proxy_mem_request}
+            limits:
+              cpu: ${prometheus_oauth2_proxy_cpu_limit}
+              memory: ${prometheus_oauth2_proxy_mem_limit}
+          args:
+            - --http-address=0.0.0.0:4180
+            - --provider=keycloak-oidc
+            - --oidc-issuer-url=${prometheus_oidc_issuer}
+            - --client-id=${prometheus_oidc_client_id}
+            - --redirect-url=${prometheus_oauth_redirect_uri}
+            - --email-domain=*
+            - --scope=openid profile email
+            - --code-challenge-method=S256
+            - --reverse-proxy=true
+            - --set-xauthrequest=true
+            - --session-cookie-minimal=true
+            - --skip-provider-button=true
+            - --cookie-name=${prometheus_oauth2_proxy_cookie_name}
+            - --cookie-secure=true
+            - --cookie-samesite=lax
+            - --upstream=static://202
+%{ for group_name in prometheus_oauth2_proxy_allowed_groups ~}
+            - --allowed-group=${group_name}
+%{ endfor ~}
+%{ if prometheus_auth_ca_enabled ~}
+            - --provider-ca-file=/run/secrets/prometheus-oauth-ca/ca.crt
+            - --use-system-trust-store=true
+%{ endif ~}
+          env:
+            - name: OAUTH2_PROXY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: ${prometheus_oauth_secret_name}
+                  key: client-secret
+            - name: OAUTH2_PROXY_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: ${prometheus_oauth_secret_name}
+                  key: cookie-secret
+          ports:
+            - name: http
+              containerPort: 4180
+%{ if prometheus_auth_ca_enabled ~}
+          volumeMounts:
+            - name: prometheus-oauth-ca
+              mountPath: /run/secrets/prometheus-oauth-ca
+              readOnly: true
+%{ endif ~}
+%{ if prometheus_auth_ca_enabled ~}
+      volumes:
+        - name: prometheus-oauth-ca
+          secret:
+            secretName: ${prometheus_auth_ca_secret_name}
+%{ endif ~}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-oauth2-proxy
+  namespace: monitoring
+spec:
+  selector:
+    app: prometheus-oauth2-proxy
+  ports:
+    - name: http
+      port: 4180
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: prometheus-oauth2-proxy
+  namespace: monitoring
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-buffer-size: 128k
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - ${prometheus_hostname}
+      secretName: ${prometheus_tls_secret_name}
+  rules:
+    - host: ${prometheus_hostname}
+      http:
+        paths:
+          - path: /oauth2
+            pathType: Prefix
+            backend:
+              service:
+                name: prometheus-oauth2-proxy
+                port:
+                  number: 4180

@@ -26,7 +26,7 @@ variable "kubeconfig_path" {
 }
 
 data "terraform_remote_state" "identity" {
-  count = trimspace(try(local.grafana_auth_keycloak_realm, "")) != "" ? 1 : 0
+  count = trimspace(try(local.grafana_auth_keycloak_realm, "")) != "" || trimspace(try(local.prometheus_auth_keycloak_realm, "")) != "" ? 1 : 0
 
   backend = "local"
   config = {
@@ -39,6 +39,21 @@ provider "kubernetes" {
 }
 
 locals {
+  prometheus_auth_keycloak_realm_value      = trimspace(try(local.prometheus_auth_keycloak_realm, ""))
+  prometheus_auth_enabled                   = local.prometheus_auth_keycloak_realm_value != ""
+  prometheus_auth_allowed_groups_value      = distinct(compact(try(local.prometheus_auth_allowed_groups, [])))
+  prometheus_auth_ca_secret_name_value      = try(local.prometheus_auth_ca_secret_name, "prometheus-oauth-ca")
+  prometheus_oauth_secret_name_value        = "prometheus-oauth"
+  prometheus_oauth_redirect_uri             = format("https://%s/oauth2/callback", local.prometheus_hostname)
+  prometheus_oauth2_proxy_image_tag_value   = try(local.prometheus_oauth2_proxy_image_tag, "v7.12.0")
+  prometheus_oauth2_proxy_cookie_name_value = try(local.prometheus_oauth2_proxy_cookie_name, "_prometheus_oauth2_proxy")
+  prometheus_oauth2_proxy_cpu_request_value = try(local.prometheus_oauth2_proxy_cpu_request, "50m")
+  prometheus_oauth2_proxy_cpu_limit_value   = try(local.prometheus_oauth2_proxy_cpu_limit, "200m")
+  prometheus_oauth2_proxy_mem_request_value = try(local.prometheus_oauth2_proxy_mem_request, "64Mi")
+  prometheus_oauth2_proxy_mem_limit_value   = try(local.prometheus_oauth2_proxy_mem_limit, "256Mi")
+  prometheus_auth_ca_content                = local.prometheus_auth_enabled ? try(file(local.root_ca_crt), "") : ""
+  prometheus_auth_ca_enabled                = trimspace(local.prometheus_auth_ca_content) != ""
+
   grafana_auth_keycloak_realm_value = trimspace(try(local.grafana_auth_keycloak_realm, ""))
   grafana_auth_enabled              = local.grafana_auth_keycloak_realm_value != ""
   grafana_auth_view_groups_value    = distinct(compact(try(local.grafana_auth_view_groups, [])))
@@ -53,15 +68,16 @@ locals {
   grafana_oauth_post_logout_uri     = format("https://%s/login", local.grafana_hostname)
   grafana_auth_ca_content           = local.grafana_auth_enabled ? try(file(local.root_ca_crt), "") : ""
   grafana_auth_ca_enabled           = trimspace(local.grafana_auth_ca_content) != ""
-  identity_realm_groups = local.grafana_auth_enabled ? try(
+  monitoring_keycloak_auth_enabled  = local.grafana_auth_enabled || local.prometheus_auth_enabled
+  identity_realm_groups = local.monitoring_keycloak_auth_enabled ? try(
     data.terraform_remote_state.identity[0].outputs.keycloak_realm_groups,
     {}
   ) : {}
-  identity_oidc_metadata = local.grafana_auth_enabled ? try(
+  identity_oidc_metadata = local.monitoring_keycloak_auth_enabled ? try(
     data.terraform_remote_state.identity[0].outputs.keycloak_oidc_client_metadata,
     {}
   ) : {}
-  identity_oidc_secrets = local.grafana_auth_enabled ? try(
+  identity_oidc_secrets = local.monitoring_keycloak_auth_enabled ? try(
     data.terraform_remote_state.identity[0].outputs.keycloak_oidc_client_secrets,
     {}
   ) : {}
@@ -75,6 +91,18 @@ locals {
   ) : ""
   grafana_oidc_client_secret = local.grafana_auth_enabled ? try(
     local.identity_oidc_secrets[local.grafana_auth_keycloak_realm_value]["grafana"],
+    ""
+  ) : ""
+  prometheus_oidc_issuer = local.prometheus_auth_enabled ? try(
+    local.identity_oidc_metadata[local.prometheus_auth_keycloak_realm_value].issuer_url,
+    ""
+  ) : ""
+  prometheus_oidc_client_id = local.prometheus_auth_enabled ? try(
+    local.identity_oidc_metadata[local.prometheus_auth_keycloak_realm_value].clients["prometheus"].client_id,
+    ""
+  ) : ""
+  prometheus_oidc_client_secret = local.prometheus_auth_enabled ? try(
+    local.identity_oidc_secrets[local.prometheus_auth_keycloak_realm_value]["prometheus"],
     ""
   ) : ""
   grafana_oidc_auth_url  = local.grafana_oidc_issuer != "" ? format("%s/protocol/openid-connect/auth", local.grafana_oidc_issuer) : ""
@@ -111,6 +139,14 @@ locals {
     local.grafana_auth_effective_view_groups,
     local.grafana_auth_effective_edit_groups
   ))
+  prometheus_auth_effective_allowed_groups = distinct(compact(concat(
+    local.prometheus_auth_allowed_groups_value,
+    flatten([
+      for group_name in local.prometheus_auth_allowed_groups_value : [
+        for ldap_group in try(local.identity_realm_groups[local.prometheus_auth_keycloak_realm_value][group_name].included_ldap_groups, []) : ldap_group.group_name
+      ]
+    ])
+  )))
   grafana_auth_view_group_condition = length(local.grafana_auth_effective_view_groups) > 0 ? join(" || ", [
     for group_name in local.grafana_auth_effective_view_groups : format("contains(groups[*], '%s')", replace(group_name, "'", "\\'"))
   ]) : "false"
@@ -126,19 +162,37 @@ locals {
     for group_name in distinct(concat(local.grafana_auth_view_groups_value, local.grafana_auth_edit_groups_value)) : group_name
     if !contains(keys(try(local.identity_realm_groups[local.grafana_auth_keycloak_realm_value], {})), group_name)
   ] : []
+  missing_prometheus_auth_group_definitions = local.prometheus_auth_enabled ? [
+    for group_name in local.prometheus_auth_allowed_groups_value : group_name
+    if !contains(keys(try(local.identity_realm_groups[local.prometheus_auth_keycloak_realm_value], {})), group_name)
+  ] : []
   monitoring_namespace = yamldecode(file("${path.module}/namespace.yaml"))
   prometheus_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/prometheus.yaml", {
-      storage_class              = local.storage_class
-      prometheus_storage_size    = local.prometheus_storage_size
-      prometheus_retention       = local.prometheus_retention
-      prometheus_image_tag       = local.prometheus_image_tag
-      prometheus_hostname        = local.prometheus_hostname
-      prometheus_cpu_request     = local.prometheus_cpu_request
-      prometheus_cpu_limit       = local.prometheus_cpu_limit
-      prometheus_mem_request     = local.prometheus_mem_request
-      prometheus_mem_limit       = local.prometheus_mem_limit
-      prometheus_tls_secret_name = local.prometheus_tls_secret_name
+      storage_class                          = local.storage_class
+      prometheus_storage_size                = local.prometheus_storage_size
+      prometheus_retention                   = local.prometheus_retention
+      prometheus_image_tag                   = local.prometheus_image_tag
+      prometheus_hostname                    = local.prometheus_hostname
+      prometheus_cpu_request                 = local.prometheus_cpu_request
+      prometheus_cpu_limit                   = local.prometheus_cpu_limit
+      prometheus_mem_request                 = local.prometheus_mem_request
+      prometheus_mem_limit                   = local.prometheus_mem_limit
+      prometheus_tls_secret_name             = local.prometheus_tls_secret_name
+      prometheus_auth_enabled                = local.prometheus_auth_enabled
+      prometheus_auth_ca_enabled             = local.prometheus_auth_ca_enabled
+      prometheus_auth_ca_secret_name         = local.prometheus_auth_ca_secret_name_value
+      prometheus_oauth_secret_name           = local.prometheus_oauth_secret_name_value
+      prometheus_oidc_issuer                 = local.prometheus_oidc_issuer
+      prometheus_oidc_client_id              = local.prometheus_oidc_client_id
+      prometheus_oauth_redirect_uri          = local.prometheus_oauth_redirect_uri
+      prometheus_oauth2_proxy_image_tag      = local.prometheus_oauth2_proxy_image_tag_value
+      prometheus_oauth2_proxy_cookie_name    = local.prometheus_oauth2_proxy_cookie_name_value
+      prometheus_oauth2_proxy_allowed_groups = local.prometheus_auth_effective_allowed_groups
+      prometheus_oauth2_proxy_cpu_request    = local.prometheus_oauth2_proxy_cpu_request_value
+      prometheus_oauth2_proxy_cpu_limit      = local.prometheus_oauth2_proxy_cpu_limit_value
+      prometheus_oauth2_proxy_mem_request    = local.prometheus_oauth2_proxy_mem_request_value
+      prometheus_oauth2_proxy_mem_limit      = local.prometheus_oauth2_proxy_mem_limit_value
     })) :
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
@@ -210,6 +264,27 @@ locals {
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
   ]
+  prometheus_oauth2_proxy_manifests = [
+    for doc in split("\n---\n", templatefile("${path.module}/prometheus-oauth2-proxy.yaml", {
+      prometheus_hostname                    = local.prometheus_hostname
+      prometheus_tls_secret_name             = local.prometheus_tls_secret_name
+      prometheus_auth_ca_enabled             = local.prometheus_auth_ca_enabled
+      prometheus_auth_ca_secret_name         = local.prometheus_auth_ca_secret_name_value
+      prometheus_oauth_secret_name           = local.prometheus_oauth_secret_name_value
+      prometheus_oidc_issuer                 = local.prometheus_oidc_issuer
+      prometheus_oidc_client_id              = local.prometheus_oidc_client_id
+      prometheus_oauth_redirect_uri          = local.prometheus_oauth_redirect_uri
+      prometheus_oauth2_proxy_image_tag      = local.prometheus_oauth2_proxy_image_tag_value
+      prometheus_oauth2_proxy_cookie_name    = local.prometheus_oauth2_proxy_cookie_name_value
+      prometheus_oauth2_proxy_allowed_groups = local.prometheus_auth_effective_allowed_groups
+      prometheus_oauth2_proxy_cpu_request    = local.prometheus_oauth2_proxy_cpu_request_value
+      prometheus_oauth2_proxy_cpu_limit      = local.prometheus_oauth2_proxy_cpu_limit_value
+      prometheus_oauth2_proxy_mem_request    = local.prometheus_oauth2_proxy_mem_request_value
+      prometheus_oauth2_proxy_mem_limit      = local.prometheus_oauth2_proxy_mem_limit_value
+    })) :
+    yamldecode(doc)
+    if local.prometheus_auth_enabled && length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
+  ]
 
   monitoring_resources = concat(
     local.prometheus_manifests,
@@ -240,7 +315,8 @@ locals {
         }
       },
     ],
-    local.kube_state_metrics_manifests
+    local.kube_state_metrics_manifests,
+    local.prometheus_oauth2_proxy_manifests
   )
 
   monitoring_certificates = [
@@ -328,6 +404,24 @@ check "grafana_auth_groups" {
   }
 }
 
+check "prometheus_auth_identity_client" {
+  assert {
+    condition = !local.prometheus_auth_enabled || (
+      trimspace(local.prometheus_oidc_issuer) != "" &&
+      trimspace(local.prometheus_oidc_client_id) != "" &&
+      trimspace(local.prometheus_oidc_client_secret) != ""
+    )
+    error_message = format("Prometheus Keycloak auth is enabled for realm %q, but identity state does not expose a confidential prometheus OIDC client.", local.prometheus_auth_keycloak_realm_value)
+  }
+}
+
+check "prometheus_auth_groups" {
+  assert {
+    condition     = !local.prometheus_auth_enabled || (length(local.prometheus_auth_effective_allowed_groups) > 0 && length(local.missing_prometheus_auth_group_definitions) == 0)
+    error_message = format("Prometheus auth groups must exist in the selected Keycloak realm. Missing logical groups: %s", join(", ", local.missing_prometheus_auth_group_definitions))
+  }
+}
+
 resource "kubernetes_manifest" "monitoring_namespace" {
   manifest = local.monitoring_namespace
 }
@@ -389,6 +483,45 @@ resource "kubernetes_secret_v1" "grafana_oauth_ca" {
   depends_on = [kubernetes_manifest.monitoring_namespace]
 }
 
+resource "random_password" "prometheus_oauth_cookie_secret" {
+  count   = local.prometheus_auth_enabled ? 1 : 0
+  length  = 32
+  special = false
+}
+
+resource "kubernetes_secret_v1" "prometheus_oauth" {
+  count = local.prometheus_auth_enabled ? 1 : 0
+
+  metadata {
+    name      = local.prometheus_oauth_secret_name_value
+    namespace = "monitoring"
+  }
+
+  data = {
+    "client-secret" = local.prometheus_oidc_client_secret
+    "cookie-secret" = random_password.prometheus_oauth_cookie_secret[0].result
+  }
+
+  type       = "Opaque"
+  depends_on = [kubernetes_manifest.monitoring_namespace]
+}
+
+resource "kubernetes_secret_v1" "prometheus_oauth_ca" {
+  count = local.prometheus_auth_ca_enabled ? 1 : 0
+
+  metadata {
+    name      = local.prometheus_auth_ca_secret_name_value
+    namespace = "monitoring"
+  }
+
+  data = {
+    "ca.crt" = local.prometheus_auth_ca_content
+  }
+
+  type       = "Opaque"
+  depends_on = [kubernetes_manifest.monitoring_namespace]
+}
+
 resource "kubernetes_manifest" "monitoring_other" {
   for_each = { for i, m in local.monitoring_other : i => m }
   manifest = each.value
@@ -409,6 +542,8 @@ resource "kubernetes_manifest" "monitoring_other" {
     kubernetes_secret_v1.grafana_admin,
     kubernetes_secret_v1.grafana_oauth,
     kubernetes_secret_v1.grafana_oauth_ca,
+    kubernetes_secret_v1.prometheus_oauth,
+    kubernetes_secret_v1.prometheus_oauth_ca,
   ]
 }
 
