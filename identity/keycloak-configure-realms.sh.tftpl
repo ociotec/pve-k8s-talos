@@ -25,6 +25,10 @@ extract_json_field() {
   sed -n 's/.*"'"$field_name"'" : "\([^"]*\)".*/\1/p'
 }
 
+url_path_segment() {
+  printf '%s' "$1" | sed 's/%/%25/g; s/ /%20/g'
+}
+
 realm_exists() {
   "$KCADM" get "realms/$1" >/dev/null 2>&1
 }
@@ -58,6 +62,13 @@ group_id() {
         ;;
     esac
   done
+}
+
+group_id_by_path() {
+  realm_name="$1"
+  group_path="$(url_path_segment "$${2#/}")"
+
+  "$KCADM" get "group-by-path/$group_path" -r "$realm_name" 2>/dev/null | first_id
 }
 
 user_id() {
@@ -98,9 +109,10 @@ execution_id_by_provider() {
   flow_alias="$2"
   provider_id="$3"
   executions_file="$TMPDIR/executions-provider-$(printf '%s' "$realm_name-$flow_alias-$provider_id" | tr -c '[:alnum:]' '-').json"
+  flow_path="$(url_path_segment "$flow_alias")"
   current_id=""
 
-  "$KCADM" get "authentication/flows/$flow_alias/executions" -r "$realm_name" > "$executions_file"
+  "$KCADM" get "authentication/flows/$flow_path/executions" -r "$realm_name" > "$executions_file"
   while IFS= read -r line; do
     case "$line" in
       *'"id" : "'*)
@@ -122,9 +134,10 @@ execution_id_by_display() {
   flow_alias="$2"
   display_name="$3"
   executions_file="$TMPDIR/executions-display-$(printf '%s' "$realm_name-$flow_alias-$display_name" | tr -c '[:alnum:]' '-').json"
+  flow_path="$(url_path_segment "$flow_alias")"
   current_id=""
 
-  "$KCADM" get "authentication/flows/$flow_alias/executions" -r "$realm_name" > "$executions_file"
+  "$KCADM" get "authentication/flows/$flow_path/executions" -r "$realm_name" > "$executions_file"
   while IFS= read -r line; do
     case "$line" in
       *'"id" : "'*)
@@ -281,7 +294,10 @@ ensure_group_client_role() {
   client_identifier="$3"
   role_name="$4"
 
-  group_id_value="$(group_id "$realm_name" "$group_name")"
+  group_id_value="$(group_id_by_path "$realm_name" "/$group_name")"
+  if [ -z "$group_id_value" ]; then
+    group_id_value="$(group_id "$realm_name" "$group_name")"
+  fi
   [ -n "$group_id_value" ]
   "$KCADM" add-roles -r "$realm_name" --gid "$group_id_value" --cclientid "$client_identifier" --rolename "$role_name" >/dev/null 2>&1 || true
 }
@@ -292,9 +308,13 @@ ensure_client_login_gate() {
   role_name="$3"
   flow_alias="$4"
   shift 4
-  subflow_alias="$flow_alias-group-gate"
-  condition_config_alias="$flow_alias-group-condition"
-  deny_config_alias="$flow_alias-group-deny"
+  legacy_subflow_alias="$flow_alias-group-gate"
+  parent_flow_alias="$flow_alias forms"
+  flow_path="$(url_path_segment "$flow_alias")"
+  parent_flow_path="$(url_path_segment "$parent_flow_alias")"
+  subflow_alias="$flow_alias-post-login-group-gate"
+  condition_config_alias="$subflow_alias-condition"
+  deny_config_alias="$subflow_alias-deny"
 
   client_uuid_value="$(client_uuid "$realm_name" "$client_identifier")"
   [ -n "$client_uuid_value" ]
@@ -307,17 +327,24 @@ ensure_client_login_gate() {
   fi
   [ -n "$flow_id_value" ]
 
-  subflow_execution_id="$(execution_id_by_display "$realm_name" "$flow_alias" "$subflow_alias" | head -n1)"
+  legacy_subflow_execution_id="$(execution_id_by_display "$realm_name" "$flow_alias" "$legacy_subflow_alias" | head -n1)"
+  if [ -n "$legacy_subflow_execution_id" ]; then
+    "$KCADM" update "authentication/flows/$flow_path/executions" -r "$realm_name" -n -s id="$legacy_subflow_execution_id" -s requirement=DISABLED >/dev/null
+  fi
+
+  [ -n "$(execution_id_by_display "$realm_name" "$flow_alias" "$parent_flow_alias" | head -n1)" ]
+
+  subflow_execution_id="$(execution_id_by_display "$realm_name" "$parent_flow_alias" "$subflow_alias" | head -n1)"
   if [ -z "$subflow_execution_id" ]; then
-    "$KCADM" create "authentication/flows/$flow_alias/executions/flow" -r "$realm_name" \
+    "$KCADM" create "authentication/flows/$parent_flow_path/executions/flow" -r "$realm_name" \
       -s alias="$subflow_alias" \
       -s type=basic-flow \
       -s provider=basic-flow \
       -s description="Deny $client_identifier login unless the configured group role is present" >/dev/null
-    subflow_execution_id="$(execution_id_by_display "$realm_name" "$flow_alias" "$subflow_alias" | head -n1)"
+    subflow_execution_id="$(execution_id_by_display "$realm_name" "$parent_flow_alias" "$subflow_alias" | head -n1)"
   fi
   [ -n "$subflow_execution_id" ]
-  "$KCADM" update "authentication/flows/$flow_alias/executions" -r "$realm_name" -n -s id="$subflow_execution_id" -s requirement=CONDITIONAL >/dev/null
+  "$KCADM" update "authentication/flows/$parent_flow_path/executions" -r "$realm_name" -n -s id="$subflow_execution_id" -s requirement=CONDITIONAL -s priority=30 >/dev/null
 
   condition_execution_id="$(execution_id_by_provider "$realm_name" "$subflow_alias" conditional-user-role | head -n1)"
   if [ -z "$condition_execution_id" ]; then

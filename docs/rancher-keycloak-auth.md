@@ -76,4 +76,4 @@ Current simplified mapping:
 
 - `k8s-admins`: shared administrative access group for Rancher and Portainer.
 
-For Rancher, `k8s-admins` is bound to the configured global role. For Portainer, Keycloak restricts login for the `portainer` client to the configured `login_allowed_groups`. Portainer CE then keeps its usual local authorization model; initialize the local cluster once with the local `admin` user so newly auto-created OAuth users can see it. Keep local Portainer admin access for break-glass recovery.
+For Rancher, `k8s-admins` is bound to the configured global role. For Portainer, Keycloak restricts login for the `portainer` client to the configured `login_allowed_groups`. Portainer CE then keeps its usual local authorization model; deployment creates the configured default team, assigns auto-created OAuth users to it, grants that team access to the existing Portainer environments, and grants the team access to Kubernetes namespaces that exist at apply time. Use `portainer_auth_default_team_existing_users` to reconcile OAuth users that logged in before this default team was configured. Keep local Portainer admin access for break-glass recovery.

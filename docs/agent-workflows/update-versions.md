@@ -37,6 +37,7 @@ Handle repositories where versions may be declared in:
   - `tofu init -upgrade`
   - `tofu validate`
   Treat those as part of the normal update workflow and proceed automatically.
+- Treat upstream API, CLI, CRD, manifest schema, authentication, and provider behavior compatibility as part of the version update itself. Do not propose or apply a version bump based only on a newer release number.
 
 ## Output Format
 
@@ -52,8 +53,9 @@ Keep the table in English.
 2. Treat the in-repo pinned value as the current version, not README examples unless they are the source of truth.
 3. Group duplicate declarations that represent the same effective component when that improves clarity.
 4. Verify the latest stable upstream version from official or primary sources.
-5. Build the table.
-6. At the end, ask a concise follow-up question in English:
+5. Check compatibility between the proposed version and every in-repo script, OpenTofu plan, manifest, or generated workspace that calls or depends on that component.
+6. Build the table.
+7. At the end, ask a concise follow-up question in English:
    `Do you want me to apply all updates, no updates, or only a partial set?`
 
 If the user chooses a partial update, ask them to name the components or version groups to update.
@@ -74,6 +76,29 @@ If the user chooses all or partial updates, execute the required repo validation
 - For products with multiple channels, prefer stable GA only
   - choose LTS only if the repo is clearly following LTS; otherwise choose latest stable GA and mention channel differences in `Note`
 
+## Compatibility Checks
+
+Before recommending or applying an update, explicitly verify that the proposed version still supports the APIs and dependencies used by this repository.
+
+Check at least:
+
+- REST or HTTP API endpoints, request payloads, response fields, auth flows, and status-code behavior used by scripts and generated helpers.
+- CLI commands, flags, output formats, and exit-code behavior used by `scripts/*.sh` or OpenTofu `local-exec` provisioners.
+- Kubernetes API versions, CRD schemas, Helm values, manifest fields, webhook behavior, and server-side normalization that can affect `kubernetes_manifest`.
+- OpenTofu provider resource/data-source schemas, argument names, state behavior, computed fields, and lockfile compatibility.
+- Container entrypoints, command-line flags, environment variables, mounted paths, secret keys, and health/readiness endpoints.
+- OIDC/OAuth/SAML configuration fields, claim names, redirect/logout URI behavior, and group/team/role mapping semantics.
+- Storage, CSI, metrics, ingress, certificate, and dashboard naming conventions consumed by other modules or constants.
+
+Use official changelogs, migration guides, API references, provider docs, and release notes as primary evidence. If upstream documentation does not clearly confirm compatibility, inspect the current repo integration points and mark the row with a compatibility note instead of presenting the update as routine.
+
+When an update changes or may change a consumed API/dependency contract:
+
+- include the risk in `Note`
+- identify the affected script, plan, manifest, or generated workspace
+- add the required code/config changes to the update scope before applying
+- validate the affected runtime path, not only static syntax
+
 ## Notes Guidance
 
 Use `Note` only when useful, for example:
@@ -82,6 +107,8 @@ Use `Note` only when useful, for example:
 - `Major upgrade`
 - `Project archived; consider migration`
 - `Upgrade requires lockfile refresh`
+- `API compatibility check required for scripts/deploy.sh`
+- `Breaking change in OAuth settings payload`
 
 Do not add a note when there is no update proposal.
 

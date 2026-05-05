@@ -435,6 +435,7 @@ If you don't have internal DNS, add an `/etc/hosts` entry using `ingress_lb_ip` 
 ```
 
 When `portainer_auth_keycloak_realm` is set in `platform_constants.tf`, OpenTofu configures Portainer custom OAuth against the generated Keycloak `portainer` client. Restrict Portainer OAuth login by setting `login_allowed_groups` on the `portainer` OIDC client in `identity_constants.tf`; Keycloak denies browser login for users outside those groups before Portainer creates a local OAuth user.
+By default, deployment also creates a Portainer team named by `portainer_auth_default_team_name`, assigns auto-created OAuth users to it, grants that team environment administrator access to the existing Portainer environments, and grants the team access to the Kubernetes namespaces that exist at apply time. Override `portainer_auth_default_team_role_id` if you want a less privileged Portainer environment role. If a user already logged in before the team default existed, add that username to `portainer_auth_default_team_existing_users` and rerun the platform apply.
 
 #### Rook Ceph dashboard
 

@@ -67,8 +67,14 @@ locals {
   portainer_auth_scopes_value            = trimspace(try(local.portainer_auth_scopes, "openid profile email"))
   portainer_auth_sso_value               = try(local.portainer_auth_sso, true)
   portainer_auth_auto_create_users_value = try(local.portainer_auth_auto_create_users, true)
-  portainer_auth_enabled                 = !var.skip_platform && trimspace(local.portainer_hostname) != "" && local.portainer_auth_keycloak_realm_value != ""
-  identity_auth_enabled                  = local.rancher_auth_enabled || local.portainer_auth_enabled
+  portainer_auth_default_team_name_value = trimspace(try(
+    local.portainer_auth_default_team_name,
+    try(local.rancher_auth_allowed_group, "k8s-admins")
+  ))
+  portainer_auth_default_team_role_id_value        = try(local.portainer_auth_default_team_role_id, 1)
+  portainer_auth_default_team_existing_users_value = try(local.portainer_auth_default_team_existing_users, [])
+  portainer_auth_enabled                           = !var.skip_platform && trimspace(local.portainer_hostname) != "" && local.portainer_auth_keycloak_realm_value != ""
+  identity_auth_enabled                            = local.rancher_auth_enabled || local.portainer_auth_enabled
   identity_realm_groups = local.identity_auth_enabled ? try(
     data.terraform_remote_state.identity[0].outputs.keycloak_realm_groups,
     {}
@@ -566,9 +572,12 @@ resource "local_sensitive_file" "portainer_oauth_configure" {
   filename        = "${path.module}/.generated-portainer-oauth-configure.sh"
   file_permission = "0700"
   content = templatefile("${path.module}/configure-portainer-oauth.sh.tftpl", {
-    kubeconfig_path         = abspath("${path.module}/${var.kubeconfig_path}")
-    portainer_auth_body     = jsonencode({ username = "admin", password = random_password.portainer_admin[0].result })
-    portainer_oauth_payload = jsonencode(local.portainer_oauth_payload)
+    kubeconfig_path                       = abspath("${path.module}/${var.kubeconfig_path}")
+    portainer_auth_body                   = jsonencode({ username = "admin", password = random_password.portainer_admin[0].result })
+    portainer_oauth_payload               = jsonencode(local.portainer_oauth_payload)
+    portainer_default_team_name_json      = jsonencode(local.portainer_auth_default_team_name_value)
+    portainer_default_team_role_id_string = tostring(local.portainer_auth_default_team_role_id_value)
+    portainer_default_team_existing_users = jsonencode(local.portainer_auth_default_team_existing_users_value)
   })
   depends_on = [kubernetes_manifest.platform_ingress]
 }

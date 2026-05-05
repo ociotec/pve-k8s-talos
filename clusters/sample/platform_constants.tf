@@ -15,6 +15,11 @@ locals {
   portainer_auth_scopes            = "openid profile email"
   portainer_auth_sso               = true
   portainer_auth_auto_create_users = true
+  portainer_auth_default_team_name = "k8s-admins"
+  # RoleId 1 is Portainer's environment administrator role.
+  portainer_auth_default_team_role_id = 1
+  # Existing auto-created OAuth usernames to add to the default team on the next platform apply.
+  portainer_auth_default_team_existing_users = []
 
   rancher_hostname                  = "rancher.${local.domain}"
   rancher_tls_secret_name           = "tls-rancher-ingress"

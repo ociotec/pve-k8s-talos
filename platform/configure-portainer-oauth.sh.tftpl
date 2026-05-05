@@ -4,6 +4,9 @@ set -euo pipefail
 KUBECONFIG_PATH='${kubeconfig_path}'
 PORTAINER_AUTH_BODY='${portainer_auth_body}'
 PORTAINER_OAUTH_PAYLOAD='${portainer_oauth_payload}'
+PORTAINER_DEFAULT_TEAM_NAME=${portainer_default_team_name_json}
+PORTAINER_DEFAULT_TEAM_ROLE_ID=${portainer_default_team_role_id_string}
+PORTAINER_DEFAULT_TEAM_EXISTING_USERS='${portainer_default_team_existing_users}'
 
 if ! command -v kubectl >/dev/null 2>&1; then
   echo "kubectl is required to configure Portainer OAuth." >&2
@@ -15,8 +18,17 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required to configure Portainer OAuth team access." >&2
+  exit 1
+fi
+
 auth_file="$(mktemp)"
 payload_file="$(mktemp)"
+request_file="$(mktemp)"
+users_file="$(mktemp)"
+memberships_file="$(mktemp)"
+namespace_policy_patch_file="$(mktemp)"
 port_forward_log="$(mktemp)"
 auth_error_log="$(mktemp)"
 reset_pod_manifest="$(mktemp)"
@@ -32,7 +44,7 @@ cleanup() {
   if [ "$portainer_scaled_down" = "true" ]; then
     KUBECONFIG="$KUBECONFIG_PATH" kubectl -n portainer scale deploy/portainer --replicas="$portainer_restore_replicas" >/dev/null 2>&1 || true
   fi
-  rm -f "$auth_file" "$payload_file" "$port_forward_log" "$auth_error_log" "$reset_pod_manifest"
+  rm -f "$auth_file" "$payload_file" "$request_file" "$users_file" "$memberships_file" "$namespace_policy_patch_file" "$port_forward_log" "$auth_error_log" "$reset_pod_manifest"
 }
 trap cleanup EXIT
 
@@ -100,6 +112,257 @@ authenticate_portainer() {
     echo "Portainer auth response did not include a JWT." >&2
     return 1
   fi
+}
+
+api_get() {
+  curl -fsS \
+    -H "Authorization: Bearer $jwt" \
+    "$portainer_api/$1"
+}
+
+api_json() {
+  method="$1"
+  path="$2"
+  data_file="$3"
+
+  curl -fsS \
+    -X "$method" \
+    -H "Authorization: Bearer $jwt" \
+    -H 'Content-Type: application/json' \
+    --data-binary "@$data_file" \
+    "$portainer_api/$path"
+}
+
+create_team_payload() {
+  python3 - "$PORTAINER_DEFAULT_TEAM_NAME" <<'PY_CREATE_TEAM_PAYLOAD'
+import json
+import sys
+
+print(json.dumps({"name": sys.argv[1]}, separators=(",", ":")))
+PY_CREATE_TEAM_PAYLOAD
+}
+
+team_id_by_name() {
+  python3 -c '
+import json
+import sys
+
+team_name = sys.argv[1]
+teams = json.load(sys.stdin)
+for team in teams:
+    if team.get("Name") == team_name or team.get("name") == team_name:
+        print(team.get("Id") or team.get("ID") or team.get("id") or "")
+        break
+' "$PORTAINER_DEFAULT_TEAM_NAME"
+}
+
+json_id() {
+  python3 -c '
+import json
+import sys
+
+obj = json.load(sys.stdin)
+print(obj.get("Id") or obj.get("ID") or obj.get("id") or "")
+'
+}
+
+ensure_default_team() {
+  teams_response="$(api_get teams)"
+  team_id="$(printf '%s' "$teams_response" | team_id_by_name)"
+
+  if [ -n "$team_id" ]; then
+    printf '%s\n' "$team_id"
+    return 0
+  fi
+
+  create_team_payload > "$request_file"
+  team_response="$(api_json POST teams "$request_file")"
+  team_id="$(printf '%s' "$team_response" | json_id)"
+
+  if [ -z "$team_id" ]; then
+    echo "Portainer team creation response did not include an ID." >&2
+    return 1
+  fi
+
+  printf '%s\n' "$team_id"
+}
+
+set_oauth_default_team() {
+  team_id="$1"
+
+  python3 - "$payload_file" "$team_id" <<'PY_SET_DEFAULT_TEAM'
+import json
+import sys
+
+payload_path = sys.argv[1]
+team_id = int(sys.argv[2])
+
+with open(payload_path, "r", encoding="utf-8") as handle:
+    payload = json.load(handle)
+
+payload.setdefault("OAuthSettings", {})["DefaultTeamID"] = team_id
+
+with open(payload_path, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, separators=(",", ":"))
+PY_SET_DEFAULT_TEAM
+}
+
+apply_default_team_access_policies() {
+  resource_path="$1"
+  team_id="$2"
+  role_id="$3"
+
+  api_get "$resource_path" > "$request_file"
+  python3 - "$request_file" "$resource_path" "$team_id" "$role_id" <<'PY_ACCESS_POLICIES' |
+import json
+import sys
+
+resources_path = sys.argv[1]
+resource_path = sys.argv[2]
+team_id = str(int(sys.argv[3]))
+role_id = int(sys.argv[4])
+
+with open(resources_path, "r", encoding="utf-8") as handle:
+    resources = json.load(handle)
+
+for resource in resources:
+    resource_id = resource.get("Id") or resource.get("ID") or resource.get("id")
+    if resource_id is None:
+        continue
+    policies = resource.get("TeamAccessPolicies") or {}
+    policies[team_id] = {"RoleId": role_id}
+    payload = {"TeamAccessPolicies": policies}
+    print(f"{resource_path}/{resource_id}\t{json.dumps(payload, separators=(',', ':'))}")
+PY_ACCESS_POLICIES
+  while IFS="$(printf '\t')" read -r target_path access_payload; do
+    [ -n "$target_path" ] || continue
+    printf '%s' "$access_payload" > "$request_file"
+    api_json PUT "$target_path" "$request_file" >/dev/null
+  done
+}
+
+apply_default_team_namespace_access() {
+  team_id="$1"
+  role_id="$2"
+  current_policies="{}"
+
+  if KUBECONFIG="$KUBECONFIG_PATH" kubectl -n portainer get configmap portainer-config >/dev/null 2>&1; then
+    current_policies="$(
+      KUBECONFIG="$KUBECONFIG_PATH" kubectl -n portainer get configmap portainer-config \
+        -o jsonpath='{.data.NamespaceAccessPolicies}' 2>/dev/null || true
+    )"
+  fi
+
+  KUBECONFIG="$KUBECONFIG_PATH" kubectl get namespaces -o json > "$request_file"
+  python3 - "$request_file" "$current_policies" "$team_id" "$role_id" "$namespace_policy_patch_file" <<'PY_NAMESPACE_POLICIES'
+import json
+import sys
+
+namespaces_path = sys.argv[1]
+current_policies_raw = sys.argv[2] or "{}"
+team_id = str(int(sys.argv[3]))
+role_id = int(sys.argv[4])
+patch_path = sys.argv[5]
+
+with open(namespaces_path, "r", encoding="utf-8") as handle:
+    namespaces = json.load(handle)
+
+try:
+    policies = json.loads(current_policies_raw)
+except json.JSONDecodeError:
+    policies = {}
+
+for item in namespaces.get("items", []):
+    namespace = item.get("metadata", {}).get("name")
+    if not namespace:
+        continue
+    policy = policies.setdefault(namespace, {})
+    policy.setdefault("UserAccessPolicies", {})
+    policy.setdefault("TeamAccessPolicies", {})[team_id] = {"RoleId": role_id}
+
+policy_json = json.dumps(policies, separators=(",", ":"))
+with open(patch_path, "w", encoding="utf-8") as handle:
+    json.dump({"data": {"NamespaceAccessPolicies": policy_json}}, handle, separators=(",", ":"))
+PY_NAMESPACE_POLICIES
+
+  if KUBECONFIG="$KUBECONFIG_PATH" kubectl -n portainer get configmap portainer-config >/dev/null 2>&1; then
+    KUBECONFIG="$KUBECONFIG_PATH" kubectl -n portainer patch configmap portainer-config --type merge --patch-file "$namespace_policy_patch_file" >/dev/null
+  else
+    python3 - "$namespace_policy_patch_file" "$request_file" <<'PY_NAMESPACE_CONFIGMAP'
+import json
+import sys
+
+patch_path = sys.argv[1]
+manifest_path = sys.argv[2]
+
+with open(patch_path, "r", encoding="utf-8") as handle:
+    patch = json.load(handle)
+
+manifest = {
+    "apiVersion": "v1",
+    "kind": "ConfigMap",
+    "metadata": {
+        "name": "portainer-config",
+        "namespace": "portainer",
+    },
+    "data": patch["data"],
+}
+
+with open(manifest_path, "w", encoding="utf-8") as handle:
+    json.dump(manifest, handle, separators=(",", ":"))
+PY_NAMESPACE_CONFIGMAP
+    KUBECONFIG="$KUBECONFIG_PATH" kubectl apply -f "$request_file" >/dev/null
+  fi
+}
+
+apply_default_team_existing_user_memberships() {
+  team_id="$1"
+
+  if [ "$PORTAINER_DEFAULT_TEAM_EXISTING_USERS" = "[]" ]; then
+    return 0
+  fi
+
+  api_get users > "$users_file"
+  api_get team_memberships > "$memberships_file"
+
+  python3 - "$users_file" "$memberships_file" "$team_id" "$PORTAINER_DEFAULT_TEAM_EXISTING_USERS" <<'PY_EXISTING_USER_MEMBERSHIPS' |
+import json
+import sys
+
+users_path = sys.argv[1]
+memberships_path = sys.argv[2]
+team_id = int(sys.argv[3])
+target_usernames = set(json.loads(sys.argv[4]))
+
+with open(users_path, "r", encoding="utf-8") as handle:
+    users = json.load(handle)
+
+with open(memberships_path, "r", encoding="utf-8") as handle:
+    memberships = json.load(handle)
+
+existing_memberships = {
+    (
+        int(membership.get("UserID") or membership.get("userID") or membership.get("userId") or 0),
+        int(membership.get("TeamID") or membership.get("teamID") or membership.get("teamId") or 0),
+    )
+    for membership in memberships
+}
+
+for user in users:
+    username = user.get("Username") or user.get("username")
+    user_id = user.get("Id") or user.get("ID") or user.get("id")
+    user_role = int(user.get("Role") or user.get("role") or 0)
+    if username not in target_usernames or user_id is None or user_role == 1:
+        continue
+    if (int(user_id), team_id) in existing_memberships:
+        continue
+    print(json.dumps({"UserID": int(user_id), "TeamID": team_id, "Role": 2}, separators=(",", ":")))
+PY_EXISTING_USER_MEMBERSHIPS
+  while IFS= read -r membership_payload; do
+    [ -n "$membership_payload" ] || continue
+    printf '%s' "$membership_payload" > "$request_file"
+    api_json POST team_memberships "$request_file" >/dev/null
+  done
 }
 
 wait_for_portainer_pods_removed() {
@@ -197,6 +460,15 @@ if ! authenticate_portainer; then
     echo "Could not authenticate to Portainer after reconciling the local admin password." >&2
     exit 1
   fi
+fi
+
+if [ -n "$PORTAINER_DEFAULT_TEAM_NAME" ]; then
+  default_team_id="$(ensure_default_team)"
+  set_oauth_default_team "$default_team_id"
+  apply_default_team_access_policies endpoints "$default_team_id" "$PORTAINER_DEFAULT_TEAM_ROLE_ID"
+  apply_default_team_access_policies endpoint_groups "$default_team_id" "$PORTAINER_DEFAULT_TEAM_ROLE_ID"
+  apply_default_team_namespace_access "$default_team_id" "$PORTAINER_DEFAULT_TEAM_ROLE_ID"
+  apply_default_team_existing_user_memberships "$default_team_id"
 fi
 
 curl -fsS \
