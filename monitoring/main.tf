@@ -575,12 +575,15 @@ resource "kubernetes_manifest" "monitoring_other" {
   computed_fields = [
     "metadata.annotations",
     "metadata.annotations[\"deprecated.daemonset.template.generation\"]",
+    "object.metadata.annotations",
+    "object.metadata.annotations[\"deprecated.daemonset.template.generation\"]",
     "spec.template.spec.containers[0].resources.limits.cpu",
     "spec.template.spec.nodeSelector",
   ]
   lifecycle {
     ignore_changes = [
       manifest.metadata.annotations,
+      object.metadata.annotations,
     ]
   }
   depends_on = [
