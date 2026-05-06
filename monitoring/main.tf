@@ -279,6 +279,17 @@ locals {
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
   ]
+  node_exporter_manifests = [
+    for doc in split("\n---\n", templatefile("${path.module}/node-exporter.yaml", {
+      node_exporter_image_tag   = local.node_exporter_image_tag
+      node_exporter_cpu_request = local.node_exporter_cpu_request
+      node_exporter_cpu_limit   = local.node_exporter_cpu_limit
+      node_exporter_mem_request = local.node_exporter_mem_request
+      node_exporter_mem_limit   = local.node_exporter_mem_limit
+    })) :
+    yamldecode(doc)
+    if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
+  ]
   prometheus_oauth2_proxy_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/prometheus-oauth2-proxy.yaml", {
       prometheus_hostname                    = local.prometheus_hostname
@@ -332,6 +343,7 @@ locals {
       },
     ],
     local.kube_state_metrics_manifests,
+    local.node_exporter_manifests,
     local.prometheus_oauth2_proxy_manifests
   )
 

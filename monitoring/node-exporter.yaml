@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+  namespace: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: node-exporter
+  template:
+    metadata:
+      labels:
+        app: node-exporter
+    spec:
+      hostNetwork: true
+      hostPID: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - operator: Exists
+      nodeSelector:
+        kubernetes.io/os: linux
+      containers:
+        - name: node-exporter
+          image: quay.io/prometheus/node-exporter:${node_exporter_image_tag}
+          args:
+            - --path.procfs=/host/proc
+            - --path.sysfs=/host/sys
+            - --path.rootfs=/host/root
+            - --collector.filesystem.mount-points-exclude=^/(dev|proc|run/credentials/.+|sys|var/lib/docker/.+|var/lib/containers/storage/.+|var/lib/kubelet/pods/.+)($|/)
+            - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$
+          ports:
+            - name: metrics
+              containerPort: 9100
+          resources:
+            requests:
+              cpu: ${node_exporter_cpu_request}
+              memory: ${node_exporter_mem_request}
+            limits:
+              cpu: ${node_exporter_cpu_limit}
+              memory: ${node_exporter_mem_limit}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: sys
+              mountPath: /host/sys
+              readOnly: true
+            - name: root
+              mountPath: /host/root
+              readOnly: true
+              mountPropagation: HostToContainer
+      volumes:
+        - name: proc
+          hostPath:
+            path: /proc
+        - name: sys
+          hostPath:
+            path: /sys
+        - name: root
+          hostPath:
+            path: /
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-exporter
+  namespace: monitoring
+spec:
+  selector:
+    app: node-exporter
+  ports:
+    - name: metrics
+      port: 9100
+      targetPort: metrics

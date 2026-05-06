@@ -458,7 +458,7 @@ Define your constants in `clusters/<cluster>/monitoring_constants.tf`: monitorin
 
 Define Portainer/Rancher constants in `clusters/<cluster>/platform_constants.tf`.
 Rancher is enabled when `rancher_hostname` is non-empty and uses one replica by default in the sample constants.
-This stack also includes kube-state-metrics (requests/limits) and kubelet cAdvisor scrape for CPU/RAM usage.
+This stack also includes kube-state-metrics (requests/limits), kubelet cAdvisor scrape for pod/container CPU/RAM usage, and node-exporter for host/VM CPU, memory, filesystem, disk, and network metrics. Grafana provisions a Node Exporter dashboard from the Grafana Labs quickstart dashboard, adapted to the local `job="node-exporter"` scrape.
 The manifests are rendered from templates using those values.
 Use the same domain as `k8s_net_constants.tf` so TLS and DNS align.
 

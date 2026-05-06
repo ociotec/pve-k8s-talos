@@ -249,6 +249,7 @@ prepare_monitoring_workspace() {
   link_into_workspace "${repo_root}/monitoring/loki.yaml" "${workspace}/loki.yaml"
   link_into_workspace "${repo_root}/monitoring/promtail.yaml" "${workspace}/promtail.yaml"
   link_into_workspace "${repo_root}/monitoring/kube-state-metrics.yaml" "${workspace}/kube-state-metrics.yaml"
+  link_into_workspace "${repo_root}/monitoring/node-exporter.yaml" "${workspace}/node-exporter.yaml"
   link_into_workspace "${repo_root}/monitoring/grafana" "${workspace}/grafana"
   if [[ -r "${repo_root}/monitoring/.terraform.lock.hcl" ]]; then
     link_into_workspace "${repo_root}/monitoring/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
@@ -519,6 +520,18 @@ wait_for_deployments_ready() {
 
   for deployment_name in "${deployments[@]}"; do
     kubectl -n "${namespace}" rollout status "deploy/${deployment_name}" --timeout="${timeout}"
+  done
+}
+
+wait_for_daemonsets_ready() {
+  local namespace="$1"
+  local timeout="${2:-600s}"
+  shift 2
+  local daemonsets=("$@")
+  local daemonset_name
+
+  for daemonset_name in "${daemonsets[@]}"; do
+    kubectl -n "${namespace}" rollout status "daemonset/${daemonset_name}" --timeout="${timeout}"
   done
 }
 
@@ -1051,17 +1064,21 @@ else
   message "Deploying monitoring stack..."
   run_tofu_init "${cluster_monitoring_workspace}"
   run tofu -chdir="${cluster_monitoring_workspace}" apply -auto-approve
+  message "Restarting Prometheus to reload scrape configuration..."
+  kubectl -n monitoring rollout restart deploy/prometheus 1>/dev/null
   message "Restarting Grafana to reload provisioned dashboards..."
   kubectl -n monitoring rollout restart deploy/grafana 1>/dev/null
   message "Waiting for monitoring PVCs, workloads, and endpoints to become ready..."
   monitoring_deployments=(grafana loki prometheus kube-state-metrics)
-  monitoring_services=(grafana loki prometheus kube-state-metrics)
+  monitoring_daemonsets=(node-exporter)
+  monitoring_services=(grafana loki prometheus kube-state-metrics node-exporter)
   if kubectl -n monitoring get deploy/prometheus-oauth2-proxy >/dev/null 2>&1; then
     monitoring_deployments+=(prometheus-oauth2-proxy)
     monitoring_services+=(prometheus-oauth2-proxy)
   fi
   wait_for_pvcs_bound "monitoring" "600" "grafana-data" "loki-data" "prometheus-data"
   wait_for_deployments_ready "monitoring" "600s" "${monitoring_deployments[@]}"
+  wait_for_daemonsets_ready "monitoring" "600s" "${monitoring_daemonsets[@]}"
   wait_for_service_endpoints "monitoring" "600" "${monitoring_services[@]}"
   grafana_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw grafana_url)"
   prometheus_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw prometheus_url)"

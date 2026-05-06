@@ -20,6 +20,7 @@ locals {
   loki_image_tag               = "3.7.1"
   promtail_image_tag           = "3.7.1"
   kube_state_metrics_image_tag = "v2.18.0"
+  node_exporter_image_tag      = "v1.11.1"
 
   grafana_admin_user            = "admin"
   grafana_admin_password_length = 24
@@ -68,6 +69,10 @@ locals {
   kube_state_metrics_cpu_limit   = "300m"
   kube_state_metrics_mem_request = "128Mi"
   kube_state_metrics_mem_limit   = "256Mi"
+  node_exporter_cpu_request      = "50m"
+  node_exporter_cpu_limit        = "200m"
+  node_exporter_mem_request      = "64Mi"
+  node_exporter_mem_limit        = "128Mi"
 
   tls_secrets = [
     {
