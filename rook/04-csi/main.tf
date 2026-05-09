@@ -17,8 +17,8 @@ provider "kubernetes" {
 }
 
 locals {
-  effective_ceph_mode      = try(local.ceph_mode, "internal")
-  effective_ceph_namespace = try(local.ceph_namespace, "rook-ceph")
+  effective_ceph_mode        = try(local.ceph_mode, "internal")
+  effective_ceph_namespace   = try(local.ceph_namespace, "rook-ceph")
   effective_ceph_name_prefix = try(local.ceph_name_prefix, "cluster")
 
   effective_ceph_block_replicated = merge(
@@ -246,19 +246,19 @@ locals {
         }
         provisioner = "rook-ceph.rbd.csi.ceph.com"
         parameters = {
-          clusterID                                               = local.effective_ceph_namespace
-          pool                                                    = local.effective_ceph_block_replicated.pool_name
-          imageFormat                                             = "2"
-          imageFeatures                                           = "layering"
-          "csi.storage.k8s.io/provisioner-secret-name"            = "rook-csi-rbd-provisioner"
-          "csi.storage.k8s.io/provisioner-secret-namespace"       = local.effective_ceph_namespace
-          "csi.storage.k8s.io/controller-expand-secret-name"      = "rook-csi-rbd-provisioner"
-          "csi.storage.k8s.io/controller-expand-secret-namespace" = local.effective_ceph_namespace
-          "csi.storage.k8s.io/controller-publish-secret-name"     = "rook-csi-rbd-provisioner"
+          clusterID                                                = local.effective_ceph_namespace
+          pool                                                     = local.effective_ceph_block_replicated.pool_name
+          imageFormat                                              = "2"
+          imageFeatures                                            = "layering,exclusive-lock,object-map,fast-diff"
+          "csi.storage.k8s.io/provisioner-secret-name"             = "rook-csi-rbd-provisioner"
+          "csi.storage.k8s.io/provisioner-secret-namespace"        = local.effective_ceph_namespace
+          "csi.storage.k8s.io/controller-expand-secret-name"       = "rook-csi-rbd-provisioner"
+          "csi.storage.k8s.io/controller-expand-secret-namespace"  = local.effective_ceph_namespace
+          "csi.storage.k8s.io/controller-publish-secret-name"      = "rook-csi-rbd-provisioner"
           "csi.storage.k8s.io/controller-publish-secret-namespace" = local.effective_ceph_namespace
-          "csi.storage.k8s.io/node-stage-secret-name"             = "rook-csi-rbd-node"
-          "csi.storage.k8s.io/node-stage-secret-namespace"        = local.effective_ceph_namespace
-          "csi.storage.k8s.io/fstype"                             = "ext4"
+          "csi.storage.k8s.io/node-stage-secret-name"              = "rook-csi-rbd-node"
+          "csi.storage.k8s.io/node-stage-secret-namespace"         = local.effective_ceph_namespace
+          "csi.storage.k8s.io/fstype"                              = "ext4"
         }
         allowVolumeExpansion = true
         reclaimPolicy        = "Delete"
@@ -273,20 +273,20 @@ locals {
         }
         provisioner = "rook-ceph.rbd.csi.ceph.com"
         parameters = {
-          clusterID                                               = local.effective_ceph_namespace
-          pool                                                    = local.effective_ceph_block_ec.metadata_pool_name
-          dataPool                                                = local.effective_ceph_block_ec.data_pool_name
-          imageFormat                                             = "2"
-          imageFeatures                                           = "layering"
-          "csi.storage.k8s.io/provisioner-secret-name"            = "rook-csi-rbd-provisioner"
-          "csi.storage.k8s.io/provisioner-secret-namespace"       = local.effective_ceph_namespace
-          "csi.storage.k8s.io/controller-expand-secret-name"      = "rook-csi-rbd-provisioner"
-          "csi.storage.k8s.io/controller-expand-secret-namespace" = local.effective_ceph_namespace
-          "csi.storage.k8s.io/controller-publish-secret-name"     = "rook-csi-rbd-provisioner"
+          clusterID                                                = local.effective_ceph_namespace
+          pool                                                     = local.effective_ceph_block_ec.metadata_pool_name
+          dataPool                                                 = local.effective_ceph_block_ec.data_pool_name
+          imageFormat                                              = "2"
+          imageFeatures                                            = "layering,exclusive-lock,object-map,fast-diff"
+          "csi.storage.k8s.io/provisioner-secret-name"             = "rook-csi-rbd-provisioner"
+          "csi.storage.k8s.io/provisioner-secret-namespace"        = local.effective_ceph_namespace
+          "csi.storage.k8s.io/controller-expand-secret-name"       = "rook-csi-rbd-provisioner"
+          "csi.storage.k8s.io/controller-expand-secret-namespace"  = local.effective_ceph_namespace
+          "csi.storage.k8s.io/controller-publish-secret-name"      = "rook-csi-rbd-provisioner"
           "csi.storage.k8s.io/controller-publish-secret-namespace" = local.effective_ceph_namespace
-          "csi.storage.k8s.io/node-stage-secret-name"             = "rook-csi-rbd-node"
-          "csi.storage.k8s.io/node-stage-secret-namespace"        = local.effective_ceph_namespace
-          "csi.storage.k8s.io/fstype"                             = "ext4"
+          "csi.storage.k8s.io/node-stage-secret-name"              = "rook-csi-rbd-node"
+          "csi.storage.k8s.io/node-stage-secret-namespace"         = local.effective_ceph_namespace
+          "csi.storage.k8s.io/fstype"                              = "ext4"
         }
         allowVolumeExpansion = true
         reclaimPolicy        = "Delete"
@@ -301,17 +301,17 @@ locals {
         }
         provisioner = "rook-ceph.cephfs.csi.ceph.com"
         parameters = {
-          clusterID                                               = local.effective_ceph_namespace
-          fsName                                                  = local.effective_ceph_filesystem_replicated.filesystem_name
-          pool                                                    = local.effective_ceph_filesystem_replicated.data_pool_name
-          "csi.storage.k8s.io/provisioner-secret-name"            = "rook-csi-cephfs-provisioner"
-          "csi.storage.k8s.io/provisioner-secret-namespace"       = local.effective_ceph_namespace
-          "csi.storage.k8s.io/controller-expand-secret-name"      = "rook-csi-cephfs-provisioner"
-          "csi.storage.k8s.io/controller-expand-secret-namespace" = local.effective_ceph_namespace
-          "csi.storage.k8s.io/controller-publish-secret-name"     = "rook-csi-cephfs-provisioner"
+          clusterID                                                = local.effective_ceph_namespace
+          fsName                                                   = local.effective_ceph_filesystem_replicated.filesystem_name
+          pool                                                     = local.effective_ceph_filesystem_replicated.data_pool_name
+          "csi.storage.k8s.io/provisioner-secret-name"             = "rook-csi-cephfs-provisioner"
+          "csi.storage.k8s.io/provisioner-secret-namespace"        = local.effective_ceph_namespace
+          "csi.storage.k8s.io/controller-expand-secret-name"       = "rook-csi-cephfs-provisioner"
+          "csi.storage.k8s.io/controller-expand-secret-namespace"  = local.effective_ceph_namespace
+          "csi.storage.k8s.io/controller-publish-secret-name"      = "rook-csi-cephfs-provisioner"
           "csi.storage.k8s.io/controller-publish-secret-namespace" = local.effective_ceph_namespace
-          "csi.storage.k8s.io/node-stage-secret-name"             = "rook-csi-cephfs-node"
-          "csi.storage.k8s.io/node-stage-secret-namespace"        = local.effective_ceph_namespace
+          "csi.storage.k8s.io/node-stage-secret-name"              = "rook-csi-cephfs-node"
+          "csi.storage.k8s.io/node-stage-secret-namespace"         = local.effective_ceph_namespace
         }
         allowVolumeExpansion = true
         reclaimPolicy        = "Delete"
@@ -326,17 +326,17 @@ locals {
         }
         provisioner = "rook-ceph.cephfs.csi.ceph.com"
         parameters = {
-          clusterID                                               = local.effective_ceph_namespace
-          fsName                                                  = local.effective_ceph_filesystem_ec.filesystem_name
-          pool                                                    = local.effective_ceph_filesystem_ec.ec_data_pool_name
-          "csi.storage.k8s.io/provisioner-secret-name"            = "rook-csi-cephfs-provisioner"
-          "csi.storage.k8s.io/provisioner-secret-namespace"       = local.effective_ceph_namespace
-          "csi.storage.k8s.io/controller-expand-secret-name"      = "rook-csi-cephfs-provisioner"
-          "csi.storage.k8s.io/controller-expand-secret-namespace" = local.effective_ceph_namespace
-          "csi.storage.k8s.io/controller-publish-secret-name"     = "rook-csi-cephfs-provisioner"
+          clusterID                                                = local.effective_ceph_namespace
+          fsName                                                   = local.effective_ceph_filesystem_ec.filesystem_name
+          pool                                                     = local.effective_ceph_filesystem_ec.ec_data_pool_name
+          "csi.storage.k8s.io/provisioner-secret-name"             = "rook-csi-cephfs-provisioner"
+          "csi.storage.k8s.io/provisioner-secret-namespace"        = local.effective_ceph_namespace
+          "csi.storage.k8s.io/controller-expand-secret-name"       = "rook-csi-cephfs-provisioner"
+          "csi.storage.k8s.io/controller-expand-secret-namespace"  = local.effective_ceph_namespace
+          "csi.storage.k8s.io/controller-publish-secret-name"      = "rook-csi-cephfs-provisioner"
           "csi.storage.k8s.io/controller-publish-secret-namespace" = local.effective_ceph_namespace
-          "csi.storage.k8s.io/node-stage-secret-name"             = "rook-csi-cephfs-node"
-          "csi.storage.k8s.io/node-stage-secret-namespace"        = local.effective_ceph_namespace
+          "csi.storage.k8s.io/node-stage-secret-name"              = "rook-csi-cephfs-node"
+          "csi.storage.k8s.io/node-stage-secret-namespace"         = local.effective_ceph_namespace
         }
         allowVolumeExpansion = true
         reclaimPolicy        = "Delete"

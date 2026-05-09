@@ -48,6 +48,7 @@ locals {
   ])
   external_ceph_username = trimspace(try(local.external_ceph.admin_secret, "")) != "" ? try(local.external_ceph.admin_username, "client.admin") : try(local.external_ceph.healthcheck_username, "client.healthchecker")
   external_ceph_secret   = trimspace(try(local.external_ceph.admin_secret, "")) != "" ? try(local.external_ceph.admin_secret, "") : try(local.external_ceph.healthcheck_secret, "")
+  external_ceph_ssh_host = trimspace(try(local.external_ceph.ssh_host, "")) != "" ? trimspace(local.external_ceph.ssh_host) : regexreplace(try(local.external_monitors[0].endpoint, ""), ":[0-9]+$", "")
 
   block_replicated = merge(
     {
@@ -169,13 +170,14 @@ resource "null_resource" "external_rbd_pools" {
 
   provisioner "local-exec" {
     command = format(
-      "%s ensure-rbd-pool --name %s --type %s --pg-num %s --size %s --min-size %s%s",
+      "%s ensure-rbd-pool --name %s --type %s --pg-num %s --size %s --min-size %s%s%s",
       "${path.module}/pve-ceph-external.sh",
       each.value.name,
       each.value.type,
       tostring(each.value.pg_num),
       tostring(each.value.size),
       tostring(each.value.min_size),
+      each.value.type == "ec" && local.external_ceph_ssh_host != "" ? format(" --ssh-host %s", local.external_ceph_ssh_host) : "",
       each.value.type == "ec" ? format(" --k %s --m %s", tostring(try(each.value.k, 0)), tostring(try(each.value.m, 0))) : ""
     )
   }

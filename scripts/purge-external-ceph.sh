@@ -15,7 +15,7 @@ Options:
   --ceph-constants <path>   Path to ceph_constants.tf.
 
 Environment:
-  CEPH_SSH_USER             SSH user for the Ceph monitor host. Default: root
+  CEPH_SSH_USER             SSH user for the Ceph SSH host. Default: root
 EOF
 }
 
@@ -92,14 +92,28 @@ hcl_block_bool_value() {
   printf '%s\n' "${value:-${default_value}}"
 }
 
-first_monitor_host() {
+endpoint_to_host() {
+  local endpoint="$1"
+
+  endpoint="${endpoint%%/*}"
+  if [[ "${endpoint}" =~ ^\[(.*)\]:[0-9]+$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  printf '%s\n' "${endpoint%:*}"
+}
+
+first_monitor_endpoint() {
   local file="$1"
   local value
 
   value="$(
     awk -F'"' '
-      /id[[:space:]]*=/ {
-        print $2
+      /^[[:space:]]*#/ {
+        next
+      }
+      /endpoint[[:space:]]*=/ {
+        print $4
         exit
       }
     ' "${file}"
@@ -109,13 +123,32 @@ first_monitor_host() {
     return 1
   fi
 
-  value="${value#mon.}"
   printf '%s\n' "${value}"
+}
+
+ceph_ssh_host_from_constants() {
+  local file="$1"
+  local external_body
+  local ssh_host
+  local endpoint
+
+  external_body="$(hcl_block_body "${file}" "ceph_external")"
+  ssh_host="$(hcl_block_string_value "${external_body}" "ssh_host" "")"
+  if [[ -n "${ssh_host}" ]]; then
+    printf '%s\n' "${ssh_host}"
+    return 0
+  fi
+
+  endpoint="$(first_monitor_endpoint "${file}" || true)"
+  if [[ -z "${endpoint}" ]]; then
+    return 1
+  fi
+  endpoint_to_host "${endpoint}"
 }
 
 remote_ceph() {
   local remote_cmd="$1"
-  ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ceph_ssh_user}@${ceph_monitor_host}" "${remote_cmd}"
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ceph_ssh_user}@${ceph_ssh_host}" "${remote_cmd}"
 }
 
 ceph_pool_exists() {
@@ -123,7 +156,7 @@ ceph_pool_exists() {
   local output
 
   if ! output="$(remote_ceph "ceph osd pool ls --format json")"; then
-    error "Failed to query Ceph pools while checking ${pool_name} on ${ceph_monitor_host}." >&2
+    error "Failed to query Ceph pools while checking ${pool_name} on ${ceph_ssh_host}." >&2
     exit 1
   fi
 
@@ -135,7 +168,7 @@ ceph_filesystem_exists() {
   local output
 
   if ! output="$(remote_ceph "ceph fs volume ls --format json")"; then
-    error "Failed to query Ceph filesystems while checking ${filesystem_name} on ${ceph_monitor_host}." >&2
+    error "Failed to query Ceph filesystems while checking ${filesystem_name} on ${ceph_ssh_host}." >&2
     exit 1
   fi
 
@@ -223,7 +256,7 @@ delete_cephfs_if_present() {
 cluster_name=""
 ceph_constants_path=""
 ceph_ssh_user="${CEPH_SSH_USER:-root}"
-ceph_monitor_host=""
+ceph_ssh_host=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -266,9 +299,9 @@ if [[ "${ceph_mode}" != "external" ]]; then
   exit 1
 fi
 
-ceph_monitor_host="$(first_monitor_host "${ceph_constants_path}" || true)"
-if [[ -z "${ceph_monitor_host}" ]]; then
-  error "Unable to derive a Ceph monitor host from ceph_constants.tf." >&2
+ceph_ssh_host="$(ceph_ssh_host_from_constants "${ceph_constants_path}" || true)"
+if [[ -z "${ceph_ssh_host}" ]]; then
+  error "Unable to derive a Ceph SSH host from ceph_external.ssh_host or the first monitor endpoint in ceph_constants.tf." >&2
   exit 1
 fi
 
@@ -325,7 +358,7 @@ if [[ "${filesystem_ec_enabled}" == "true" ]]; then
   cephfs_specs+=("${fs_ec_name}|${fs_ec_metadata_pool_name}|${fs_ec_default_data_pool_name}|${fs_ec_data_pool_name}")
 fi
 
-message "External Ceph purge requested for cluster ${cluster_name} on ${ceph_ssh_user}@${ceph_monitor_host}:"
+message "External Ceph purge requested for cluster ${cluster_name} on ${ceph_ssh_user}@${ceph_ssh_host}:"
 for summary in "${summaries[@]}"; do
   message "  - ${summary}"
 done

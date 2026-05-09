@@ -8,6 +8,7 @@ Usage:
 
 Options:
   --node <name>            Optional Proxmox node that owns the local Ceph management API.
+  --ssh-host <host>        Optional host/IP for Ceph CLI SSH operations. Defaults to --node.
   --name <pool-name>       Base pool name.
   --type <replicated|ec>   Pool type.
   --pg-num <n>             Initial PG count.
@@ -99,12 +100,12 @@ pool_exists() {
 }
 
 ceph_pool_exists_via_ssh() {
-  local node="$1"
+  local ssh_host="$1"
   local pool_name="$2"
   local ssh_user="${CEPH_SSH_USER:-root}"
   local payload
 
-  payload="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${node}" \
+  payload="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
     "ceph osd pool ls --format json")"
   printf '%s' "${payload}" | jq -er --arg pool_name "${pool_name}" '.[] | select(. == $pool_name)' >/dev/null
 }
@@ -246,44 +247,44 @@ set_pool_allow_ec_overwrites() {
 }
 
 set_pool_allow_ec_overwrites_via_ssh() {
-  local node="$1"
+  local ssh_host="$1"
   local pool_name="$2"
   local ssh_user="${CEPH_SSH_USER:-root}"
   local quoted_pool
 
   require_cmd ssh
   quoted_pool="$(shell_quote "${pool_name}")"
-  ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${node}" \
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
     "ceph osd pool set ${quoted_pool} allow_ec_overwrites true" 1>/dev/null
   echo "Pool ${pool_name} allow_ec_overwrites set to on via Ceph CLI."
 }
 
 run_ceph_via_ssh() {
-  local node="$1"
+  local ssh_host="$1"
   local ceph_args="$2"
   local ssh_user="${CEPH_SSH_USER:-root}"
 
   require_cmd ssh
-  ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${node}" \
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
     "ceph ${ceph_args}" 1>/dev/null
 }
 
 converge_ec_rbd_pool_via_ssh() {
-  local node="$1"
+  local ssh_host="$1"
   local pool_name="$2"
   local min_size="$3"
   local quoted_pool
 
   quoted_pool="$(shell_quote "${pool_name}")"
-  run_ceph_via_ssh "${node}" "osd pool application enable ${quoted_pool} rbd --yes-i-really-mean-it"
-  run_ceph_via_ssh "${node}" "osd pool set ${quoted_pool} min_size ${min_size}"
-  run_ceph_via_ssh "${node}" "osd pool set ${quoted_pool} pg_autoscale_mode on"
-  run_ceph_via_ssh "${node}" "osd pool set ${quoted_pool} allow_ec_overwrites true"
+  run_ceph_via_ssh "${ssh_host}" "osd pool application enable ${quoted_pool} rbd --yes-i-really-mean-it"
+  run_ceph_via_ssh "${ssh_host}" "osd pool set ${quoted_pool} min_size ${min_size}"
+  run_ceph_via_ssh "${ssh_host}" "osd pool set ${quoted_pool} pg_autoscale_mode on"
+  run_ceph_via_ssh "${ssh_host}" "osd pool set ${quoted_pool} allow_ec_overwrites true"
   echo "Pool ${pool_name} converged via Ceph CLI."
 }
 
 ensure_ec_rbd_pool_via_ssh() {
-  local node="$1"
+  local ssh_host="$1"
   local pool_name="$2"
   local pg_num="$3"
   local min_size="$4"
@@ -296,16 +297,16 @@ ensure_ec_rbd_pool_via_ssh() {
   quoted_pool="$(shell_quote "${pool_name}")"
   quoted_profile="$(shell_quote "${profile_name}")"
 
-  if ceph_pool_exists_via_ssh "${node}" "${pool_name}"; then
-    echo "Pool ${pool_name} already exists on ${node}, converging settings via Ceph CLI."
-    converge_ec_rbd_pool_via_ssh "${node}" "${pool_name}" "${min_size}"
+  if ceph_pool_exists_via_ssh "${ssh_host}" "${pool_name}"; then
+    echo "Pool ${pool_name} already exists on ${ssh_host}, converging settings via Ceph CLI."
+    converge_ec_rbd_pool_via_ssh "${ssh_host}" "${pool_name}" "${min_size}"
     return 0
   fi
 
-  run_ceph_via_ssh "${node}" "osd erasure-code-profile set ${quoted_profile} k=${k} m=${m} crush-failure-domain=host --force"
-  run_ceph_via_ssh "${node}" "osd pool create ${quoted_pool} ${pg_num} ${pg_num} erasure ${quoted_profile}"
-  echo "Pool ${pool_name} created on ${node} via Ceph CLI."
-  converge_ec_rbd_pool_via_ssh "${node}" "${pool_name}" "${min_size}"
+  run_ceph_via_ssh "${ssh_host}" "osd erasure-code-profile set ${quoted_profile} k=${k} m=${m} crush-failure-domain=host --force"
+  run_ceph_via_ssh "${ssh_host}" "osd pool create ${quoted_pool} ${pg_num} ${pg_num} erasure ${quoted_profile}"
+  echo "Pool ${pool_name} created on ${ssh_host} via Ceph CLI."
+  converge_ec_rbd_pool_via_ssh "${ssh_host}" "${pool_name}" "${min_size}"
 }
 
 converge_rbd_pool() {
@@ -325,6 +326,7 @@ converge_rbd_pool() {
 
 ensure_rbd_pool() {
   local node=""
+  local ssh_host=""
   local pool_name=""
   local pool_type=""
   local pg_num=""
@@ -337,6 +339,10 @@ ensure_rbd_pool() {
     case "$1" in
       --node)
         node="$2"
+        shift 2
+        ;;
+      --ssh-host)
+        ssh_host="$2"
         shift 2
         ;;
       --name)
@@ -407,7 +413,11 @@ ensure_rbd_pool() {
       exit 1
     fi
 
-    ensure_ec_rbd_pool_via_ssh "${node}" "${pool_name}" "${pg_num}" "${min_size}" "${k}" "${m}"
+    if [[ -z "${ssh_host}" ]]; then
+      ssh_host="${node}"
+    fi
+
+    ensure_ec_rbd_pool_via_ssh "${ssh_host}" "${pool_name}" "${pg_num}" "${min_size}" "${k}" "${m}"
     return 0
   fi
 

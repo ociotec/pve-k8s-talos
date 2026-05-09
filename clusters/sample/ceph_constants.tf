@@ -1,7 +1,7 @@
 locals {
-  ceph_mode = "internal"
-  ceph_namespace    = "rook-ceph"
-  ceph_cluster_name = "rook-ceph"
+  ceph_mode          = "internal"
+  ceph_namespace     = "rook-ceph"
+  ceph_cluster_name  = "rook-ceph"
   ceph_cluster_image = "quay.io/ceph/ceph:v20.2.1"
 
   ceph_name_prefix = "sample"
@@ -47,14 +47,39 @@ locals {
   # Values below are ignored in internal mode. Keep all external-cluster data here so
   # the Ceph scope still uses a single constants file per cluster.
   ceph_external = {
+    # Optional SSH host/IP for Ceph CLI operations such as erasure-coded RBD pool creation.
+    # Leave empty to use the first monitor endpoint without its port.
+    # Example: "192.0.2.11"
+    ssh_host = ""
+
+    # On a PVE Ceph node as root, list monitor IDs and v1 endpoints with:
+    # ceph mon dump
+    # Use each mon name as id and its v1 address without the trailing /rank, for example 10.0.0.11:6789.
+    # If jq is available:
+    # ceph mon dump -f json | jq -r '.mons[] | .name as $id | (.public_addrs.addrvec[] | select(.type == "v1").addr | sub("/.*$"; "")) as $addr | "      { id = \"\($id)\", endpoint = \"\($addr)\" },"'
     monitors = [
       { id = "a", endpoint = "10.0.0.11:6789" },
       { id = "b", endpoint = "10.0.0.12:6789" },
       { id = "c", endpoint = "10.0.0.13:6789" },
     ]
-    fsid                      = ""
-    admin_username            = "client.admin"
-    admin_secret              = ""
-    healthcheck_secret        = ""
+
+    # On a PVE Ceph node as root:
+    # ceph fsid
+    fsid = ""
+
+    # Use client.admin when Rook must create or reconcile external Ceph pools/filesystems.
+    # To inspect the configured admin identity:
+    # ceph auth get client.admin
+    admin_username = "client.admin"
+
+    # On a PVE Ceph node as root:
+    # ceph auth get-key client.admin
+    # This is required when external CephFS resources are enabled or when Rook must manage pools/filesystems.
+    admin_secret = ""
+
+    # On a PVE Ceph node as root:
+    # ceph auth get-or-create-key client.healthchecker mon 'allow r'
+    # Used only when admin_secret is empty; it is sufficient for basic external cluster health checks.
+    healthcheck_secret = ""
   }
 }
