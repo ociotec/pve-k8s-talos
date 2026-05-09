@@ -231,12 +231,21 @@ upsert_client() {
   realm_name="$1"
   client_identifier="$2"
   payload_file="$3"
+  output=""
 
   existing_id="$(client_uuid "$realm_name" "$client_identifier")"
   if [ -n "$existing_id" ]; then
     "$KCADM" update "clients/$existing_id" -r "$realm_name" -f "$payload_file"
   else
-    "$KCADM" create clients -r "$realm_name" -f "$payload_file"
+    if ! output="$("$KCADM" create clients -r "$realm_name" -f "$payload_file" 2>&1)"; then
+      existing_id="$(client_uuid "$realm_name" "$client_identifier")"
+      if [ -n "$existing_id" ]; then
+        "$KCADM" update "clients/$existing_id" -r "$realm_name" -f "$payload_file"
+      else
+        printf '%s\n' "$output" >&2
+        return 1
+      fi
+    fi
   fi
 }
 

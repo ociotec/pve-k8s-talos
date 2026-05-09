@@ -174,10 +174,10 @@ locals {
                 name            = try(client.groups_claim_name, "groups")
                 protocol_mapper = "oidc-group-membership-mapper"
                 config = {
-                  "access.token.claim"        = "false"
+                  "access.token.claim"        = "true"
                   "claim.name"                = try(client.groups_claim_name, "groups")
                   "full.path"                 = tostring(try(client.groups_claim_full_path, true))
-                  "id.token.claim"            = "false"
+                  "id.token.claim"            = "true"
                   "introspection.token.claim" = "true"
                   "jsonType.label"            = "String"
                   "multivalued"               = "true"

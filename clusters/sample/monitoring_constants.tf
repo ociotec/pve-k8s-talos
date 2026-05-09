@@ -24,9 +24,9 @@ locals {
 
   grafana_admin_user            = "admin"
   grafana_admin_password_length = 24
-  grafana_auth_keycloak_realm   = ""
-  grafana_auth_view_groups      = []
-  grafana_auth_edit_groups      = []
+  grafana_auth_keycloak_realm   = "company"
+  grafana_auth_view_groups      = ["monitoring-view"]
+  grafana_auth_edit_groups      = ["monitoring-edit"]
   grafana_auth_name             = "Keycloak"
   grafana_auth_scopes           = "openid profile email"
   grafana_auth_auto_login       = false

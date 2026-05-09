@@ -17,6 +17,7 @@ locals {
   postgres_storage_class = "${local.ceph_name_prefix}-rbd-ec"
   rancher_url            = "https://rancher.${local.domain}"
   portainer_url          = "https://portainer.${local.domain}"
+  grafana_url            = "https://grafana.${local.domain}"
   prometheus_url         = "https://prometheus.${local.domain}"
 
   tls_secrets = [
@@ -57,6 +58,28 @@ locals {
             {
               federation_name = "company-ldap"
               group_dn        = "CN=KC_K8S_ADMINS,OU=Groups,DC=company,DC=com"
+            },
+          ]
+        },
+        {
+          name          = "monitoring-view"
+          description   = "Grafana viewers"
+          extra_members = []
+          included_ldap_groups = [
+            {
+              federation_name = "company-ldap"
+              group_dn        = "CN=KC_MONITORING_VIEW,OU=Groups,DC=company,DC=com"
+            },
+          ]
+        },
+        {
+          name          = "monitoring-edit"
+          description   = "Grafana editors"
+          extra_members = []
+          included_ldap_groups = [
+            {
+              federation_name = "company-ldap"
+              group_dn        = "CN=KC_MONITORING_EDIT,OU=Groups,DC=company,DC=com"
             },
           ]
         },
@@ -139,6 +162,40 @@ locals {
                 "access.token.claim"        = "true"
                 "included.client.audience"  = "portainer"
                 "id.token.claim"            = "false"
+                "introspection.token.claim" = "false"
+              }
+            },
+          ]
+        },
+        {
+          client_id                    = "grafana"
+          name                         = "Grafana"
+          description                  = "OIDC client for Grafana login"
+          access_type                  = "confidential"
+          client_secret_length         = 32
+          login_allowed_groups         = ["monitoring-view", "monitoring-edit"]
+          valid_redirect_uris          = ["${local.grafana_url}/login/generic_oauth"]
+          post_logout_redirect_uris    = ["${local.grafana_url}/login"]
+          web_origins                  = [local.grafana_url]
+          base_url                     = local.grafana_url
+          admin_url                    = local.grafana_url
+          standard_flow_enabled        = true
+          direct_access_grants_enabled = false
+          service_accounts_enabled     = false
+          full_scope_allowed           = false
+          include_groups_claim         = true
+          groups_claim_name            = "groups"
+          groups_claim_full_path       = false
+          default_scopes               = ["profile", "email", "roles"]
+          optional_scopes              = ["offline_access"]
+          mappers = [
+            {
+              name            = "client-audience"
+              protocol_mapper = "oidc-audience-mapper"
+              config = {
+                "access.token.claim"        = "true"
+                "included.client.audience"  = "grafana"
+                "id.token.claim"            = "true"
                 "introspection.token.claim" = "false"
               }
             },
