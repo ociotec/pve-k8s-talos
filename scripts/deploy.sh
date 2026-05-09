@@ -31,6 +31,8 @@ Options:
   -p, --skip-platform       Skip platform services.
       --skip-portainer      Deprecated alias for --skip-platform.
   -m, --skip-monitoring     Skip monitoring stack (Prometheus, Loki, Grafana).
+--services-only       Skip Talos VM/root apply and deploy Kubernetes services only.
+                            Requires existing out/kubeconfig and out/talosconfig.
   -h, --help                Show this help message.
 
 Note:
@@ -50,6 +52,7 @@ skip_k8s_net=false
 skip_identity=false
 skip_platform=false
 skip_monitoring=false
+services_only=false
 gen_talos_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -87,6 +90,10 @@ while [[ $# -gt 0 ]]; do
       skip_monitoring=true
       shift
       ;;
+--services-only)
+      services_only=true
+      shift
+      ;;
     -v|--verbose)
       verbose=true
       shift
@@ -110,6 +117,11 @@ done
 
 if [[ "${purge_external_ceph}" == "true" && "${destroy_first}" != "true" ]]; then
   error "--purge-external-ceph requires --destroy or --destroy-only." >&2
+  exit 1
+fi
+
+if [[ "${services_only}" == "true" && "${destroy_first}" == "true" ]]; then
+  error "--services-only cannot be combined with --destroy or --destroy-only." >&2
   exit 1
 fi
 
@@ -915,6 +927,11 @@ if [[ "${purge_external_ceph}" == "true" ]]; then
     exit 1
   fi
 fi
+if [[ "${services_only}" == "true" ]]; then
+  message "Services-only requested; skipping Talos VM/root OpenTofu apply."
+  require_cluster_file "${cluster_talosconfig_path}" "generated talosconfig"
+  require_cluster_file "${cluster_kubeconfig_path}" "generated kubeconfig"
+else
 prepare_root_workspace
 run_gen_talos_assets
 run_tofu_init "${cluster_root_workspace}"
@@ -970,6 +987,7 @@ if [[ ! -f "${cluster_kubeconfig_path}" ]]; then
   message "Generated ${cluster_kubeconfig_path}"
 else
   message "kubeconfig already exists at ${cluster_kubeconfig_path}, skipping generation"
+fi
 fi
 
 export TALOSCONFIG="${cluster_talosconfig_path}"

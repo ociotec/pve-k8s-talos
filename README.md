@@ -549,6 +549,13 @@ Run with `-h` or `--help` to see help documentation. Common options:
 --skip-identity   Skip Keycloak and its PostgreSQL database.
 --skip-platform   Skip platform services.
 --skip-monitoring Skip Prometheus/Loki/Grafana stack.
+--services-only   Skip Talos VM/root apply and deploy Kubernetes services only.
+```
+
+For faster iterative deploys after the Talos VMs and kubeconfig already exist, use:
+
+```bash
+../../scripts/deploy.sh --services-only
 ```
 
 ### Inspect service URLs and credentials
