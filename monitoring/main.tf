@@ -372,7 +372,11 @@ locals {
   ]
   monitoring_other = [
     for m in local.monitoring_resources : m
-    if !contains(["Certificate", "Ingress", "Namespace"], try(m.kind, ""))
+    if !contains(["Certificate", "Ingress", "Namespace", "DaemonSet"], try(m.kind, ""))
+]
+  monitoring_daemonsets = [
+    for m in local.monitoring_resources : m
+    if try(m.kind, "") == "DaemonSet"
   ]
   extra_namespaces = [
     for m in local.monitoring_resources : m
@@ -634,6 +638,32 @@ resource "kubernetes_manifest" "monitoring_other" {
     kubernetes_secret_v1.prometheus_api_basic_auth,
     kubernetes_secret_v1.prometheus_oauth,
     kubernetes_secret_v1.prometheus_oauth_ca,
+  ]
+}
+
+resource "local_file" "monitoring_daemonsets" {
+  count = length(local.monitoring_daemonsets) > 0 ? 1 : 0
+
+  filename = "${path.module}/.generated-monitoring-daemonsets.yaml"
+  content  = join("\n---\n", [for m in local.monitoring_daemonsets : yamlencode(m)])
+}
+
+resource "null_resource" "monitoring_daemonsets" {
+  count = length(local.monitoring_daemonsets) > 0 ? 1 : 0
+
+  triggers = {
+    manifest_sha = sha256(local_file.monitoring_daemonsets[0].content)
+  }
+
+  provisioner "local-exec" {
+    command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl apply -f ${local_file.monitoring_daemonsets[0].filename}"
+  }
+
+  depends_on = [
+    kubernetes_manifest.monitoring_namespace,
+    kubernetes_manifest.extra_namespaces,
+    kubernetes_manifest.monitoring_other,
+    local_file.monitoring_daemonsets,
   ]
 }
 
