@@ -107,12 +107,48 @@ locals {
     for m in local.metrics_server : m
     if try(m.kind, "") == "APIService"
   ]
-  root_ca_crt_path    = local.root_ca_crt
-  root_ca_key_path    = can(regex("(?m)^\\s*root_ca_key\\s*=\\s*\"([^\"]*)\"", local.constants_source)[0]) ? regex("(?m)^\\s*root_ca_key\\s*=\\s*\"([^\"]*)\"", local.constants_source)[0] : ""
-  root_ca_crt_content = try(file(local.root_ca_crt_path), "")
-  root_ca_key_content = try(file(local.root_ca_key_path), "")
-  root_ca_common_name_value = can(regex("(?m)^\\s*root_ca_common_name\\s*=\\s*\"([^\"]*)\"", local.constants_source)[0]) ? regex("(?m)^\\s*root_ca_common_name\\s*=\\s*\"([^\"]*)\"", local.constants_source)[0] : local.domain
-  root_ca_organization_value = can(regex("(?m)^\\s*root_ca_organization\\s*=\\s*\"([^\"]*)\"", local.constants_source)[0]) ? regex("(?m)^\\s*root_ca_organization\\s*=\\s*\"([^\"]*)\"", local.constants_source)[0] : "Generated local CA"
+  coredns_domain_regex         = replace(local.domain, ".", "\\.")
+  coredns_corefile             = <<-EOF
+    .:53 {
+        errors
+        health {
+            lameduck 5s
+        }
+        ready
+        log . {
+            class error
+        }
+        prometheus :9153
+
+        template IN A ${local.domain} {
+            match ^(.+\.)?${local.coredns_domain_regex}\.$
+            answer "{{ .Name }} 30 IN A ${local.ingress_lb_ip}"
+            fallthrough
+        }
+
+        kubernetes cluster.local in-addr.arpa ip6.arpa {
+            pods insecure
+            fallthrough in-addr.arpa ip6.arpa
+            ttl 30
+        }
+        forward . /etc/resolv.conf {
+           max_concurrent 1000
+        }
+        cache 30 {
+           disable success cluster.local
+           disable denial cluster.local
+        }
+        loop
+        reload
+        loadbalance
+    }
+  EOF
+  root_ca_crt_path             = local.root_ca_crt
+  root_ca_key_path             = can(regex("(?m)^\\s*root_ca_key\\s*=\\s*\"([^\"]*)\"", local.constants_source)[0]) ? regex("(?m)^\\s*root_ca_key\\s*=\\s*\"([^\"]*)\"", local.constants_source)[0] : ""
+  root_ca_crt_content          = try(file(local.root_ca_crt_path), "")
+  root_ca_key_content          = try(file(local.root_ca_key_path), "")
+  root_ca_common_name_value    = can(regex("(?m)^\\s*root_ca_common_name\\s*=\\s*\"([^\"]*)\"", local.constants_source)[0]) ? regex("(?m)^\\s*root_ca_common_name\\s*=\\s*\"([^\"]*)\"", local.constants_source)[0] : local.domain
+  root_ca_organization_value   = can(regex("(?m)^\\s*root_ca_organization\\s*=\\s*\"([^\"]*)\"", local.constants_source)[0]) ? regex("(?m)^\\s*root_ca_organization\\s*=\\s*\"([^\"]*)\"", local.constants_source)[0] : "Generated local CA"
   root_ca_validity_hours_value = can(regex("(?m)^\\s*root_ca_validity_hours\\s*=\\s*([0-9]+)", local.constants_source)[0]) ? tonumber(regex("(?m)^\\s*root_ca_validity_hours\\s*=\\s*([0-9]+)", local.constants_source)[0]) : 876000
 
   root_ca_has_crt = local.root_ca_crt_path != "" && trimspace(local.root_ca_crt_content) != ""
@@ -238,8 +274,8 @@ resource "kubernetes_manifest" "ingress_nginx" {
 }
 
 resource "kubernetes_manifest" "ingress_nginx_namespace" {
-  for_each   = { for i, m in local.ingress_nginx_namespace : i => m }
-  manifest   = each.value
+  for_each = { for i, m in local.ingress_nginx_namespace : i => m }
+  manifest = each.value
 }
 
 resource "kubernetes_manifest" "metrics_server" {
@@ -267,6 +303,33 @@ resource "kubernetes_manifest" "metrics_server_apiservice" {
   ]
 }
 
+resource "local_file" "coredns_config" {
+  filename = "${path.module}/.generated-coredns.yaml"
+  content = yamlencode({
+    apiVersion = "v1"
+    kind       = "ConfigMap"
+    metadata = {
+      name      = "coredns"
+      namespace = "kube-system"
+    }
+    data = {
+      Corefile = local.coredns_corefile
+    }
+  })
+}
+
+resource "null_resource" "coredns_reload" {
+  triggers = {
+    corefile_sha = sha256(local.coredns_corefile)
+  }
+
+  provisioner "local-exec" {
+    command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl apply -f ${local_file.coredns_config.filename} && KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n kube-system rollout restart deploy/coredns && KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n kube-system rollout status deploy/coredns --timeout=180s"
+  }
+
+  depends_on = [local_file.coredns_config]
+}
+
 resource "null_resource" "ingress_nginx_webhook_ready" {
   depends_on = [kubernetes_manifest.ingress_nginx]
 
@@ -280,7 +343,7 @@ resource "null_resource" "metrics_server_ready" {
 
   provisioner "local-exec" {
     interpreter = ["/bin/bash", "-c"]
-    command = <<-EOT
+    command     = <<-EOT
       set -euo pipefail
       kubeconfig="${abspath("${path.module}/${var.kubeconfig_path}")}"
 
@@ -383,7 +446,7 @@ resource "null_resource" "cert_manager_webhook_ready" {
 
   provisioner "local-exec" {
     interpreter = ["/bin/bash", "-c"]
-    command = <<-EOT
+    command     = <<-EOT
       set -euo pipefail
       kubeconfig="${abspath("${path.module}/${var.kubeconfig_path}")}"
 
@@ -419,7 +482,7 @@ resource "null_resource" "metallb_controller_ready" {
 
   provisioner "local-exec" {
     interpreter = ["/bin/bash", "-c"]
-    command = <<-EOT
+    command     = <<-EOT
       set -euo pipefail
       kubeconfig="${abspath("${path.module}/${var.kubeconfig_path}")}"
 
