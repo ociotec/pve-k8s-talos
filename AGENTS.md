@@ -83,6 +83,7 @@ For any non-trivial change:
 
 - Never commit real secrets or private keys.
 - Keep cert files under `clusters/<cluster>/certs/` and out of version control unless explicitly intended.
+- Do not use real private URLs, private domains, internal hostnames, or private IPs in documentation, `clusters/sample`, shared modules, scripts, templates, or any other versioned repository content. Use reserved/example values instead (`example.com`, `example.net`, `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`). Real private endpoints are only allowed in ignored files under real cluster directories such as `clusters/<cluster>/`.
 - Do not edit `clusters/sample` as if it were an active cluster runtime; use it as template/reference.
 - Prefer additive, reversible edits; call out destructive implications explicitly.
 
