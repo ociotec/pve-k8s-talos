@@ -63,6 +63,19 @@ data:
       - job_name: prometheus
         static_configs:
           - targets: ["localhost:9090"]
+%{ if length(ceph_prometheus_targets) > 0 ~}
+
+      - job_name: ceph-mgr
+        scheme: ${ceph_prometheus_scheme}
+        static_configs:
+          - targets:
+%{ for target in ceph_prometheus_targets ~}
+              - "${target}"
+%{ endfor ~}
+            labels:
+              cluster: "${ceph_cluster_name}"
+              namespace: "${ceph_namespace}"
+%{ endif ~}
 
       - job_name: kubernetes-apiservers
         scheme: https

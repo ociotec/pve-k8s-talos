@@ -58,6 +58,13 @@ locals {
   prometheus_api_basic_auth_secret_name_value     = try(local.prometheus_api_basic_auth_secret_name, "prometheus-api-basic-auth")
   prometheus_api_basic_auth_user                  = "prometheus-external"
   prometheus_api_basic_auth_password_length_value = try(local.prometheus_api_basic_auth_password_length, 32)
+  ceph_mode_value                                 = try(local.ceph_mode, "internal")
+  ceph_external_value                             = try(local.ceph_external, {})
+  ceph_prometheus_scheme_value                    = trimspace(try(local.ceph_external_value.prometheus_scheme, "http"))
+  ceph_prometheus_targets = local.ceph_mode_value == "external" ? distinct(compact([
+    for target in try(local.ceph_external_value.prometheus_targets, []) :
+    trimsuffix(replace(replace(trimspace(target), "http://", ""), "https://", ""), "/")
+  ])) : []
 
   grafana_auth_keycloak_realm_value = trimspace(try(local.grafana_auth_keycloak_realm, ""))
   grafana_auth_enabled              = local.grafana_auth_keycloak_realm_value != ""
@@ -181,7 +188,7 @@ locals {
     if !contains(keys(try(local.identity_realm_groups[local.prometheus_auth_keycloak_realm_value], {})), group_name)
   ] : []
   available_identity_realms = keys(local.identity_oidc_metadata)
-  monitoring_namespace = yamldecode(file("${path.module}/namespace.yaml"))
+  monitoring_namespace      = yamldecode(file("${path.module}/namespace.yaml"))
   prometheus_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/prometheus.yaml", {
       storage_class                          = local.storage_class
@@ -209,6 +216,10 @@ locals {
       prometheus_oauth2_proxy_cpu_limit      = local.prometheus_oauth2_proxy_cpu_limit_value
       prometheus_oauth2_proxy_mem_request    = local.prometheus_oauth2_proxy_mem_request_value
       prometheus_oauth2_proxy_mem_limit      = local.prometheus_oauth2_proxy_mem_limit_value
+      ceph_prometheus_targets                = local.ceph_prometheus_targets
+      ceph_prometheus_scheme                 = local.ceph_prometheus_scheme_value
+      ceph_cluster_name                      = try(local.ceph_cluster_name, "rook-ceph")
+      ceph_namespace                         = try(local.ceph_namespace, "rook-ceph")
     })) :
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
@@ -373,7 +384,7 @@ locals {
   monitoring_other = [
     for m in local.monitoring_resources : m
     if !contains(["Certificate", "Ingress", "Namespace", "DaemonSet"], try(m.kind, ""))
-]
+  ]
   monitoring_daemonsets = [
     for m in local.monitoring_resources : m
     if try(m.kind, "") == "DaemonSet"
@@ -468,6 +479,13 @@ check "prometheus_auth_groups" {
   assert {
     condition     = !local.prometheus_auth_enabled || (length(local.prometheus_auth_effective_allowed_groups) > 0 && length(local.missing_prometheus_auth_group_definitions) == 0)
     error_message = format("Prometheus auth groups must exist in the selected Keycloak realm. Missing logical groups: %s", join(", ", local.missing_prometheus_auth_group_definitions))
+  }
+}
+
+check "ceph_prometheus_scheme" {
+  assert {
+    condition     = contains(["http", "https"], local.ceph_prometheus_scheme_value)
+    error_message = format("ceph_external.prometheus_scheme must be \"http\" or \"https\", got %q", local.ceph_prometheus_scheme_value)
   }
 }
 

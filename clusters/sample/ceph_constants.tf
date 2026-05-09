@@ -63,6 +63,18 @@ locals {
       { id = "c", endpoint = "10.0.0.13:6789" },
     ]
 
+    # Optional ceph-mgr Prometheus endpoints for external Ceph pool/PG dashboards.
+    # On a Ceph node or from rook-ceph-tools:
+    # ceph mgr services -f json
+    # Use host:port targets without scheme; set prometheus_scheme if the mgr endpoint uses HTTPS.
+    # List every mgr endpoint when possible; standby mgrs may return empty scrapes until failover.
+    prometheus_scheme = "http"
+    prometheus_targets = [
+      "10.0.0.11:9283",
+      "10.0.0.12:9283",
+      "10.0.0.13:9283",
+    ]
+
     # On a PVE Ceph node as root:
     # ceph fsid
     fsid = ""
