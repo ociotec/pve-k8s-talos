@@ -157,25 +157,43 @@ The environment root CA should be declared with `root_ca_crt` in `k8s_net_consta
 
 The generated machine patch disables Talos' external service discovery registry by default via `talos.discovery_service_disabled = "true"`, which avoids proxy-related `cluster.DiscoveryServiceController` errors in environments that don't need the public discovery service. Set it to `"false"` if you intentionally need Talos public discovery.
 
-To configure container registry mirrors for Talos, define `talos.registry` in `constants.auto.tfvars`. The generator renders `machine.registries.mirrors` from the `mirrors` map, applies the same `skipFallback`/`overridePath` values to every mirror, and renders `machine.registries.config.*.tls.insecureSkipVerify` from the global TLS flag for each unique mirror host.
+To configure container registry mirrors for Talos, define `talos.registry` in `constants.auto.tfvars`. The generator renders `machine.registries.mirrors` from the `mirrors` map, applies the same `skipFallback`/`overridePath` values to every mirror, renders optional `username`/`password` auth for each unique mirror host, and renders `machine.registries.config.*.tls.insecureSkipVerify` from the global TLS flag.
+
+This repository currently pulls images from these upstream registries:
+
+- `docker.io` / `registry-1.docker.io`
+- `gcr.io`
+- `ghcr.io`
+- `quay.io`
+- `registry.k8s.io`
+- `factory.talos.dev`
+
+If your registry manager exposes a single group endpoint that aggregates all required proxies and private images, point every mirror to that group. For Nexus repository URLs, include the Docker API suffix `/v2` in the endpoint and keep `override_path = "true"` so Talos does not append another `/v2`. Registry authentication is optional; leave both `username` and `password` empty to render no auth block.
 
 ```hcl
 "talos" = {
   # ...
   "registry" = {
     "mirrors" = {
-      "docker.io"            = "https://docker-cscc-public.cscc.gmv.es"
-      "registry-1.docker.io" = "https://docker-cscc-public.cscc.gmv.es"
-      "*"                    = "https://docker-cscc-public.cscc.gmv.es"
+      "docker.io"            = "https://registry.example.com/repository/docker-public/v2"
+      "registry-1.docker.io" = "https://registry.example.com/repository/docker-public/v2"
+      "gcr.io"               = "https://registry.example.com/repository/docker-public/v2"
+      "ghcr.io"              = "https://registry.example.com/repository/docker-public/v2"
+      "quay.io"              = "https://registry.example.com/repository/docker-public/v2"
+      "registry.k8s.io"      = "https://registry.example.com/repository/docker-public/v2"
+      "factory.talos.dev"    = "https://registry.example.com/repository/docker-public/v2"
     }
     "skip_fallback"    = "true"
-    "override_path"    = "false"
+    "override_path"    = "true"
     "ignore_TLS_error" = "false"
+    # Optional. Leave both empty to disable registry authentication.
+    "username"         = "registry-user"
+    "password"         = "registry-password"
   }
 }
 ```
 
-That example renders Talos YAML using `skipFallback: true`, `overridePath: false`, and `insecureSkipVerify: false`. Then regenerate Talos assets.
+That example renders Talos YAML using `skipFallback: true`, `overridePath: true`, registry auth, and `insecureSkipVerify: false`. Then regenerate Talos assets.
 
 ### Create the infrastructre
 

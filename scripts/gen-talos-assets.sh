@@ -349,6 +349,9 @@ parse_talos_registry_settings() {
 
     {
       line = $0
+      if (line ~ /^[[:space:]]*#/) {
+        next
+      }
       delta = brace_delta(line)
     }
 
@@ -405,7 +408,7 @@ parse_talos_registry_settings() {
           next
         }
 
-        if (match(line, /"(skip_fallback|override_path|ignore_TLS_error)"[[:space:]]*=[[:space:]]*("?[^"}[:space:]]+"?)/)) {
+        if (match(line, /"(skip_fallback|override_path|ignore_TLS_error|username|password)"[[:space:]]*=[[:space:]]*("[^"]*"|[^"}[:space:]]+)/)) {
           pair = substr(line, RSTART, RLENGTH)
           key = pair
           sub(/^[[:space:]]*"/, "", key)
@@ -533,6 +536,8 @@ fi
 registry_skip_fallback="true"
 registry_override_path="false"
 registry_ignore_tls_error="false"
+registry_username=""
+registry_password=""
 declare -A registry_mirror_urls=()
 
 while IFS='|' read -r kind key value; do
@@ -549,6 +554,12 @@ while IFS='|' read -r kind key value; do
           ;;
         ignore_TLS_error)
           registry_ignore_tls_error="${value}"
+          ;;
+        username)
+          registry_username="${value}"
+          ;;
+        password)
+          registry_password="${value}"
           ;;
       esac
       ;;
@@ -574,6 +585,17 @@ for registry_boolean_name in \
       ;;
   esac
 done
+
+if [[ -n "${registry_username}" && -z "${registry_password}" ]]; then
+  echo "Error: talos.registry.username is set but talos.registry.password is empty." >&2
+  echo "Fix: set both talos.registry.username and talos.registry.password, or remove both." >&2
+  exit 1
+fi
+if [[ -z "${registry_username}" && -n "${registry_password}" ]]; then
+  echo "Error: talos.registry.password is set but talos.registry.username is empty." >&2
+  echo "Fix: set both talos.registry.username and talos.registry.password, or remove both." >&2
+  exit 1
+fi
 
 trusted_roots_patch_path="${patch_dir}/trusted-roots-root-ca.yaml"
 tls_source=""
@@ -791,6 +813,11 @@ if [[ ${#registry_mirror_urls[@]} -gt 0 ]]; then
   machine_registries_section+=$'\n    config:'
   while IFS= read -r registry_host; do
     machine_registries_section+=$'\n      "'"$(yaml_escape "${registry_host}")"$'":'
+    if [[ -n "${registry_username}" ]]; then
+      machine_registries_section+=$'\n        auth:'
+      machine_registries_section+=$'\n          username: "'"$(yaml_escape "${registry_username}")"$'"'
+      machine_registries_section+=$'\n          password: "'"$(yaml_escape "${registry_password}")"$'"'
+    fi
     machine_registries_section+=$'\n        tls:'
     machine_registries_section+=$'\n          insecureSkipVerify: '"${registry_ignore_tls_error}"
   done < <(printf "%s\n" "${!registry_config_hosts[@]}" | sort)
