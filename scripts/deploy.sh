@@ -519,7 +519,7 @@ wait_for_deployments_ready() {
   local deployment_name
 
   for deployment_name in "${deployments[@]}"; do
-    kubectl -n "${namespace}" rollout status "deploy/${deployment_name}" --timeout="${timeout}"
+    wait_for_rollout_ready "${namespace}" "deploy/${deployment_name}" "${timeout}"
   done
 }
 
@@ -531,8 +531,38 @@ wait_for_daemonsets_ready() {
   local daemonset_name
 
   for daemonset_name in "${daemonsets[@]}"; do
-    kubectl -n "${namespace}" rollout status "daemonset/${daemonset_name}" --timeout="${timeout}"
+    wait_for_rollout_ready "${namespace}" "daemonset/${daemonset_name}" "${timeout}"
   done
+}
+
+wait_for_rollout_ready() {
+  local namespace="$1"
+  local resource="$2"
+  local timeout="${3:-600s}"
+  local output
+
+  if output="$(kubectl -n "${namespace}" rollout status "${resource}" --timeout="${timeout}" 2>&1)"; then
+    if [[ "${verbose}" == "true" && -n "${output}" ]]; then
+      printf '%s\n' "${output}"
+    fi
+    return 0
+  fi
+
+  if printf '%s\n' "${output}" | grep -q 'watch ended with error'; then
+    message "warning: Kubernetes watch ended while waiting for ${namespace}/${resource}; checking rollout state once more."
+    if output="$(kubectl -n "${namespace}" rollout status "${resource}" --timeout=30s 2>&1)"; then
+      if [[ "${verbose}" == "true" && -n "${output}" ]]; then
+        printf '%s\n' "${output}"
+      fi
+      return 0
+    fi
+  fi
+
+  error "Rollout failed or timed out for ${namespace}/${resource}." >&2
+  if [[ -n "${output}" ]]; then
+    printf '%s\n' "${output}" >&2
+  fi
+  exit 1
 }
 
 print_job_failure_context() {
@@ -575,7 +605,7 @@ wait_for_job_complete() {
 
     failed_status="$(kubectl -n "${namespace}" get job "${job_name}" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)"
     bad_pods="$(kubectl -n "${namespace}" get pods -l "job-name=${job_name}" --no-headers 2>/dev/null \
-      | awk '$3 ~ /^(CrashLoopBackOff|ImagePullBackOff|ErrImagePull)$/ || ($4 + 0) > 0 { print $1 " (" $3 ", restarts=" $4 ")" }' || true)"
+      | awk '$3 ~ /^(CrashLoopBackOff|ImagePullBackOff|ErrImagePull|Error|Failed)$/ { print $1 " (" $3 ", restarts=" $4 ")" }' || true)"
     if [[ "${failed_status}" == "True" || -n "${bad_pods}" ]]; then
       if [[ -n "${bad_pods}" ]]; then
         error "Detected failing pods for job ${namespace}/${job_name}: ${bad_pods}" >&2
@@ -1020,7 +1050,7 @@ else
   if [[ "${ceph_mode_value}" == "external" ]]; then
     message "Restarting Rook Ceph CSI RBD provisioner to reload external Ceph monitor configuration..."
     kubectl -n rook-ceph rollout restart deploy/csi-rbdplugin-provisioner 1>/dev/null
-    kubectl -n rook-ceph rollout status deploy/csi-rbdplugin-provisioner --timeout=180s 1>/dev/null
+    wait_for_rollout_ready "rook-ceph" "deploy/csi-rbdplugin-provisioner" "180s"
   fi
   kubectl -n rook-ceph get storageclasses.storage.k8s.io
 fi
