@@ -20,6 +20,79 @@ data:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
+  name: grafana-postgres-data
+  namespace: monitoring
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ${grafana_postgres_storage_class}
+  resources:
+    requests:
+      storage: ${grafana_postgres_pvc_size}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana-postgres
+  namespace: monitoring
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: grafana-postgres
+  template:
+    metadata:
+      labels:
+        app: grafana-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:${grafana_postgres_image_tag}
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-db
+                  key: database
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-db
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-db
+                  key: password
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: grafana-postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-postgres
+  namespace: monitoring
+spec:
+  selector:
+    app: grafana-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
   name: grafana-data
   namespace: monitoring
 spec:
@@ -54,6 +127,19 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:${grafana_postgres_image_tag}
+          command:
+            - sh
+            - -c
+            - until pg_isready -h grafana-postgres -p 5432 -U "$POSTGRES_USER"; do sleep 5; done
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-db
+                  key: username
       containers:
         - name: grafana
           image: grafana/grafana:${grafana_image_tag}
@@ -86,6 +172,27 @@ spec:
                   key: admin-password
             - name: GF_SERVER_ROOT_URL
               value: https://${grafana_hostname}
+            - name: GF_DATABASE_TYPE
+              value: postgres
+            - name: GF_DATABASE_HOST
+              value: grafana-postgres:5432
+            - name: GF_DATABASE_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-db
+                  key: database
+            - name: GF_DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-db
+                  key: username
+            - name: GF_DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-db
+                  key: password
+            - name: GF_DATABASE_SSL_MODE
+              value: disable
 %{ if grafana_auth_enabled ~}
             - name: GF_AUTH_GENERIC_OAUTH_ENABLED
               value: "true"

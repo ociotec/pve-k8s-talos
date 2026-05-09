@@ -87,6 +87,7 @@ locals {
     data.terraform_remote_state.identity[0].outputs.keycloak_oidc_client_secrets,
     {}
   ) : {}
+  available_identity_realms = keys(local.identity_oidc_metadata)
   rancher_oidc_issuer = local.rancher_auth_enabled ? try(
     local.identity_oidc_metadata[local.rancher_auth_keycloak_realm_value].issuer_url,
     ""
@@ -383,22 +384,24 @@ check "rancher_auth_access_mode_valid" {
 check "rancher_auth_identity_outputs" {
   assert {
     condition = !local.rancher_auth_enabled || (
+      contains(local.available_identity_realms, local.rancher_auth_keycloak_realm_value) &&
       trimspace(local.rancher_oidc_issuer) != "" &&
       trimspace(local.rancher_oidc_client_id) != "" &&
       trimspace(local.rancher_oidc_client_secret) != ""
     )
-    error_message = "Rancher auth automation requires a populated identity workspace with Keycloak OIDC metadata and secret for the selected realm."
+    error_message = format("Rancher auth automation requires identity state with realm %q and a confidential rancher OIDC client. Available realms: %s", local.rancher_auth_keycloak_realm_value, join(", ", local.available_identity_realms))
   }
 }
 
 check "portainer_auth_identity_outputs" {
   assert {
     condition = !local.portainer_auth_enabled || (
+      contains(local.available_identity_realms, local.portainer_auth_keycloak_realm_value) &&
       trimspace(local.portainer_oidc_issuer) != "" &&
       trimspace(local.portainer_oidc_client_id) != "" &&
       trimspace(local.portainer_oidc_client_secret) != ""
     )
-    error_message = "Portainer auth automation requires a populated identity workspace with Keycloak OIDC metadata and secret for the portainer client in the selected realm."
+    error_message = format("Portainer auth automation requires identity state with realm %q and a confidential portainer OIDC client. Available realms: %s", local.portainer_auth_keycloak_realm_value, join(", ", local.available_identity_realms))
   }
 }
 

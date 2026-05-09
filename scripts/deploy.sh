@@ -31,7 +31,7 @@ Options:
   -p, --skip-platform       Skip platform services.
       --skip-portainer      Deprecated alias for --skip-platform.
   -m, --skip-monitoring     Skip monitoring stack (Prometheus, Loki, Grafana).
---services-only       Skip Talos VM/root apply and deploy Kubernetes services only.
+      --services-only       Skip Talos VM/root apply and deploy Kubernetes services only.
                             Requires existing out/kubeconfig and out/talosconfig.
   -h, --help                Show this help message.
 
@@ -90,7 +90,7 @@ while [[ $# -gt 0 ]]; do
       skip_monitoring=true
       shift
       ;;
---services-only)
+    --services-only)
       services_only=true
       shift
       ;;
@@ -932,62 +932,62 @@ if [[ "${services_only}" == "true" ]]; then
   require_cluster_file "${cluster_talosconfig_path}" "generated talosconfig"
   require_cluster_file "${cluster_kubeconfig_path}" "generated kubeconfig"
 else
-prepare_root_workspace
-run_gen_talos_assets
-run_tofu_init "${cluster_root_workspace}"
-if [[ "${destroy_first}" == "true" ]]; then
-  if state_dir_has_state "${cluster_root_workspace}"; then
-    message "Regenerating Talos assets required for destroy..."
-    run_gen_talos_assets
-    run_tofu_init "${cluster_root_workspace}"
-    message "Destroying Talos cluster VMs..."
-    run tofu -chdir="${cluster_root_workspace}" destroy -auto-approve -refresh=false
-    message "Done."
+  prepare_root_workspace
+  run_gen_talos_assets
+  run_tofu_init "${cluster_root_workspace}"
+  if [[ "${destroy_first}" == "true" ]]; then
+    if state_dir_has_state "${cluster_root_workspace}"; then
+      message "Regenerating Talos assets required for destroy..."
+      run_gen_talos_assets
+      run_tofu_init "${cluster_root_workspace}"
+      message "Destroying Talos cluster VMs..."
+      run tofu -chdir="${cluster_root_workspace}" destroy -auto-approve -refresh=false
+      message "Done."
+    else
+      message "No root OpenTofu state found for cluster ${cluster_name}; skipping tofu destroy."
+    fi
+
+    if [[ "${purge_external_ceph}" == "true" ]]; then
+      "${script_dir}/purge-external-ceph.sh" \
+        --cluster-name "${cluster_name}" \
+        --ceph-constants "${cluster_ceph_constants_path}"
+    fi
+
+    message "Removing generated cluster runtime workspace at ${cluster_out_dir}..."
+    purge_cluster_out_dir
+
+    if [[ "${destroy_only}" == "true" ]]; then
+      message "Destroy-only requested; exiting without deploying."
+      exit 0
+    fi
+  fi
+
+  message "Deploying the Talos cluster ${cluster_name} (PVE VMs creation, Talos cluster initialization, k8s bootstrapping)..."
+  run_gen_talos_assets
+  run_tofu_init "${cluster_root_workspace}"
+  run tofu -chdir="${cluster_root_workspace}" apply -auto-approve
+
+  if [[ ! -f "${cluster_talosconfig_path}" ]]; then
+    if ! tofu -chdir="${cluster_root_workspace}" output -raw talosconfig > "${cluster_talosconfig_path}" 2>/dev/null; then
+      error "Failed to write talosconfig from tofu outputs." >&2
+      exit 1
+    fi
+    chmod 600 "${cluster_talosconfig_path}"
+    message "Generated ${cluster_talosconfig_path}"
   else
-    message "No root OpenTofu state found for cluster ${cluster_name}; skipping tofu destroy."
+    message "talosconfig already exists at ${cluster_talosconfig_path}, skipping generation"
   fi
 
-  if [[ "${purge_external_ceph}" == "true" ]]; then
-    "${script_dir}/purge-external-ceph.sh" \
-      --cluster-name "${cluster_name}" \
-      --ceph-constants "${cluster_ceph_constants_path}"
+  if [[ ! -f "${cluster_kubeconfig_path}" ]]; then
+    if ! tofu -chdir="${cluster_root_workspace}" output -raw kubeconfig > "${cluster_kubeconfig_path}" 2>/dev/null; then
+      error "Failed to write kubeconfig from tofu outputs." >&2
+      exit 1
+    fi
+    chmod 600 "${cluster_kubeconfig_path}"
+    message "Generated ${cluster_kubeconfig_path}"
+  else
+    message "kubeconfig already exists at ${cluster_kubeconfig_path}, skipping generation"
   fi
-
-  message "Removing generated cluster runtime workspace at ${cluster_out_dir}..."
-  purge_cluster_out_dir
-
-  if [[ "${destroy_only}" == "true" ]]; then
-    message "Destroy-only requested; exiting without deploying."
-    exit 0
-  fi
-fi
-
-message "Deploying the Talos cluster ${cluster_name} (PVE VMs creation, Talos cluster initialization, k8s bootstrapping)..."
-run_gen_talos_assets
-run_tofu_init "${cluster_root_workspace}"
-run tofu -chdir="${cluster_root_workspace}" apply -auto-approve
-
-if [[ ! -f "${cluster_talosconfig_path}" ]]; then
-  if ! tofu -chdir="${cluster_root_workspace}" output -raw talosconfig > "${cluster_talosconfig_path}" 2>/dev/null; then
-    error "Failed to write talosconfig from tofu outputs." >&2
-    exit 1
-  fi
-  chmod 600 "${cluster_talosconfig_path}"
-  message "Generated ${cluster_talosconfig_path}"
-else
-  message "talosconfig already exists at ${cluster_talosconfig_path}, skipping generation"
-fi
-
-if [[ ! -f "${cluster_kubeconfig_path}" ]]; then
-  if ! tofu -chdir="${cluster_root_workspace}" output -raw kubeconfig > "${cluster_kubeconfig_path}" 2>/dev/null; then
-    error "Failed to write kubeconfig from tofu outputs." >&2
-    exit 1
-  fi
-  chmod 600 "${cluster_kubeconfig_path}"
-  message "Generated ${cluster_kubeconfig_path}"
-else
-  message "kubeconfig already exists at ${cluster_kubeconfig_path}, skipping generation"
-fi
 fi
 
 export TALOSCONFIG="${cluster_talosconfig_path}"
@@ -1117,14 +1117,14 @@ else
   message "Restarting Grafana to reload provisioned dashboards..."
   kubectl -n monitoring rollout restart deploy/grafana 1>/dev/null
   message "Waiting for monitoring PVCs, workloads, and endpoints to become ready..."
-  monitoring_deployments=(grafana loki prometheus kube-state-metrics)
-  monitoring_daemonsets=(node-exporter)
-  monitoring_services=(grafana loki prometheus kube-state-metrics node-exporter)
+  monitoring_deployments=(grafana-postgres grafana loki prometheus kube-state-metrics)
+  monitoring_daemonsets=(node-exporter promtail)
+  monitoring_services=(grafana-postgres grafana loki prometheus kube-state-metrics node-exporter)
   if kubectl -n monitoring get deploy/prometheus-oauth2-proxy >/dev/null 2>&1; then
     monitoring_deployments+=(prometheus-oauth2-proxy)
     monitoring_services+=(prometheus-oauth2-proxy)
   fi
-  wait_for_pvcs_bound "monitoring" "600" "grafana-data" "loki-data" "prometheus-data"
+  wait_for_pvcs_bound "monitoring" "600" "grafana-postgres-data" "grafana-data" "loki-data" "prometheus-data"
   wait_for_deployments_ready "monitoring" "600s" "${monitoring_deployments[@]}"
   wait_for_daemonsets_ready "monitoring" "600s" "${monitoring_daemonsets[@]}"
   wait_for_service_endpoints "monitoring" "600" "${monitoring_services[@]}"

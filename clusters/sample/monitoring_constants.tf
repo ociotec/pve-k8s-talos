@@ -18,20 +18,26 @@ locals {
   grafana_image_tag            = "13.0.1"
   prometheus_image_tag         = "v3.11.2"
   loki_image_tag               = "3.7.1"
-  promtail_image_tag           = "3.7.1"
+  promtail_image_tag           = "3.6.10"
   kube_state_metrics_image_tag = "v2.18.0"
   node_exporter_image_tag      = "v1.11.1"
 
-  grafana_admin_user            = "admin"
-  grafana_admin_password_length = 24
-  grafana_auth_keycloak_realm   = "company"
-  grafana_auth_view_groups      = ["monitoring-view"]
-  grafana_auth_edit_groups      = ["monitoring-edit"]
-  grafana_auth_name             = "Keycloak"
-  grafana_auth_scopes           = "openid profile email"
-  grafana_auth_auto_login       = false
-  grafana_auth_allow_sign_up    = true
-  grafana_auth_ca_secret_name   = "grafana-oauth-ca"
+  grafana_admin_user               = "admin"
+  grafana_admin_password_length    = 24
+  grafana_db_name                  = "grafana"
+  grafana_db_username              = "grafana"
+  grafana_postgres_image_tag       = "18.3"
+  grafana_postgres_pvc_size        = "8Gi"
+  grafana_postgres_password_length = 24
+  grafana_postgres_storage_class   = local.storage_class
+  grafana_auth_keycloak_realm      = "company"
+  grafana_auth_view_groups         = ["monitoring-view"]
+  grafana_auth_edit_groups         = ["monitoring-edit"]
+  grafana_auth_name                = "Keycloak"
+  grafana_auth_scopes              = "openid profile email"
+  grafana_auth_auto_login          = false
+  grafana_auth_allow_sign_up       = true
+  grafana_auth_ca_secret_name      = "grafana-oauth-ca"
 
   prometheus_auth_keycloak_realm            = ""
   prometheus_auth_allowed_groups            = []

@@ -69,11 +69,20 @@ locals {
   grafana_auth_allow_sign_up_value  = try(local.grafana_auth_allow_sign_up, true)
   grafana_auth_ca_secret_name_value = try(local.grafana_auth_ca_secret_name, "grafana-oauth-ca")
   grafana_oauth_secret_name_value   = "grafana-oauth"
-  grafana_oauth_redirect_uri        = format("https://%s/login/generic_oauth", local.grafana_hostname)
-  grafana_oauth_post_logout_uri     = format("https://%s/login", local.grafana_hostname)
-  grafana_auth_ca_content           = local.grafana_auth_enabled ? try(file(local.root_ca_crt), "") : ""
-  grafana_auth_ca_enabled           = trimspace(local.grafana_auth_ca_content) != ""
-  monitoring_keycloak_auth_enabled  = local.grafana_auth_enabled || local.prometheus_auth_enabled
+  grafana_db_name_value             = try(local.grafana_db_name, "grafana")
+  grafana_db_username_value         = try(local.grafana_db_username, "grafana")
+  grafana_postgres_image_tag_value  = try(local.grafana_postgres_image_tag, "18.3")
+  grafana_postgres_pvc_size_value   = try(local.grafana_postgres_pvc_size, "8Gi")
+  grafana_postgres_storage_class_value = try(
+    local.grafana_postgres_storage_class,
+    local.storage_class
+  )
+  grafana_postgres_password_length_value = try(local.grafana_postgres_password_length, 24)
+  grafana_oauth_redirect_uri             = format("https://%s/login/generic_oauth", local.grafana_hostname)
+  grafana_oauth_post_logout_uri          = format("https://%s/login", local.grafana_hostname)
+  grafana_auth_ca_content                = local.grafana_auth_enabled ? try(file(local.root_ca_crt), "") : ""
+  grafana_auth_ca_enabled                = trimspace(local.grafana_auth_ca_content) != ""
+  monitoring_keycloak_auth_enabled       = local.grafana_auth_enabled || local.prometheus_auth_enabled
   identity_realm_groups = local.monitoring_keycloak_auth_enabled ? try(
     data.terraform_remote_state.identity[0].outputs.keycloak_realm_groups,
     {}
@@ -171,6 +180,7 @@ locals {
     for group_name in local.prometheus_auth_allowed_groups_value : group_name
     if !contains(keys(try(local.identity_realm_groups[local.prometheus_auth_keycloak_realm_value], {})), group_name)
   ] : []
+  available_identity_realms = keys(local.identity_oidc_metadata)
   monitoring_namespace = yamldecode(file("${path.module}/namespace.yaml"))
   prometheus_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/prometheus.yaml", {
@@ -218,6 +228,11 @@ locals {
       grafana_storage_size               = local.grafana_storage_size
       grafana_image_tag                  = local.grafana_image_tag
       grafana_hostname                   = local.grafana_hostname
+      grafana_db_name                    = local.grafana_db_name_value
+      grafana_db_username                = local.grafana_db_username_value
+      grafana_postgres_image_tag         = local.grafana_postgres_image_tag_value
+      grafana_postgres_pvc_size          = local.grafana_postgres_pvc_size_value
+      grafana_postgres_storage_class     = local.grafana_postgres_storage_class_value
       grafana_cpu_request                = local.grafana_cpu_request
       grafana_cpu_limit                  = local.grafana_cpu_limit
       grafana_mem_request                = local.grafana_mem_request
@@ -417,11 +432,12 @@ check "preissued_tls_secrets_files" {
 check "grafana_auth_identity_client" {
   assert {
     condition = !local.grafana_auth_enabled || (
+      contains(local.available_identity_realms, local.grafana_auth_keycloak_realm_value) &&
       trimspace(local.grafana_oidc_issuer) != "" &&
       trimspace(local.grafana_oidc_client_id) != "" &&
       trimspace(local.grafana_oidc_client_secret) != ""
     )
-    error_message = format("Grafana Keycloak auth is enabled for realm %q, but identity state does not expose a confidential grafana OIDC client.", local.grafana_auth_keycloak_realm_value)
+    error_message = format("Grafana Keycloak auth is enabled for realm %q, but identity state does not expose that realm with a confidential grafana OIDC client. Available realms: %s", local.grafana_auth_keycloak_realm_value, join(", ", local.available_identity_realms))
   }
 }
 
@@ -435,11 +451,12 @@ check "grafana_auth_groups" {
 check "prometheus_auth_identity_client" {
   assert {
     condition = !local.prometheus_auth_enabled || (
+      contains(local.available_identity_realms, local.prometheus_auth_keycloak_realm_value) &&
       trimspace(local.prometheus_oidc_issuer) != "" &&
       trimspace(local.prometheus_oidc_client_id) != "" &&
       trimspace(local.prometheus_oidc_client_secret) != ""
     )
-    error_message = format("Prometheus Keycloak auth is enabled for realm %q, but identity state does not expose a confidential prometheus OIDC client.", local.prometheus_auth_keycloak_realm_value)
+    error_message = format("Prometheus Keycloak auth is enabled for realm %q, but identity state does not expose that realm with a confidential prometheus OIDC client. Available realms: %s", local.prometheus_auth_keycloak_realm_value, join(", ", local.available_identity_realms))
   }
 }
 
@@ -464,6 +481,11 @@ resource "random_password" "grafana_admin" {
   special = false
 }
 
+resource "random_password" "grafana_postgres" {
+  length  = local.grafana_postgres_password_length_value
+  special = false
+}
+
 resource "kubernetes_secret_v1" "grafana_admin" {
   metadata {
     name      = "grafana-admin"
@@ -473,6 +495,22 @@ resource "kubernetes_secret_v1" "grafana_admin" {
   data = {
     "admin-user"     = local.grafana_admin_user
     "admin-password" = random_password.grafana_admin.result
+  }
+
+  type       = "Opaque"
+  depends_on = [kubernetes_manifest.monitoring_namespace]
+}
+
+resource "kubernetes_secret_v1" "grafana_db" {
+  metadata {
+    name      = "grafana-db"
+    namespace = "monitoring"
+  }
+
+  data = {
+    username = local.grafana_db_username_value
+    password = random_password.grafana_postgres.result
+    database = local.grafana_db_name_value
   }
 
   type       = "Opaque"
@@ -590,6 +628,7 @@ resource "kubernetes_manifest" "monitoring_other" {
     kubernetes_manifest.monitoring_namespace,
     kubernetes_manifest.extra_namespaces,
     kubernetes_secret_v1.grafana_admin,
+    kubernetes_secret_v1.grafana_db,
     kubernetes_secret_v1.grafana_oauth,
     kubernetes_secret_v1.grafana_oauth_ca,
     kubernetes_secret_v1.prometheus_api_basic_auth,
