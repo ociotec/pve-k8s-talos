@@ -167,6 +167,72 @@ locals {
 
   cert_manager_wait_seconds = 120
   metallb_wait_seconds      = 120
+
+  coredns_resources_patch = jsonencode({
+    spec = {
+      template = {
+        spec = {
+          containers = [{
+            name = "coredns"
+            resources = {
+              requests = {
+                cpu    = "100m"
+                memory = "70Mi"
+              }
+              limits = {
+                cpu    = "200m"
+                memory = "70Mi"
+              }
+            }
+          }]
+        }
+      }
+    }
+  })
+
+  kube_flannel_resources_patch = jsonencode({
+    spec = {
+      template = {
+        spec = {
+          containers = [{
+            name = "kube-flannel"
+            resources = {
+              requests = {
+                cpu    = "100m"
+                memory = "50Mi"
+              }
+              limits = {
+                cpu    = "200m"
+                memory = "50Mi"
+              }
+            }
+          }]
+        }
+      }
+    }
+  })
+
+  kube_proxy_resources_patch = jsonencode({
+    spec = {
+      template = {
+        spec = {
+          containers = [{
+            name = "kube-proxy"
+            resources = {
+              requests = {
+                cpu    = "50m"
+                memory = "64Mi"
+              }
+              limits = {
+                cpu    = "200m"
+                memory = "64Mi"
+              }
+            }
+          }]
+        }
+      }
+    }
+  })
 }
 
 moved {
@@ -248,8 +314,11 @@ resource "kubernetes_manifest" "metallb_native_namespace" {
 }
 
 resource "kubernetes_manifest" "metallb_native" {
-  for_each   = { for i, m in local.metallb_native_other : i => m }
-  manifest   = each.value
+  for_each = { for i, m in local.metallb_native_other : i => m }
+  manifest = each.value
+  computed_fields = [
+    "metadata.annotations",
+  ]
   depends_on = [kubernetes_manifest.metallb_native_namespace]
 }
 
@@ -328,6 +397,32 @@ resource "null_resource" "coredns_reload" {
   }
 
   depends_on = [local_file.coredns_config]
+}
+
+resource "null_resource" "kube_system_resource_requirements" {
+  triggers = {
+    coredns_resources_sha      = sha256(local.coredns_resources_patch)
+    kube_flannel_resources_sha = sha256(local.kube_flannel_resources_patch)
+    kube_proxy_resources_sha   = sha256(local.kube_proxy_resources_patch)
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<-EOT
+      set -euo pipefail
+      kubeconfig="${abspath("${path.module}/${var.kubeconfig_path}")}"
+
+      KUBECONFIG="$kubeconfig" kubectl -n kube-system patch deployment coredns --type=strategic --patch '${local.coredns_resources_patch}'
+      KUBECONFIG="$kubeconfig" kubectl -n kube-system patch daemonset kube-flannel --type=strategic --patch '${local.kube_flannel_resources_patch}'
+      KUBECONFIG="$kubeconfig" kubectl -n kube-system patch daemonset kube-proxy --type=strategic --patch '${local.kube_proxy_resources_patch}'
+
+      KUBECONFIG="$kubeconfig" kubectl -n kube-system rollout status deployment/coredns --timeout=180s
+      KUBECONFIG="$kubeconfig" kubectl -n kube-system rollout status daemonset/kube-flannel --timeout=180s
+      KUBECONFIG="$kubeconfig" kubectl -n kube-system rollout status daemonset/kube-proxy --timeout=180s
+    EOT
+  }
+
+  depends_on = [null_resource.coredns_reload]
 }
 
 resource "null_resource" "ingress_nginx_webhook_ready" {

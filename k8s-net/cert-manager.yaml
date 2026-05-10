@@ -13288,6 +13288,13 @@ spec:
               drop:
               - ALL
             readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
       nodeSelector:
         kubernetes.io/os: "linux"
 ---
@@ -13352,6 +13359,13 @@ spec:
               drop:
               - ALL
             readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
           env:
           - name: POD_NAMESPACE
             valueFrom:
@@ -13459,6 +13473,13 @@ spec:
               drop:
               - ALL
             readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
           env:
           - name: POD_NAMESPACE
             valueFrom:
