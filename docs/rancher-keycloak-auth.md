@@ -92,15 +92,15 @@ grafana_auth_edit_groups    = ["monitoring-edit"]
 
 The monitoring module reads the identity workspace outputs, resolves the `grafana` client secret, expands each configured logical group with its included LDAP group names, and sets Grafana generic OAuth environment variables.
 
-Use `monitoring-view` for Grafana `Viewer` access and `monitoring-edit` for Grafana `Editor` access. Keep the local Grafana `admin` user for server administration and break-glass recovery.
+Use `monitoring-view` for Grafana `Viewer` access and browser access to Prometheus. Use `monitoring-edit` for Grafana `Editor` access and browser access to Prometheus. Keep the local Grafana `admin` user for server administration and break-glass recovery.
 
 ## Role model
 
 Current simplified mapping:
 
 - `k8s-admins`: shared administrative access group for Rancher and Portainer.
-- `monitoring-view`: Grafana Viewer access.
-- `monitoring-edit`: Grafana Editor access.
+- `monitoring-view`: Grafana Viewer access and browser access to Prometheus.
+- `monitoring-edit`: Grafana Editor access and browser access to Prometheus.
 
 For Rancher, `k8s-admins` is bound to the configured global role. For Portainer, Keycloak restricts login for the `portainer` client to the configured `login_allowed_groups`. Portainer CE then keeps its usual local authorization model; deployment creates the configured default team, assigns auto-created OAuth users to it, grants that team access to the existing Portainer environments, and grants the team access to Kubernetes namespaces that exist at apply time. Use `portainer_auth_default_team_existing_users` to reconcile OAuth users that logged in before this default team was configured. Keep local Portainer admin access for break-glass recovery.
-For Grafana, Keycloak restricts login for the `grafana` client to the configured groups, and Grafana maps those groups to `Viewer` or `Editor`. Grafana OSS `Viewer` is intentionally strict; users who need Explore and dashboard editing should be in `monitoring-edit`.
+For Grafana, Keycloak restricts login for the `grafana` client to the configured groups, and Grafana maps those groups to `Viewer` or `Editor`. Grafana OSS `Viewer` is intentionally strict; users who need Explore and dashboard editing should be in `monitoring-edit`. For Prometheus, Keycloak restricts login for the `prometheus` client and ingress-nginx delegates browser auth to oauth2-proxy; Prometheus itself does not provide per-user RBAC in this deployment.

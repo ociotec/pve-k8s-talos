@@ -40,8 +40,8 @@ locals {
   grafana_auth_allow_sign_up          = true
   grafana_auth_ca_secret_name         = "grafana-oauth-ca"
 
-  prometheus_auth_keycloak_realm            = ""
-  prometheus_auth_allowed_groups            = []
+  prometheus_auth_keycloak_realm            = "company"
+  prometheus_auth_allowed_groups            = ["monitoring-view", "monitoring-edit"]
   prometheus_auth_ca_secret_name            = "prometheus-oauth-ca"
   prometheus_oauth2_proxy_image_tag         = "v7.12.0"
   prometheus_oauth2_proxy_cookie_name       = "_prometheus_oauth2_proxy"

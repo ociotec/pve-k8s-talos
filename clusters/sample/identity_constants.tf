@@ -70,7 +70,7 @@ locals {
         },
         {
           name          = "monitoring-view"
-          description   = "Grafana viewers"
+          description   = "Monitoring viewers"
           extra_members = []
           included_ldap_groups = [
             {
@@ -81,7 +81,7 @@ locals {
         },
         {
           name          = "monitoring-edit"
-          description   = "Grafana editors"
+          description   = "Monitoring editors"
           extra_members = []
           included_ldap_groups = [
             {
@@ -214,7 +214,7 @@ locals {
           description                  = "OIDC client for Prometheus ingress oauth2-proxy"
           access_type                  = "confidential"
           client_secret_length         = 32
-          login_allowed_groups         = ["k8s-admins"]
+          login_allowed_groups         = ["monitoring-view", "monitoring-edit"]
           valid_redirect_uris          = ["${local.prometheus_url}/oauth2/callback"]
           post_logout_redirect_uris    = ["${local.prometheus_url}/", "${local.prometheus_url}/*"]
           web_origins                  = [local.prometheus_url]
