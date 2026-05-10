@@ -262,18 +262,19 @@ locals {
   ]))
   identity_resources = [
     for doc in split("\n---\n", templatefile("${path.module}/keycloak.yaml", {
-      identity_namespace     = local.identity_namespace
-      keycloak_hostname      = local.keycloak_hostname
-      keycloak_image_tag     = local.keycloak_image_tag
-      keycloak_tls_secret    = local.keycloak_tls_secret_name
-      keycloak_db_name       = local.keycloak_db_name
-      postgres_image_tag     = local.postgres_image_tag
-      postgres_pvc_size      = local.postgres_pvc_size
-      postgres_storage_class = local.postgres_storage_class
-      keycloak_cpu_request   = try(local.keycloak_cpu_request, "200m")
-      keycloak_cpu_limit     = try(local.keycloak_cpu_limit, "2")
-      keycloak_realms        = []
-      keycloak_realms_script = ""
+      identity_namespace          = local.identity_namespace
+      keycloak_hostname           = local.keycloak_hostname
+      keycloak_image_tag          = local.keycloak_image_tag
+      keycloak_tls_secret         = local.keycloak_tls_secret_name
+      keycloak_db_name            = local.keycloak_db_name
+      postgres_image_tag          = local.postgres_image_tag
+      postgres_exporter_image_tag = local.postgres_exporter_image_tag
+      postgres_pvc_size           = local.postgres_pvc_size
+      postgres_storage_class      = local.postgres_storage_class
+      keycloak_cpu_request        = try(local.keycloak_cpu_request, "200m")
+      keycloak_cpu_limit          = try(local.keycloak_cpu_limit, "2")
+      keycloak_realms             = []
+      keycloak_realms_script      = ""
     })) :
     yamldecode(doc)
     if local.keycloak_enabled && length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
@@ -432,13 +433,11 @@ resource "kubernetes_manifest" "identity_other" {
   manifest = each.value
   computed_fields = [
     "metadata.annotations",
-    "spec.template.metadata.annotations",
     "spec.template.metadata.labels",
   ]
   lifecycle {
     ignore_changes = [
       manifest.metadata.annotations,
-      manifest.spec.template.metadata.annotations,
       manifest.spec.template.metadata.labels,
     ]
   }

@@ -32,6 +32,10 @@ spec:
     metadata:
       labels:
         app: keycloak-postgres
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9187"
+        prometheus.io/path: /metrics
     spec:
       containers:
         - name: postgres
@@ -65,6 +69,31 @@ spec:
             limits:
               cpu: "1"
               memory: 512Mi
+        - name: postgres-exporter
+          image: quay.io/prometheuscommunity/postgres-exporter:${postgres_exporter_image_tag}
+          ports:
+            - name: metrics
+              containerPort: 9187
+          env:
+            - name: DATA_SOURCE_URI
+              value: localhost:5432/${keycloak_db_name}?sslmode=disable
+            - name: DATA_SOURCE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-db
+                  key: username
+            - name: DATA_SOURCE_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-db
+                  key: password
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       volumes:
         - name: postgres-data
           persistentVolumeClaim:
@@ -99,7 +128,7 @@ spec:
         app: keycloak
       annotations:
         prometheus.io/scrape: "true"
-        prometheus.io/port: "8080"
+        prometheus.io/port: "9000"
         prometheus.io/path: /metrics
     spec:
       initContainers:
@@ -133,6 +162,8 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            - name: monitoring
+              containerPort: 9000
           env:
             - name: KC_DB
               value: postgres

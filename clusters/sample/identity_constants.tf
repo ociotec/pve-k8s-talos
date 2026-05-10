@@ -8,11 +8,12 @@ locals {
   keycloak_admin_username        = "admin"
   keycloak_admin_password_length = 24
 
-  keycloak_db_name         = "keycloak"
-  keycloak_db_username     = "keycloak"
-  postgres_image_tag       = "18.3"
-  postgres_pvc_size        = "8Gi"
-  postgres_password_length = 24
+  keycloak_db_name            = "keycloak"
+  keycloak_db_username        = "keycloak"
+  postgres_image_tag          = "18.3"
+  postgres_exporter_image_tag = "v0.19.1"
+  postgres_pvc_size           = "8Gi"
+  postgres_password_length    = 24
 
   postgres_storage_class = "${local.ceph_name_prefix}-rbd-ec"
   rancher_url            = "https://rancher.${local.domain}"
