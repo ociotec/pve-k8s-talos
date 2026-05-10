@@ -235,19 +235,20 @@ locals {
   ]
   grafana_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/grafana.yaml", {
-      storage_class                  = local.storage_class
-      grafana_storage_size           = local.grafana_storage_size
-      grafana_image_tag              = local.grafana_image_tag
-      grafana_hostname               = local.grafana_hostname
-      grafana_db_name                = local.grafana_db_name_value
-      grafana_db_username            = local.grafana_db_username_value
-      grafana_postgres_image_tag     = local.grafana_postgres_image_tag_value
-      grafana_postgres_pvc_size      = local.grafana_postgres_pvc_size_value
-      grafana_postgres_storage_class = local.grafana_postgres_storage_class_value
-      grafana_postgres_cpu_request   = try(local.grafana_postgres_cpu_request, "100m")
-      grafana_postgres_cpu_limit     = try(local.grafana_postgres_cpu_limit, "500m")
-      grafana_postgres_mem_request   = try(local.grafana_postgres_mem_request, "256Mi")
-      grafana_postgres_mem_limit     = try(local.grafana_postgres_mem_limit, "256Mi")
+      storage_class                       = local.storage_class
+      grafana_storage_size                = local.grafana_storage_size
+      grafana_image_tag                   = local.grafana_image_tag
+      grafana_hostname                    = local.grafana_hostname
+      grafana_db_name                     = local.grafana_db_name_value
+      grafana_db_username                 = local.grafana_db_username_value
+      grafana_postgres_image_tag          = local.grafana_postgres_image_tag_value
+      grafana_postgres_exporter_image_tag = local.grafana_postgres_exporter_image_tag
+      grafana_postgres_pvc_size           = local.grafana_postgres_pvc_size_value
+      grafana_postgres_storage_class      = local.grafana_postgres_storage_class_value
+      grafana_postgres_cpu_request        = try(local.grafana_postgres_cpu_request, "100m")
+      grafana_postgres_cpu_limit          = try(local.grafana_postgres_cpu_limit, "500m")
+      grafana_postgres_mem_request        = try(local.grafana_postgres_mem_request, "256Mi")
+      grafana_postgres_mem_limit          = try(local.grafana_postgres_mem_limit, "256Mi")
       grafana_wait_for_postgres_cpu_request = try(
         local.grafana_wait_for_postgres_cpu_request,
         "20m"
@@ -652,14 +653,16 @@ resource "kubernetes_secret_v1" "prometheus_oauth_ca" {
 resource "kubernetes_manifest" "monitoring_other" {
   for_each = { for i, m in local.monitoring_other : i => m }
   manifest = each.value
-  computed_fields = [
+  computed_fields = concat([
     "metadata.annotations",
     "metadata.annotations[\"deprecated.daemonset.template.generation\"]",
     "object.metadata.annotations",
     "object.metadata.annotations[\"deprecated.daemonset.template.generation\"]",
     "spec.template.spec.containers[0].resources.limits.cpu",
     "spec.template.spec.nodeSelector",
-  ]
+    ], try(each.value.kind, "") == "Deployment" ? [
+    "object.spec.template.metadata.annotations",
+  ] : [])
   lifecycle {
     ignore_changes = [
       manifest.metadata.annotations,

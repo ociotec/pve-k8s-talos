@@ -1243,6 +1243,21 @@ else
   prepare_monitoring_workspace
   message "Deploying monitoring stack..."
   run_tofu_init "${cluster_monitoring_workspace}"
+  if kubectl get namespace monitoring >/dev/null 2>&1; then
+    monitoring_existing_restart_deployments=()
+    for deployment in grafana grafana-postgres loki prometheus kube-state-metrics prometheus-oauth2-proxy; do
+      if kubectl -n monitoring get deploy "${deployment}" >/dev/null 2>&1; then
+        monitoring_existing_restart_deployments+=("${deployment}")
+      fi
+    done
+    if [[ "${#monitoring_existing_restart_deployments[@]}" -gt 0 ]]; then
+      for deployment in "${monitoring_existing_restart_deployments[@]}"; do
+        kubectl -n monitoring patch deploy "${deployment}" --type=json \
+          -p='[{"op":"remove","path":"/spec/template/metadata/annotations/kubectl.kubernetes.io~1restartedAt"}]' \
+          1>/dev/null 2>&1 || true
+      done
+    fi
+  fi
   run tofu -chdir="${cluster_monitoring_workspace}" apply -auto-approve
   message "Restarting Prometheus to reload scrape configuration..."
   kubectl -n monitoring rollout restart deploy/prometheus 1>/dev/null

@@ -46,6 +46,10 @@ spec:
     metadata:
       labels:
         app: grafana-postgres
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9187"
+        prometheus.io/path: /metrics
     spec:
       containers:
         - name: postgres
@@ -79,6 +83,31 @@ spec:
             limits:
               cpu: ${grafana_postgres_cpu_limit}
               memory: ${grafana_postgres_mem_limit}
+        - name: postgres-exporter
+          image: quay.io/prometheuscommunity/postgres-exporter:${grafana_postgres_exporter_image_tag}
+          ports:
+            - name: metrics
+              containerPort: 9187
+          env:
+            - name: DATA_SOURCE_URI
+              value: localhost:5432/${grafana_db_name}?sslmode=disable
+            - name: DATA_SOURCE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-db
+                  key: username
+            - name: DATA_SOURCE_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-db
+                  key: password
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
       volumes:
         - name: postgres-data
           persistentVolumeClaim:
@@ -126,6 +155,10 @@ spec:
     metadata:
       labels:
         app: grafana
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: /metrics
     spec:
       securityContext:
         runAsUser: 472
@@ -164,7 +197,7 @@ spec:
               drop:
                 - ALL
           ports:
-            - name: http
+            - name: monitoring
               containerPort: 3000
           resources:
             requests:
@@ -186,6 +219,8 @@ spec:
                   key: admin-password
             - name: GF_SERVER_ROOT_URL
               value: https://${grafana_hostname}
+            - name: GF_METRICS_ENABLED
+              value: "true"
             - name: GF_DATABASE_TYPE
               value: postgres
             - name: GF_DATABASE_HOST
@@ -302,7 +337,7 @@ spec:
   ports:
     - name: http
       port: 3000
-      targetPort: http
+      targetPort: monitoring
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
