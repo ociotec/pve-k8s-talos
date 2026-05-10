@@ -195,7 +195,7 @@ def project_section($ns; $workload):
     | .missingRequests += (if $cpuRequest == null or $memRequest == null then 1 else 0 end)
     | .missingLimits += (if $cpuLimit == null or $memLimit == null then 1 else 0 end)
   )) as $totals
-| ($sortedRows | map(.row)) as $allRows
+| ($sortedRows | map(.row) | map(select(($sections | length) == 0 or (.Section as $section | $sections | index($section))))) as $allRows
 | (if $showAll then $allRows else ($allRows[:$topRows]) end) as $shownRows
 | {
     summary: {

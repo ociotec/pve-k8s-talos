@@ -76,6 +76,8 @@ It complements `README.md` and focuses on execution behavior, change safety, and
 - This applies to Deployments, StatefulSets, DaemonSets, Jobs, CronJobs, init containers, and sidecars created by shared modules or manifests.
 - Do not add or update a workload manifest without checking that all containers have both CPU and memory reservations and limits.
 - For memory, set `requests.memory` equal to `limits.memory` to make OOM behavior explicit and avoid scheduling pods with lower memory reservations than their enforced ceiling.
+- Write integer CPU quantities in Kubernetes-canonical core form instead of millicores to avoid provider/API normalization drift: use `"1"` instead of `"1000m"`, `"2"` instead of `"2000m"`, and so on. Keep fractional CPU quantities in millicores, such as `1500m` for 1.5 cores.
+- `scripts/deploy.sh` has a preflight check that blocks integer CPU millicore values in deployed modules for the same reason.
 
 ## Validation Checklist (Minimum)
 

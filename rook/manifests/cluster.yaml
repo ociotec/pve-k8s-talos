@@ -241,14 +241,14 @@ spec:
         memory: "1024Mi"
     mgr:
       limits:
-        cpu: "1000m"
+        cpu: "1"
         memory: "1024Mi"
       requests:
         cpu: "200m"
         memory: "1024Mi"
     osd:
       limits:
-        cpu: "2000m"
+        cpu: "2"
         memory: "3072Mi"
       requests:
         cpu: "500m"

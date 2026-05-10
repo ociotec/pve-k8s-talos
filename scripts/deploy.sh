@@ -129,6 +129,30 @@ setup_cluster_context "${script_dir}" ""
 
 controlplane_vip="$(awk -F'"' '/"controlplane_vip"/ { print $4; exit }' "${cluster_constants_path}")"
 
+check_integer_cpu_millicores() {
+  local paths=("$@")
+  local matches
+
+  if [[ "${#paths[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  matches="$(
+    grep -RInE --include='*.yaml' --include='*.yml' --include='*.tf' \
+      'cpu:[[:space:]]*"?[1-9][0-9]*000m"?' \
+      "${paths[@]}" 2>/dev/null || true
+  )"
+
+  if [[ -z "${matches}" ]]; then
+    return 0
+  fi
+
+  error "Found integer CPU quantities written as millicores. Kubernetes normalizes these values and the provider can fail after apply." >&2
+  error "Use canonical core values instead: \"1\" instead of \"1000m\", \"2\" instead of \"2000m\". Keep fractional values like 1500m as millicores." >&2
+  printf '%s\n' "${matches}" >&2
+  exit 1
+}
+
 if [[ "${skip_ceph}" == "true" ]]; then
   gen_talos_args+=(--skip-ceph)
 fi
@@ -144,6 +168,24 @@ fi
 if [[ "${skip_monitoring}" == "true" ]]; then
   gen_talos_args+=(--skip-monitoring)
 fi
+
+cpu_quantity_check_paths=()
+if [[ "${skip_ceph}" != "true" ]]; then
+  cpu_quantity_check_paths+=("${repo_root}/rook")
+fi
+if [[ "${skip_k8s_net}" != "true" ]]; then
+  cpu_quantity_check_paths+=("${repo_root}/k8s-net")
+fi
+if [[ "${skip_identity}" != "true" ]]; then
+  cpu_quantity_check_paths+=("${repo_root}/identity")
+fi
+if [[ "${skip_platform}" != "true" ]]; then
+  cpu_quantity_check_paths+=("${repo_root}/platform")
+fi
+if [[ "${skip_monitoring}" != "true" ]]; then
+  cpu_quantity_check_paths+=("${repo_root}/monitoring")
+fi
+check_integer_cpu_millicores "${cpu_quantity_check_paths[@]}"
 
 if [[ "${debug}" == "true" ]]; then
   # Enable verbose tracing and Terraform debug logging for troubleshooting.

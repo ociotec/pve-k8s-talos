@@ -20,6 +20,8 @@ Options:
   --cluster <name>      Cluster name. Must match the current clusters/<name> directory.
   --top <n>             Number of table rows to show. Defaults to 25.
   --all                 Show all rows.
+  --section <name>      Limit output to a section. Can be repeated.
+                        Known sections: identity, k8s-net, monitoring, platform, rook, other.
   --format <format>     Output format: markdown or json. Defaults to markdown.
   --include-ok          Include containers with no finding. Defaults to false.
   --skip-prometheus     Only audit declared requests/limits; usage columns are n/a.
@@ -44,6 +46,7 @@ show_all=false
 output_format="markdown"
 include_ok=false
 skip_prometheus=false
+sections=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -66,6 +69,14 @@ while [[ $# -gt 0 ]]; do
     --all)
       show_all=true
       shift
+      ;;
+    --section)
+      if [[ $# -lt 2 ]]; then
+        error "--section requires a value."
+        exit 1
+      fi
+      sections+=("$2")
+      shift 2
       ;;
     --format)
       if [[ $# -lt 2 ]]; then
@@ -107,6 +118,8 @@ if ! [[ "${top_rows}" =~ ^[0-9]+$ ]] || [[ "${top_rows}" -lt 1 ]]; then
   error "--top must be a positive integer."
   exit 1
 fi
+
+sections_json="$(printf '%s\n' "${sections[@]}" | jq -R . | jq -s .)"
 
 require_cmd kubectl
 require_cmd jq
@@ -208,4 +221,5 @@ jq -r -n \
   --arg outputFormat "${output_format}" \
   --argjson includeOk "${include_ok}" \
   --argjson skipPrometheus "${skip_prometheus}" \
+  --argjson sections "${sections_json}" \
   -f "${script_dir}/audit-cluster-resources.jq"

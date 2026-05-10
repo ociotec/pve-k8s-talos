@@ -42,7 +42,7 @@ Exclude:
 - Never apply changes to the cluster from this workflow.
 - Never run `tofu plan`, `tofu apply`, or any deployment script from this workflow.
 - Only inspect, edit repository files when requested, and run validation commands such as `tofu init` and `tofu validate`.
-- After remediation analysis, show the user the minimal `scripts/deploy.sh` command needed to apply the changes, using skip flags for unaffected stacks. The user runs it manually.
+- After any remediation analysis or file changes, always end the response by showing the minimal `scripts/deploy.sh` command needed to apply the changes, using skip flags for unaffected stacks. The user runs it manually.
 - Do not include secrets, private hostnames, private IPs, or raw private URLs in the final answer.
 
 ## Output Format
@@ -85,6 +85,7 @@ If the result is large, show the worst 25 rows and state that the table is trunc
 2. Run the repo script from `clusters/<cluster>`:
    - Default: `../../scripts/audit-cluster-resources.sh --cluster <cluster> --include-ok --all`
    - Use `--top <n>` only when the user asks for a truncated report.
+   - Use one or more `--section <name>` flags when the user asks for specific areas, for example `--section platform --section rook`.
    - Use `--format json` when follow-up processing is needed.
    - Use `--skip-prometheus` only when the user explicitly asks to avoid Prometheus or when the Prometheus API is unavailable.
 3. If the script is unavailable or needs debugging, confirm access to the cluster:
@@ -130,12 +131,14 @@ If the result is large, show the worst 25 rows and state that the table is trunc
    - count of containers with missing limits
 11. Render the table using the required columns.
 12. If repository files were changed, validate affected generated workspaces but do not run `tofu plan`, `tofu apply`, or a deployment script.
-13. End with an apply command suggestion:
+13. End every response after remediation or file changes with an apply command suggestion:
    - Run from `clusters/<cluster>`.
    - Use `../../scripts/deploy.sh --services-only` for service-only changes.
    - Add skip flags for unaffected stacks.
    - For Rook-only changes, use:
      `../../scripts/deploy.sh --services-only --skip-k8s-net --skip-identity --skip-platform --skip-monitoring`
+   - For platform-only changes, use:
+     `../../scripts/deploy.sh --services-only --skip-ceph --skip-k8s-net --skip-identity --skip-monitoring`
 
 ## Prometheus Notes
 
@@ -150,6 +153,11 @@ If the result is large, show the worst 25 rows and state that the table is trunc
 - For missing requests, recommend adding both CPU and memory requests before tuning limits.
 - For memory requests below 24h max, recommend a request above observed max plus headroom.
 - For CPU requests below p95, recommend a request near p95 plus modest headroom unless the workload is intentionally bursty.
+- When setting CPU requests or limits, write integer CPU values in Kubernetes-canonical core form to avoid OpenTofu/Kubernetes provider normalization errors:
+  - use `"1"` instead of `"1000m"`
+  - use `"2"` instead of `"2000m"`
+  - keep non-integer CPU values as millicores, such as `200m`, `500m`, or `1500m` for 1.5 cores
+  - `scripts/deploy.sh` rejects integer CPU millicore values in modules that are included in the selected deployment path
 - For missing memory limits, recommend setting them for application workloads where OOM behavior is acceptable and understood.
 - For missing CPU limits, do not automatically recommend strict CPU limits for latency-sensitive workloads; recommend review instead.
 - If a namespace is system-owned, prefer conservative recommendations and call out that changes should follow the component's supported configuration path.
