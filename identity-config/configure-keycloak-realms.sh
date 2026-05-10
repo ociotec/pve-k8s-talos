@@ -300,6 +300,24 @@ ensure_master_admin_user() {
   assign_user_realm_role master "${user_id_value}" admin
 }
 
+configure_master_realm_settings() {
+  local payload
+  if [[ -z "${KEYCLOAK_MASTER_REALM_SETTINGS_JSON:-}" || "${KEYCLOAK_MASTER_REALM_SETTINGS_JSON}" == "null" ]]; then
+    return 0
+  fi
+
+  echo "[keycloak-api] master: settings"
+  payload="${TMPDIR}/master-realm-settings.json"
+  jq -n --argjson settings "${KEYCLOAK_MASTER_REALM_SETTINGS_JSON}" '{
+    realm: "master",
+    enabled: true,
+    eventsEnabled: ($settings.save_user_events // false),
+    adminEventsEnabled: ($settings.save_admin_events // false),
+    adminEventsDetailsEnabled: ($settings.save_admin_event_details // ($settings.save_admin_events // false))
+  }' > "${payload}"
+  api PUT "realms/master" "${payload}" >/dev/null
+}
+
 upsert_realm() {
   local realm_json="$1"
   local realm
@@ -623,6 +641,7 @@ printf '\n'
 
 echo "[keycloak-api] ensuring permanent master admin access"
 ensure_master_admin_user
+configure_master_realm_settings
 
 jq -c '.[]' "${TMPDIR}/realms.json" | while IFS= read -r realm; do
   realm_file="${TMPDIR}/realm-input.json"

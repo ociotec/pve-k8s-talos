@@ -8,6 +8,12 @@ locals {
   keycloak_admin_username        = "admin"
   keycloak_admin_password_length = 24
 
+  keycloak_master_realm_config = {
+    save_user_events         = true
+    save_admin_events        = true
+    save_admin_event_details = true
+  }
+
   keycloak_db_name            = "keycloak"
   keycloak_db_username        = "keycloak"
   postgres_image_tag          = "18.3"

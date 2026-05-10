@@ -33,6 +33,11 @@ provider "kubernetes" {
 
 locals {
   configured_keycloak_realms = try(local.keycloak_realms, [])
+  keycloak_master_realm_settings = {
+    save_user_events         = try(local.keycloak_master_realm_config.save_user_events, false)
+    save_admin_events        = try(local.keycloak_master_realm_config.save_admin_events, false)
+    save_admin_event_details = try(local.keycloak_master_realm_config.save_admin_event_details, try(local.keycloak_master_realm_config.save_admin_events, false))
+  }
   keycloak_realm_base_definitions = [
     for realm in local.configured_keycloak_realms : {
       name = realm.name
@@ -578,5 +583,10 @@ output "keycloak_realm_groups" {
 
 output "keycloak_realm_definitions" {
   value     = local.keycloak_enabled && !var.skip_identity ? local.keycloak_realm_definitions : []
+  sensitive = true
+}
+
+output "keycloak_master_realm_settings" {
+  value     = local.keycloak_enabled && !var.skip_identity ? local.keycloak_master_realm_settings : null
   sensitive = true
 }
