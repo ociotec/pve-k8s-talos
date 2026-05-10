@@ -119,7 +119,11 @@ if ! [[ "${top_rows}" =~ ^[0-9]+$ ]] || [[ "${top_rows}" -lt 1 ]]; then
   exit 1
 fi
 
-sections_json="$(printf '%s\n' "${sections[@]}" | jq -R . | jq -s .)"
+if [[ "${#sections[@]}" -eq 0 ]]; then
+  sections_json="[]"
+else
+  sections_json="$(printf '%s\n' "${sections[@]}" | jq -R . | jq -s .)"
+fi
 
 require_cmd kubectl
 require_cmd jq
