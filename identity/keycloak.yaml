@@ -197,6 +197,10 @@ spec:
               value: "true"
             - name: KC_METRICS_ENABLED
               value: "true"
+            - name: KC_EVENT_METRICS_USER_ENABLED
+              value: "true"
+            - name: KC_EVENT_METRICS_USER_TAGS
+              value: realm,clientId
           readinessProbe:
             httpGet:
               path: /realms/master
