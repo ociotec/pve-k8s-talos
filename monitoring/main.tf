@@ -189,9 +189,15 @@ locals {
   ] : []
   available_identity_realms = keys(local.identity_oidc_metadata)
   monitoring_namespace      = yamldecode(file("${path.module}/namespace.yaml"))
+  prometheus_storage_class_value = try(
+    local.prometheus_storage_class,
+    local.storage_class
+  )
+  prometheus_wal_compression_value       = try(local.prometheus_wal_compression, true)
+  prometheus_query_max_concurrency_value = try(local.prometheus_query_max_concurrency, 10)
   prometheus_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/prometheus.yaml", {
-      storage_class                          = local.storage_class
+      storage_class                          = local.prometheus_storage_class_value
       prometheus_storage_size                = local.prometheus_storage_size
       prometheus_retention                   = local.prometheus_retention
       prometheus_image_tag                   = local.prometheus_image_tag
@@ -201,6 +207,8 @@ locals {
       prometheus_cpu_limit                   = local.prometheus_cpu_limit
       prometheus_mem_request                 = local.prometheus_mem_request
       prometheus_mem_limit                   = local.prometheus_mem_limit
+      prometheus_wal_compression             = local.prometheus_wal_compression_value
+      prometheus_query_max_concurrency       = local.prometheus_query_max_concurrency_value
       prometheus_tls_secret_name             = local.prometheus_tls_secret_name
       prometheus_auth_enabled                = local.prometheus_auth_enabled
       prometheus_auth_ca_enabled             = local.prometheus_auth_ca_enabled

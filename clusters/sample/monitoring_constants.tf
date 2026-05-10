@@ -6,7 +6,8 @@ locals {
   prometheus_tls_secret_name     = "prometheus-tls"
   prometheus_api_tls_secret_name = local.prometheus_tls_secret_name
 
-  storage_class = "${local.ceph_name_prefix}-rbd-ec"
+  storage_class            = "${local.ceph_name_prefix}-rbd-ec"
+  prometheus_storage_class = "${local.ceph_name_prefix}-rbd-replica"
 
   grafana_storage_size    = "5Gi"
   prometheus_storage_size = "20Gi"
@@ -52,10 +53,18 @@ locals {
   prometheus_api_basic_auth_secret_name     = "prometheus-api-basic-auth"
   prometheus_api_basic_auth_password_length = 32
 
-  prometheus_cpu_request = "200m"
-  prometheus_cpu_limit   = "1"
-  prometheus_mem_request = "1Gi"
+  prometheus_cpu_request = "1"
+  prometheus_cpu_limit   = "2"
+  prometheus_mem_request = "4Gi"
   prometheus_mem_limit   = "4Gi"
+
+  # Compresses Prometheus TSDB WAL segments to reduce WAL bytes that must be read after restarts.
+  # Docs: https://prometheus.io/docs/prometheus/latest/storage/#operational-aspects
+  prometheus_wal_compression = true
+
+  # Caps concurrent PromQL queries so dashboard/API load leaves CPU and memory for TSDB WAL replay and compaction work.
+  # Docs: https://prometheus.io/docs/prometheus/latest/command-line/prometheus/#flags
+  prometheus_query_max_concurrency = 10
 
   grafana_cpu_request = "100m"
   grafana_cpu_limit   = "500m"

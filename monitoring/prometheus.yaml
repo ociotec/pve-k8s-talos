@@ -287,6 +287,7 @@ spec:
       labels:
         app: prometheus
     spec:
+      terminationGracePeriodSeconds: 120
       serviceAccountName: prometheus
       securityContext:
         fsGroup: 65534
@@ -314,6 +315,10 @@ spec:
             - --config.file=/etc/prometheus/prometheus.yml
             - --storage.tsdb.path=/prometheus
             - --storage.tsdb.retention.time=${prometheus_retention}
+%{ if prometheus_wal_compression ~}
+            - --storage.tsdb.wal-compression
+%{ endif ~}
+            - --query.max-concurrency=${prometheus_query_max_concurrency}
             - --web.enable-lifecycle
           ports:
             - name: http
