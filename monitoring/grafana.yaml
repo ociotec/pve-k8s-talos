@@ -72,6 +72,13 @@ spec:
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql
+          resources:
+            requests:
+              cpu: ${grafana_postgres_cpu_request}
+              memory: ${grafana_postgres_mem_request}
+            limits:
+              cpu: ${grafana_postgres_cpu_limit}
+              memory: ${grafana_postgres_mem_limit}
       volumes:
         - name: postgres-data
           persistentVolumeClaim:
@@ -140,6 +147,13 @@ spec:
                 secretKeyRef:
                   name: grafana-db
                   key: username
+          resources:
+            requests:
+              cpu: ${grafana_wait_for_postgres_cpu_request}
+              memory: ${grafana_wait_for_postgres_mem_request}
+            limits:
+              cpu: ${grafana_wait_for_postgres_cpu_limit}
+              memory: ${grafana_wait_for_postgres_mem_limit}
       containers:
         - name: grafana
           image: grafana/grafana:${grafana_image_tag}

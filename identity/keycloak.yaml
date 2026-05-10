@@ -185,10 +185,10 @@ spec:
             successThreshold: 1
           resources:
             requests:
-              cpu: 200m
+              cpu: "${keycloak_cpu_request}"
               memory: 2Gi
             limits:
-              cpu: "2"
+              cpu: "${keycloak_cpu_limit}"
               memory: 2Gi
 ---
 apiVersion: v1

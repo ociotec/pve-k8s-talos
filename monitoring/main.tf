@@ -235,15 +235,35 @@ locals {
   ]
   grafana_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/grafana.yaml", {
-      storage_class                      = local.storage_class
-      grafana_storage_size               = local.grafana_storage_size
-      grafana_image_tag                  = local.grafana_image_tag
-      grafana_hostname                   = local.grafana_hostname
-      grafana_db_name                    = local.grafana_db_name_value
-      grafana_db_username                = local.grafana_db_username_value
-      grafana_postgres_image_tag         = local.grafana_postgres_image_tag_value
-      grafana_postgres_pvc_size          = local.grafana_postgres_pvc_size_value
-      grafana_postgres_storage_class     = local.grafana_postgres_storage_class_value
+      storage_class                  = local.storage_class
+      grafana_storage_size           = local.grafana_storage_size
+      grafana_image_tag              = local.grafana_image_tag
+      grafana_hostname               = local.grafana_hostname
+      grafana_db_name                = local.grafana_db_name_value
+      grafana_db_username            = local.grafana_db_username_value
+      grafana_postgres_image_tag     = local.grafana_postgres_image_tag_value
+      grafana_postgres_pvc_size      = local.grafana_postgres_pvc_size_value
+      grafana_postgres_storage_class = local.grafana_postgres_storage_class_value
+      grafana_postgres_cpu_request   = try(local.grafana_postgres_cpu_request, "100m")
+      grafana_postgres_cpu_limit     = try(local.grafana_postgres_cpu_limit, "500m")
+      grafana_postgres_mem_request   = try(local.grafana_postgres_mem_request, "256Mi")
+      grafana_postgres_mem_limit     = try(local.grafana_postgres_mem_limit, "256Mi")
+      grafana_wait_for_postgres_cpu_request = try(
+        local.grafana_wait_for_postgres_cpu_request,
+        "20m"
+      )
+      grafana_wait_for_postgres_cpu_limit = try(
+        local.grafana_wait_for_postgres_cpu_limit,
+        "100m"
+      )
+      grafana_wait_for_postgres_mem_request = try(
+        local.grafana_wait_for_postgres_mem_request,
+        "32Mi"
+      )
+      grafana_wait_for_postgres_mem_limit = try(
+        local.grafana_wait_for_postgres_mem_limit,
+        "32Mi"
+      )
       grafana_cpu_request                = local.grafana_cpu_request
       grafana_cpu_limit                  = local.grafana_cpu_limit
       grafana_mem_request                = local.grafana_mem_request

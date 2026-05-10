@@ -270,6 +270,8 @@ locals {
       postgres_image_tag     = local.postgres_image_tag
       postgres_pvc_size      = local.postgres_pvc_size
       postgres_storage_class = local.postgres_storage_class
+      keycloak_cpu_request   = try(local.keycloak_cpu_request, "200m")
+      keycloak_cpu_limit     = try(local.keycloak_cpu_limit, "2")
       keycloak_realms        = []
       keycloak_realms_script = ""
     })) :
