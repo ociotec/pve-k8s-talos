@@ -189,7 +189,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(irate(ceph_osd_op_w_in_bytes{}[5m]))",
+          "expr": "sum(irate(ceph_pool_wr_bytes{}[5m]))",
           "format": "time_series",
           "instant": true,
           "interval": "$interval",
@@ -268,7 +268,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(irate(ceph_osd_op_r_out_bytes{}[5m]))",
+          "expr": "sum(irate(ceph_pool_rd_bytes{}[5m]))",
           "format": "time_series",
           "instant": true,
           "interval": "$interval",
@@ -579,7 +579,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(ceph_osd_op_w_in_bytes{})",
+          "expr": "sum(ceph_pool_wr_bytes{})",
           "format": "time_series",
           "instant": false,
           "interval": "$interval",
@@ -654,7 +654,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(ceph_osd_op_r_out_bytes{})",
+          "expr": "sum(ceph_pool_rd_bytes{})",
           "format": "time_series",
           "instant": false,
           "interval": "$interval",
@@ -795,7 +795,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(irate(ceph_osd_op_w{}[5m]))",
+          "expr": "sum(irate(ceph_pool_wr{}[5m]))",
           "format": "time_series",
           "instant": true,
           "interval": "$interval",
@@ -874,7 +874,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(irate(ceph_osd_op_r{}[5m]))",
+          "expr": "sum(irate(ceph_pool_rd{}[5m]))",
           "format": "time_series",
           "instant": true,
           "interval": "$interval",
@@ -1108,7 +1108,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(ceph_mon_num_sessions{})",
+          "expr": "sum(ceph_mon_metadata{})",
           "format": "time_series",
           "instant": false,
           "interval": "$interval",
@@ -1117,7 +1117,7 @@
           "refId": "A"
         }
       ],
-      "title": "Mon Session Num",
+      "title": "Monitors",
       "type": "stat"
     },
     {
@@ -1361,7 +1361,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "count(ceph_osd_up{} == 0.0) OR vector(0)",
+          "expr": "count(ceph_osd_up{} == 0) OR vector(0)",
           "format": "time_series",
           "instant": true,
           "interval": "$interval",
@@ -1593,7 +1593,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "avg(ceph_osd_numpg{})",
+          "expr": "sum(ceph_pg_total{})",
           "format": "time_series",
           "instant": true,
           "interval": "$interval",
@@ -1603,7 +1603,7 @@
           "step": 300
         }
       ],
-      "title": "Avg PGs",
+      "title": "Total PGs",
       "type": "stat"
     },
     {
@@ -1834,7 +1834,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "avg(rate(ceph_osd_op_w_latency_sum{}[5m]) / rate(ceph_osd_op_w_latency_count{}[5m]) >= 0)",
+          "expr": "avg(ceph_osd_commit_latency_ms{})",
           "format": "time_series",
           "interval": "$interval",
           "intervalFactor": 1,
@@ -1842,7 +1842,7 @@
           "refId": "A"
         }
       ],
-      "title": "Avg Op Write Latency",
+      "title": "Avg Commit Latency",
       "type": "stat"
     },
     {
@@ -1913,7 +1913,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "avg(rate(ceph_osd_op_r_latency_sum{}[5m])/rate(ceph_osd_op_r_latency_count{}[5m]) >= 0)",
+          "expr": "avg(ceph_osd_apply_latency_ms{})",
           "format": "time_series",
           "instant": true,
           "interval": "$interval",
@@ -1922,7 +1922,7 @@
           "refId": "A"
         }
       ],
-      "title": "Avg Op Read Latency",
+      "title": "Avg Apply Latency",
       "type": "stat"
     },
     {
@@ -2354,7 +2354,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(irate(ceph_osd_op_w{}[5m]))",
+          "expr": "sum(irate(ceph_pool_wr{}[5m]))",
           "format": "time_series",
           "interval": "$interval",
           "intervalFactor": 1,
@@ -2364,7 +2364,7 @@
         },
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(irate(ceph_osd_op_r{}[5m]))",
+          "expr": "sum(irate(ceph_pool_rd{}[5m]))",
           "format": "time_series",
           "interval": "$interval",
           "intervalFactor": 1,
@@ -2465,7 +2465,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(irate(ceph_osd_op_w_in_bytes{}[5m]))",
+          "expr": "sum(irate(ceph_pool_wr_bytes{}[5m]))",
           "format": "time_series",
           "interval": "$interval",
           "intervalFactor": 1,
@@ -2475,7 +2475,7 @@
         },
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(irate(ceph_osd_op_r_out_bytes{}[5m]))",
+          "expr": "sum(irate(ceph_pool_rd_bytes{}[5m]))",
           "format": "time_series",
           "interval": "$interval",
           "intervalFactor": 1,
@@ -3044,15 +3044,15 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "count(ceph_bluestore_kv_commit_lat_count{})",
+          "expr": "count by (device_class)(ceph_osd_metadata{})",
           "format": "time_series",
           "intervalFactor": 1,
-          "legendFormat": "BlueStore",
+          "legendFormat": "{{device_class}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "OSD Type Count",
+      "title": "OSD Device Classes",
       "type": "timeseries"
     },
     {
@@ -3137,7 +3137,7 @@
           "targets": [
             {
               "datasource": "${DS_PROMETHEUS}",
-              "expr": "ALERTS{alertstate=\"firing\",alertname=~\"^Ceph.+\"}",
+              "expr": "ALERTS{alertstate=\"firing\",alertname=~\"^Ceph.+\"} OR on() vector(0)",
               "format": "table",
               "instant": true,
               "intervalFactor": 1,
@@ -3320,7 +3320,7 @@
           "targets": [
             {
               "datasource": "${DS_PROMETHEUS}",
-              "expr": "ceph_osd_up{} == 0",
+              "expr": "ceph_osd_up{} == 0 OR on() vector(0)",
               "format": "table",
               "instant": true,
               "intervalFactor": 1,
@@ -3532,7 +3532,7 @@
           "targets": [
             {
               "datasource": "${DS_PROMETHEUS}",
-              "expr": "avg by(instance)(irate(node_cpu_seconds_total{job='node',mode!=\"idle\"}[$interval])) * 100",
+              "expr": "avg by(instance)(irate(node_cpu_seconds_total{job=\"node-exporter\",mode!=\"idle\"}[$interval])) * 100",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{instance}}",
@@ -3798,7 +3798,7 @@
           "targets": [
             {
               "datasource": "${DS_PROMETHEUS}",
-              "expr": "(node_filesystem_free_bytes{ mountpoint=\"/\", device != \"rootfs\"})*100 / (node_filesystem_size_bytes{ mountpoint=\"/\", device != \"rootfs\"})",
+              "expr": "(node_filesystem_free_bytes{job=\"node-exporter\", mountpoint=\"/var\", fstype!~\"tmpfs|overlay\"})*100 / (node_filesystem_size_bytes{job=\"node-exporter\", mountpoint=\"/var\", fstype!~\"tmpfs|overlay\"})",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "{{instance}}",
@@ -3806,7 +3806,7 @@
               "refId": "A"
             }
           ],
-          "title": "Free Space in root filesystem",
+          "title": "Free Space in /var filesystem",
           "type": "timeseries"
         }
       ],
@@ -4092,7 +4092,7 @@
         },
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(ceph_unclean_pgs{})",
+          "expr": "sum(ceph_pg_total{}) - sum(ceph_pg_clean{})",
           "format": "time_series",
           "interval": "$interval",
           "intervalFactor": 1,
@@ -4154,7 +4154,7 @@
         },
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(ceph_pg_wait_backfill{})",
+          "expr": "sum(ceph_pg_backfill_wait{})",
           "format": "time_series",
           "interval": "$interval",
           "intervalFactor": 1,
@@ -4224,7 +4224,7 @@
         },
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(ceph_pg_backfill{})",
+          "expr": "sum(ceph_pg_backfilling{})",
           "format": "time_series",
           "interval": "$interval",
           "intervalFactor": 1,
@@ -4478,7 +4478,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(irate(ceph_osd_recovery_ops{}[$interval]))",
+          "expr": "sum(ceph_pool_recovering_objects_per_sec{})",
           "format": "time_series",
           "interval": "$interval",
           "intervalFactor": 1,
@@ -4487,7 +4487,7 @@
           "step": 300
         }
       ],
-      "title": "Recovery Operations",
+      "title": "Pool Recovery Objects",
       "type": "timeseries"
     },
     {
@@ -4554,7 +4554,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-9
+          "le": 1E-9
         },
         "legend": {
           "show": true
@@ -4641,7 +4641,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-9
+          "le": 1E-9
         },
         "legend": {
           "show": true
@@ -4728,7 +4728,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-9
+          "le": 1E-9
         },
         "legend": {
           "show": true
@@ -4754,7 +4754,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "rate(ceph_osd_op_r_latency_sum{}[5m]) / rate(ceph_osd_op_r_latency_count{}[5m]) >= 0",
+          "expr": "ceph_osd_apply_latency_ms{}",
           "format": "time_series",
           "instant": false,
           "interval": "$interval",
@@ -4763,7 +4763,7 @@
           "refId": "A"
         }
       ],
-      "title": "OSD Read Op Latency Distribution",
+      "title": "OSD Apply Latency Distribution",
       "type": "heatmap"
     },
     {
@@ -4816,7 +4816,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-9
+          "le": 1E-9
         },
         "legend": {
           "show": true
@@ -4842,7 +4842,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "rate(ceph_osd_op_w_latency_sum{}[5m]) / rate(ceph_osd_op_w_latency_count{}[5m]) >= 0",
+          "expr": "ceph_osd_commit_latency_ms{}",
           "format": "time_series",
           "instant": false,
           "interval": "$interval",
@@ -4851,7 +4851,7 @@
           "refId": "A"
         }
       ],
-      "title": "OSD Write Op Latency Distribution",
+      "title": "OSD Commit Latency Distribution",
       "type": "heatmap"
     },
     {
@@ -4937,22 +4937,22 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "avg(rate(ceph_osd_op_r_latency_sum{}[5m]) / rate(ceph_osd_op_r_latency_count{}[5m]) >= 0)",
+          "expr": "avg(ceph_osd_apply_latency_ms{})",
           "format": "time_series",
           "intervalFactor": 1,
-          "legendFormat": "Read",
+          "legendFormat": "Apply",
           "refId": "A"
         },
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "avg(rate(ceph_osd_op_w_latency_sum{}[5m]) / rate(ceph_osd_op_w_latency_count{}[5m]) >= 0)",
+          "expr": "avg(ceph_osd_commit_latency_ms{})",
           "format": "time_series",
           "intervalFactor": 1,
-          "legendFormat": "Write",
+          "legendFormat": "Commit",
           "refId": "B"
         }
       ],
-      "title": "Recovery Operations",
+      "title": "Average OSD Latency",
       "type": "timeseries"
     },
     {
@@ -5409,14 +5409,14 @@
           "targets": [
             {
               "datasource": "${DS_PROMETHEUS}",
-              "expr": "count by (ceph_version)(ceph_rgw_metadata{})",
+              "expr": "count by (ceph_version)(ceph_rgw_metadata{}) OR on() vector(0)",
               "format": "time_series",
               "intervalFactor": 1,
               "legendFormat": "",
               "refId": "A"
             }
           ],
-          "title": "Ceph RGW Versions",
+          "title": "Ceph RGW Versions (if present)",
           "type": "timeseries"
         }
       ],
