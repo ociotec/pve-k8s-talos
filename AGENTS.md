@@ -70,6 +70,12 @@ It complements `README.md` and focuses on execution behavior, change safety, and
 - Use `computed_fields`/`ignore_changes` for known unstable fields when provider inconsistencies are observed.
 - Avoid unnecessary manifest churn; preserve field order and semantics unless a behavior change is intended.
 
+## Kubernetes Resource Requirements
+
+- Every service deployed into the cluster must define CPU and memory `requests` and `limits` for every container.
+- This applies to Deployments, StatefulSets, DaemonSets, Jobs, CronJobs, init containers, and sidecars created by shared modules or manifests.
+- Do not add or update a workload manifest without checking that all containers have both CPU and memory reservations and limits.
+
 ## Validation Checklist (Minimum)
 
 For any non-trivial change:
