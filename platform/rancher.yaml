@@ -207,6 +207,13 @@ spec:
           timeoutSeconds: 5
           periodSeconds: 30
           failureThreshold: 5
+        resources:
+          requests:
+            cpu: 200m
+            memory: 2560Mi
+          limits:
+            cpu: "1"
+            memory: 2560Mi
         volumeMounts:
         # Pass CA cert into rancher for private CA
         - mountPath: /etc/rancher/ssl/cacerts.pem
