@@ -75,6 +75,7 @@ It complements `README.md` and focuses on execution behavior, change safety, and
 - Every service deployed into the cluster must define CPU and memory `requests` and `limits` for every container.
 - This applies to Deployments, StatefulSets, DaemonSets, Jobs, CronJobs, init containers, and sidecars created by shared modules or manifests.
 - Do not add or update a workload manifest without checking that all containers have both CPU and memory reservations and limits.
+- For memory, set `requests.memory` equal to `limits.memory` to make OOM behavior explicit and avoid scheduling pods with lower memory reservations than their enforced ceiling.
 
 ## Validation Checklist (Minimum)
 

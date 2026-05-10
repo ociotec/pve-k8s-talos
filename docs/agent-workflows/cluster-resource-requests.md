@@ -39,6 +39,10 @@ Exclude:
 - Compare reserved resources with actual 24-hour usage, not only current usage.
 - Call out when cluster-level used CPU or memory exceeds requested CPU or memory because that indicates under-requested workloads.
 - Do not change manifests unless the user explicitly asks for remediation.
+- Never apply changes to the cluster from this workflow.
+- Never run `tofu plan`, `tofu apply`, or any deployment script from this workflow.
+- Only inspect, edit repository files when requested, and run validation commands such as `tofu init` and `tofu validate`.
+- After remediation analysis, show the user the minimal `scripts/deploy.sh` command needed to apply the changes, using skip flags for unaffected stacks. The user runs it manually.
 - Do not include secrets, private hostnames, private IPs, or raw private URLs in the final answer.
 
 ## Output Format
@@ -126,6 +130,13 @@ If the result is large, show the worst 25 rows and state that the table is trunc
    - count of containers with missing requests
    - count of containers with missing limits
 11. Render the table using the required columns.
+12. If repository files were changed, validate affected generated workspaces but do not run `tofu plan`, `tofu apply`, or a deployment script.
+13. End with an apply command suggestion:
+   - Run from `clusters/<cluster>`.
+   - Use `../../scripts/deploy.sh --services-only` for service-only changes.
+   - Add skip flags for unaffected stacks.
+   - For Rook-only changes, use:
+     `../../scripts/deploy.sh --services-only --skip-k8s-net --skip-identity --skip-platform --skip-monitoring`
 
 ## Prometheus Notes
 
