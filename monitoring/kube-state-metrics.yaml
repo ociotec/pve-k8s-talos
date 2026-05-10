@@ -75,6 +75,28 @@ rules:
       - list
       - watch
   - apiGroups:
+      - admissionregistration.k8s.io
+    resources:
+      - mutatingwebhookconfigurations
+      - validatingwebhookconfigurations
+    verbs:
+      - list
+      - watch
+  - apiGroups:
+      - certificates.k8s.io
+    resources:
+      - certificatesigningrequests
+    verbs:
+      - list
+      - watch
+  - apiGroups:
+      - discovery.k8s.io
+    resources:
+      - endpointslices
+    verbs:
+      - list
+      - watch
+  - apiGroups:
       - storage.k8s.io
     resources:
       - storageclasses
@@ -120,6 +142,24 @@ spec:
               containerPort: 8080
             - name: telemetry
               containerPort: 8081
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: telemetry
+              scheme: HTTP
+            periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: telemetry
+              scheme: HTTP
+            periodSeconds: 30
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
           resources:
             requests:
               cpu: ${kube_state_metrics_cpu_request}

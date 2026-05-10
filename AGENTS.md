@@ -90,6 +90,8 @@ It complements `README.md` and focuses on execution behavior, change safety, and
 - Use `livenessProbe` to let Kubernetes recover containers that are running but unhealthy.
 - Add `startupProbe` when startup can legitimately take longer than normal liveness timing, such as WAL replay, database migrations, storage recovery, cache warmup, or JVM/application warmup.
 - Do not use liveness probes as startup gates; use `startupProbe` so slow but healthy starts are not killed prematurely.
+- Do not assume probe endpoint paths from memory. Before adding or changing an HTTP/gRPC probe, verify the endpoint against official component documentation or the component's existing configuration, and when practical test it against a running pod or local port-forward before recommending or applying it.
+- When the Kubernetes API normalizes probe defaults, write those defaults explicitly in manifests to avoid `kubernetes_manifest` provider drift: `timeoutSeconds: 1`, `successThreshold: 1`, and `httpGet.scheme: HTTP` for HTTP probes unless a component requires different values.
 - Jobs and CronJobs do not require readiness/liveness probes by default, but long-running job-style services should still define an appropriate health check if they expose service behavior.
 
 ## Validation Checklist (Minimum)

@@ -57,6 +57,42 @@ spec:
           ports:
             - name: postgres
               containerPort: 5432
+          startupProbe:
+            exec:
+              command:
+                - pg_isready
+                - -h
+                - 127.0.0.1
+                - -p
+                - "5432"
+            periodSeconds: 5
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -h
+                - 127.0.0.1
+                - -p
+                - "5432"
+            periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -h
+                - 127.0.0.1
+                - -p
+                - "5432"
+            periodSeconds: 30
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
           env:
             - name: POSTGRES_DB
               valueFrom:
@@ -88,6 +124,24 @@ spec:
           ports:
             - name: metrics
               containerPort: 9187
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+              scheme: HTTP
+            periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+              scheme: HTTP
+            periodSeconds: 30
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
           env:
             - name: DATA_SOURCE_URI
               value: localhost:5432/${grafana_db_name}?sslmode=disable
@@ -199,6 +253,33 @@ spec:
           ports:
             - name: monitoring
               containerPort: 3000
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: monitoring
+              scheme: HTTP
+            periodSeconds: 5
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: monitoring
+              scheme: HTTP
+            periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: monitoring
+              scheme: HTTP
+            periodSeconds: 30
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
           resources:
             requests:
               cpu: ${grafana_cpu_request}

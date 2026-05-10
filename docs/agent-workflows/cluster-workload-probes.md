@@ -37,6 +37,7 @@ Exclude by default:
 - Always show workloads missing readiness or liveness probes first.
 - Treat readiness and liveness probes as required for long-running service workloads.
 - Treat startup probes as recommended when startup may be slow because of WAL replay, migrations, storage recovery, cache warmup, JVM warmup, or similar initialization work.
+- Do not assume HTTP/gRPC probe endpoint paths from memory. Before remediation, verify endpoints against official component documentation or existing component configuration, and when practical test them against a running pod or a temporary port-forward.
 - Do not change manifests unless the user explicitly asks for remediation.
 - Never apply changes to the cluster from this workflow.
 - Never run `tofu plan`, `tofu apply`, or any deployment script from this workflow.
@@ -124,6 +125,10 @@ If the result is large, show the worst 25 rows and state that the table is trunc
 - Use liveness endpoints that prove the process is not deadlocked or permanently unhealthy.
 - Use startup probes for components with known slow initialization so liveness checks do not kill healthy startup work.
 - Avoid overly aggressive liveness thresholds for storage-backed services; slow I/O should not cause repeated restarts.
+- For HTTP probes managed through `kubernetes_manifest`, write API defaults explicitly to avoid provider drift after apply:
+  - `scheme: HTTP`
+  - `timeoutSeconds: 1`
+  - `successThreshold: 1`
 - For Prometheus, prefer:
   - readiness/startup: `/-/ready`
   - liveness: `/-/healthy`

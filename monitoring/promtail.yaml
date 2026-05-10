@@ -102,6 +102,36 @@ spec:
           image: grafana/promtail:${promtail_image_tag}
           args:
             - -config.file=/etc/promtail/promtail.yaml
+          ports:
+            - name: http
+              containerPort: 3101
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: http
+              scheme: HTTP
+            periodSeconds: 5
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+              scheme: HTTP
+            periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: http
+              scheme: HTTP
+            periodSeconds: 30
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
           env:
             - name: HOSTNAME
               valueFrom:

@@ -99,6 +99,33 @@ spec:
           ports:
             - name: http
               containerPort: 3100
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: http
+              scheme: HTTP
+            periodSeconds: 5
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+              scheme: HTTP
+            periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: http
+              scheme: HTTP
+            periodSeconds: 30
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
           resources:
             requests:
               cpu: ${loki_cpu_request}
