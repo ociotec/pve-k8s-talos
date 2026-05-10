@@ -235,24 +235,24 @@ spec:
     mon:
       limits:
         cpu: "500m"
-        memory: "1024Mi"
+        memory: "1Gi"
       requests:
         cpu: "100m"
-        memory: "1024Mi"
+        memory: "1Gi"
     mgr:
       limits:
         cpu: "1"
-        memory: "1024Mi"
+        memory: "1Gi"
       requests:
         cpu: "200m"
-        memory: "1024Mi"
+        memory: "1Gi"
     osd:
       limits:
         cpu: "2"
-        memory: "3072Mi"
+        memory: "3Gi"
       requests:
         cpu: "500m"
-        memory: "3072Mi"
+        memory: "3Gi"
     mds:
       limits:
         cpu: "500m"
@@ -271,10 +271,10 @@ spec:
   #The requests and limits set here, allow the mgr pod to use half of one CPU core and 1 gigabyte of memory
   #   mgr:
   #     limits:
-  #       memory: "1024Mi"
+  #       memory: "1Gi"
   #     requests:
   #       cpu: "500m"
-  #       memory: "1024Mi"
+  #       memory: "1Gi"
   # The above example requests/limits can also be added to the other components
   #   mon:
   #   osd:

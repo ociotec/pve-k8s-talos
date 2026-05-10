@@ -157,7 +157,12 @@ If the result is large, show the worst 25 rows and state that the table is trunc
   - use `"1"` instead of `"1000m"`
   - use `"2"` instead of `"2000m"`
   - keep non-integer CPU values as millicores, such as `200m`, `500m`, or `1500m` for 1.5 cores
-  - `scripts/deploy.sh` rejects integer CPU millicore values in modules that are included in the selected deployment path
+- When setting memory requests or limits, write whole-Gi values in Kubernetes-canonical Gi form:
+  - use `"1Gi"` instead of `"1024Mi"`
+  - use `"2Gi"` instead of `"2048Mi"`
+  - use `"3Gi"` instead of `"3072Mi"`
+  - keep non-whole Gi values as Mi, such as `1536Mi`
+  - `scripts/deploy.sh` rejects integer CPU millicore values and whole-Gi memory values written as Mi in modules that are included in the selected deployment path
 - For missing memory limits, recommend setting them for application workloads where OOM behavior is acceptable and understood.
 - For missing CPU limits, do not automatically recommend strict CPU limits for latency-sensitive workloads; recommend review instead.
 - If a namespace is system-owned, prefer conservative recommendations and call out that changes should follow the component's supported configuration path.

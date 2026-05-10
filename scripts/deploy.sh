@@ -153,6 +153,38 @@ check_integer_cpu_millicores() {
   exit 1
 }
 
+check_integer_gibibyte_mebibytes() {
+  local paths=("$@")
+  local matches
+
+  if [[ "${#paths[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  matches="$(
+    find "${paths[@]}" -type f \( -name '*.yaml' -o -name '*.yml' -o -name '*.tf' \) -exec awk '
+      /^[[:space:]]*#/ { next }
+      /memory[[:space:]:=]+\"?[0-9]+Mi\"?/ {
+        value = $0
+        sub(/^.*memory[[:space:]:=]+\"?/, "", value)
+        sub(/Mi\"?.*$/, "", value)
+        if (value + 0 > 0 && value % 1024 == 0) {
+          printf "%s:%d:%s\n", FILENAME, FNR, $0
+        }
+      }
+    ' {} + 2>/dev/null || true
+  )"
+
+  if [[ -z "${matches}" ]]; then
+    return 0
+  fi
+
+  error "Found whole-Gi memory quantities written as Mi. Kubernetes normalizes these values and the provider can fail after apply." >&2
+  error "Use canonical Gi values instead: \"1Gi\" instead of \"1024Mi\", \"2Gi\" instead of \"2048Mi\". Keep non-whole values like 1536Mi as Mi." >&2
+  printf '%s\n' "${matches}" >&2
+  exit 1
+}
+
 if [[ "${skip_ceph}" == "true" ]]; then
   gen_talos_args+=(--skip-ceph)
 fi
@@ -169,23 +201,24 @@ if [[ "${skip_monitoring}" == "true" ]]; then
   gen_talos_args+=(--skip-monitoring)
 fi
 
-cpu_quantity_check_paths=()
+quantity_check_paths=()
 if [[ "${skip_ceph}" != "true" ]]; then
-  cpu_quantity_check_paths+=("${repo_root}/rook")
+  quantity_check_paths+=("${repo_root}/rook")
 fi
 if [[ "${skip_k8s_net}" != "true" ]]; then
-  cpu_quantity_check_paths+=("${repo_root}/k8s-net")
+  quantity_check_paths+=("${repo_root}/k8s-net")
 fi
 if [[ "${skip_identity}" != "true" ]]; then
-  cpu_quantity_check_paths+=("${repo_root}/identity")
+  quantity_check_paths+=("${repo_root}/identity")
 fi
 if [[ "${skip_platform}" != "true" ]]; then
-  cpu_quantity_check_paths+=("${repo_root}/platform")
+  quantity_check_paths+=("${repo_root}/platform")
 fi
 if [[ "${skip_monitoring}" != "true" ]]; then
-  cpu_quantity_check_paths+=("${repo_root}/monitoring")
+  quantity_check_paths+=("${repo_root}/monitoring")
 fi
-check_integer_cpu_millicores "${cpu_quantity_check_paths[@]}"
+check_integer_cpu_millicores "${quantity_check_paths[@]}"
+check_integer_gibibyte_mebibytes "${quantity_check_paths[@]}"
 
 if [[ "${debug}" == "true" ]]; then
   # Enable verbose tracing and Terraform debug logging for troubleshooting.
@@ -646,14 +679,27 @@ wait_for_job_complete() {
   local job_name="$2"
   local timeout_seconds="${3:-600}"
   local start
+  local now
+  local elapsed
+  local last_progress
   local complete_status
   local failed_status
   local bad_pods
+  local active_status
+  local ready_status
+  local succeeded_status
+  local pod_summary
+  local recent_logs
 
   start="$(date +%s)"
+  last_progress=0
   while true; do
+    now="$(date +%s)"
+    elapsed=$((now - start))
     complete_status="$(kubectl -n "${namespace}" get job "${job_name}" -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || true)"
     if [[ "${complete_status}" == "True" ]]; then
+      printf '\n'
+      message "Job ${namespace}/${job_name} completed."
       return 0
     fi
 
@@ -668,10 +714,27 @@ wait_for_job_complete() {
       exit 1
     fi
 
-    if (( $(date +%s) - start >= timeout_seconds )); then
+    if (( elapsed >= timeout_seconds )); then
+      printf '\n'
       error "Timed out waiting for job ${namespace}/${job_name} to complete." >&2
       print_job_failure_context "${namespace}" "${job_name}"
       exit 1
+    fi
+
+    if (( elapsed - last_progress >= 30 )); then
+      active_status="$(kubectl -n "${namespace}" get job "${job_name}" -o jsonpath='{.status.active}' 2>/dev/null || true)"
+      ready_status="$(kubectl -n "${namespace}" get job "${job_name}" -o jsonpath='{.status.ready}' 2>/dev/null || true)"
+      succeeded_status="$(kubectl -n "${namespace}" get job "${job_name}" -o jsonpath='{.status.succeeded}' 2>/dev/null || true)"
+      pod_summary="$(kubectl -n "${namespace}" get pods -l "job-name=${job_name}" --no-headers 2>/dev/null | awk '{ print $1 ":" $3 ":restarts=" $4 }' | paste -sd ', ' - || true)"
+      printf '\n'
+      message "Waiting for job ${namespace}/${job_name} (${elapsed}s/${timeout_seconds}s): active=${active_status:-0} ready=${ready_status:-0} succeeded=${succeeded_status:-0}; pods=${pod_summary:-none}"
+      recent_logs="$(kubectl -n "${namespace}" logs "job/${job_name}" --since=35s --tail=20 2>/dev/null || true)"
+      if [[ -n "${recent_logs}" ]]; then
+        printf '%s\n' "${recent_logs}" | sed 's/^/  /'
+      fi
+      last_progress="${elapsed}"
+    else
+      printf '.'
     fi
 
     sleep 5
