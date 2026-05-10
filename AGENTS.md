@@ -81,6 +81,17 @@ It complements `README.md` and focuses on execution behavior, change safety, and
 - Write whole-Gi memory quantities in Kubernetes-canonical Gi form for the same reason: use `"1Gi"` instead of `"1024Mi"`, `"2Gi"` instead of `"2048Mi"`, and so on. Keep non-whole values like `1536Mi` in Mi.
 - `scripts/deploy.sh` has a preflight check that blocks integer CPU millicore values and whole-Gi memory values written as Mi in deployed modules for the same reason.
 
+## Kubernetes Probe Requirements
+
+- Every long-running service workload deployed into the cluster must define `readinessProbe` and `livenessProbe` for every regular container.
+- This applies to Deployments, StatefulSets, and DaemonSets created by shared modules or manifests.
+- Do not add or update a long-running workload manifest without checking that all regular containers have both probes.
+- Use `readinessProbe` to prevent traffic from reaching a container until the application is actually ready, not merely running.
+- Use `livenessProbe` to let Kubernetes recover containers that are running but unhealthy.
+- Add `startupProbe` when startup can legitimately take longer than normal liveness timing, such as WAL replay, database migrations, storage recovery, cache warmup, or JVM/application warmup.
+- Do not use liveness probes as startup gates; use `startupProbe` so slow but healthy starts are not killed prematurely.
+- Jobs and CronJobs do not require readiness/liveness probes by default, but long-running job-style services should still define an appropriate health check if they expose service behavior.
+
 ## Validation Checklist (Minimum)
 
 For any non-trivial change:
@@ -108,6 +119,8 @@ For any non-trivial change:
 ## Repo-Specific Agent Workflows
 
 - When the user asks to audit or update pinned versions across the repository, follow `docs/agent-workflows/update-versions.md`.
+- When the user asks to audit Kubernetes CPU/memory requests or limits, follow `docs/agent-workflows/cluster-resource-requests.md`.
+- When the user asks to audit Kubernetes readiness/liveness/startup probe coverage or health-check compliance, follow `docs/agent-workflows/cluster-workload-probes.md`.
 - Treat files under `docs/agent-workflows/` as repo-local operating procedures for agents:
   - use them when the user request clearly matches the workflow
   - apply them together with this `AGENTS.md`, not instead of it
