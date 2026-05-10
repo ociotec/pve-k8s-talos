@@ -49,10 +49,11 @@ Exclude:
 
 Use this column set unless the user requests a different shape:
 
-| Namespace | Workload | Container | CPU request | CPU limit | CPU 24h p95 | CPU request ratio | Memory request | Memory limit | Memory 24h max | Memory request ratio | Finding | Recommendation |
+| Section | Namespace | Workload | Container | CPU request | CPU limit | CPU 24h p95 | CPU request ratio | Memory request | Memory limit | Memory 24h max | Memory request ratio | Finding | Recommendation |
 
 Column rules:
 
+- `Section`: repository/deployment area affected, such as `identity`, `k8s-net`, `monitoring`, `platform`, `rook`, or `other`.
 - `Namespace`: Kubernetes namespace.
 - `Workload`: `<kind>/<name>`, for example `Deployment/grafana`.
 - `Container`: container name; prefix init containers with `init:`.
@@ -69,12 +70,10 @@ Column rules:
 
 Sort rows by severity:
 
-1. Missing CPU or memory request.
-2. Missing CPU or memory limit.
-3. Memory 24h max above request.
-4. CPU 24h p95 above request.
-5. Highest memory request ratio.
-6. Highest CPU request ratio.
+1. Section.
+2. Namespace.
+3. Workload.
+4. Container.
 
 If the result is large, show the worst 25 rows and state that the table is truncated.
 

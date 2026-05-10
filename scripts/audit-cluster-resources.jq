@@ -65,6 +65,17 @@ def workload_containers:
     | map(select((.resources.requests // null) != null or (.resources.limits // null) != null))
     | map({display: ("init:" + (.name // "")), lookup: (.name // ""), container: .}));
 
+def project_section($ns; $workload):
+  if $ns == "rook-ceph" then "rook"
+  elif $ns == "monitoring" then "monitoring"
+  elif $ns == "identity" then "identity"
+  elif $ns == "portainer" then "platform"
+  elif $ns == "ingress-nginx" or $ns == "metallb-system" or $ns == "cert-manager" then "k8s-net"
+  elif ($ns | startswith("cattle-")) or $ns == "fleet-local" then "platform"
+  elif $ns == "kube-system" then "k8s-net"
+  else "other"
+  end;
+
 ($workloads[0].items // []) as $workloadItems
 | ($pods[0].items // []) as $podItems
 | ($replicasets[0].items // []) as $replicaSetItems
@@ -121,6 +132,8 @@ def workload_containers:
     | ($workload.metadata.namespace) as $ns
     | ($workload.kind) as $kind
     | ($workload.metadata.name) as $name
+    | (($kind + "/" + $name)) as $workloadName
+    | project_section($ns; $workloadName) as $section
     | ($entry.container.resources.requests.cpu // null | parse_cpu) as $cpuRequest
     | ($entry.container.resources.requests.memory // null | parse_mem) as $memRequest
     | ($entry.container.resources.limits.cpu // null | parse_cpu) as $cpuLimit
@@ -153,8 +166,9 @@ def workload_containers:
     | {
         sort: [$severity, -([$cpuRatio, $memRatio, 0] | max)],
         row: {
+          "Section": $section,
           "Namespace": $ns,
-          "Workload": ($kind + "/" + $name),
+          "Workload": $workloadName,
           "Container": $entry.display,
           "CPU request": ($cpuRequest | fmt_cpu("missing")),
           "CPU limit": ($cpuLimit | fmt_cpu("missing")),
@@ -168,7 +182,7 @@ def workload_containers:
           "Recommendation": ($recommendations | join("; "))
         }
       }
-  ] | sort_by(.row.Namespace, .row.Workload, .row.Container) as $sortedRows
+  ] | sort_by(.row.Section, .row.Namespace, .row.Workload, .row.Container) as $sortedRows
 | (reduce ($podItems[] | select(.status.phase != "Succeeded" and .status.phase != "Failed") | .spec.containers[]?) as $container (
     {running: 0, missingRequests: 0, missingLimits: 0, cpuRequest: 0, memRequest: 0};
     ($container.resources.requests.cpu // null | parse_cpu) as $cpuRequest
@@ -218,10 +232,10 @@ def workload_containers:
         "Running containers missing requests: \($s.running_containers_missing_requests)",
         "Running containers missing limits: \($s.running_containers_missing_limits)",
         "",
-        "| Namespace | Workload | Container | CPU request | CPU limit | CPU 24h p95 | CPU request ratio | Memory request | Memory limit | Memory 24h max | Memory request ratio | Finding | Recommendation |",
-        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|"
+        "| Section | Namespace | Workload | Container | CPU request | CPU limit | CPU 24h p95 | CPU request ratio | Memory request | Memory limit | Memory 24h max | Memory request ratio | Finding | Recommendation |",
+        "|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|"
       ]
-      + ($rows | map("| \(.["Namespace"] | gsub("\\|"; "\\\\|")) | \(.["Workload"] | gsub("\\|"; "\\\\|")) | \(.["Container"] | gsub("\\|"; "\\\\|")) | \(.["CPU request"]) | \(.["CPU limit"]) | \(.["CPU 24h p95"]) | \(.["CPU request ratio"]) | \(.["Memory request"]) | \(.["Memory limit"]) | \(.["Memory 24h max"]) | \(.["Memory request ratio"]) | \(.["Finding"] | gsub("\\|"; "\\\\|")) | \(.["Recommendation"] | gsub("\\|"; "\\\\|")) |"))
+      + ($rows | map("| \(.["Section"] | gsub("\\|"; "\\\\|")) | \(.["Namespace"] | gsub("\\|"; "\\\\|")) | \(.["Workload"] | gsub("\\|"; "\\\\|")) | \(.["Container"] | gsub("\\|"; "\\\\|")) | \(.["CPU request"]) | \(.["CPU limit"]) | \(.["CPU 24h p95"]) | \(.["CPU request ratio"]) | \(.["Memory request"]) | \(.["Memory limit"]) | \(.["Memory 24h max"]) | \(.["Memory request ratio"]) | \(.["Finding"] | gsub("\\|"; "\\\\|")) | \(.["Recommendation"] | gsub("\\|"; "\\\\|")) |"))
       + (if ($showAll | not) and $s.rows_total > $s.rows_shown then ["", "Rows total: \($s.rows_total); shown: \($s.rows_shown). Use --all or --top <n> to change this."] else [] end)
     | .[]
   end
