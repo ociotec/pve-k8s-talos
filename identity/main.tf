@@ -237,9 +237,6 @@ locals {
       ]
     ])
   ])
-  keycloak_realm_config_script = trimspace(templatefile("${path.module}/keycloak-configure-realms.sh.tftpl", {
-    keycloak_realms = local.keycloak_realm_definitions
-  }))
   keycloak_enabled = trimspace(local.keycloak_hostname) != ""
   keycloak_realm_console_definitions = [
     for realm in local.keycloak_realm_definitions : {
@@ -279,8 +276,6 @@ locals {
     yamldecode(doc)
     if local.keycloak_enabled && length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
   ]
-  keycloak_realms_job_enabled = local.keycloak_enabled && length(local.keycloak_realm_definitions) > 0
-
   identity_certificates = [
     for m in local.identity_resources : m
     if try(m.kind, "") == "Certificate" && local.tls_source == "ca_issuer"
@@ -505,67 +500,6 @@ resource "kubernetes_manifest" "identity_ingress" {
   ]
 }
 
-resource "kubernetes_job_v1" "identity_realms_job" {
-  count = !var.skip_identity && local.keycloak_realms_job_enabled ? 1 : 0
-
-  wait_for_completion = false
-
-  metadata {
-    name      = "keycloak-configure-realms"
-    namespace = local.identity_namespace
-  }
-
-  spec {
-    backoff_limit = 6
-
-    template {
-      metadata {
-        labels = {
-          app = "keycloak-configure-realms"
-        }
-      }
-
-      spec {
-        restart_policy = "OnFailure"
-
-        container {
-          name  = "keycloak-configure-realms"
-          image = "quay.io/keycloak/keycloak:${local.keycloak_image_tag}"
-          command = [
-            "/bin/sh",
-            "-ec",
-            local.keycloak_realm_config_script,
-          ]
-
-          volume_mount {
-            name       = "keycloak-admin"
-            mount_path = "/keycloak-admin"
-            read_only  = true
-          }
-        }
-
-        volume {
-          name = "keycloak-admin"
-
-          secret {
-            secret_name = "keycloak-admin"
-          }
-        }
-      }
-    }
-  }
-
-  depends_on = [
-    kubernetes_manifest.identity_other,
-    kubernetes_manifest.identity_ingress,
-  ]
-
-  timeouts {
-    create = "10m"
-    update = "10m"
-  }
-}
-
 output "keycloak_enabled" {
   value = local.keycloak_enabled && !var.skip_identity
 }
@@ -639,4 +573,9 @@ output "keycloak_realm_groups" {
       }
     }
   } : {}
+}
+
+output "keycloak_realm_definitions" {
+  value     = local.keycloak_enabled && !var.skip_identity ? local.keycloak_realm_definitions : []
+  sensitive = true
 }

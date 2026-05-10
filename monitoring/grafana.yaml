@@ -231,6 +231,8 @@ spec:
               value: "true"
             - name: GF_AUTH_GENERIC_OAUTH_ALLOW_SIGN_UP
               value: "${grafana_auth_allow_sign_up}"
+            - name: GF_AUTH_OAUTH_ALLOW_INSECURE_EMAIL_LOOKUP
+              value: "true"
             - name: GF_AUTH_OAUTH_AUTO_LOGIN
               value: "${grafana_auth_auto_login}"
             - name: GF_AUTH_GENERIC_OAUTH_JWK_SET_URL

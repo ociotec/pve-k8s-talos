@@ -355,14 +355,26 @@ prepare_identity_workspace() {
   fi
   link_into_workspace "${repo_root}/identity/main.tf" "${workspace}/main.tf"
   link_into_workspace "${repo_root}/identity/keycloak.yaml" "${workspace}/keycloak.yaml"
-  link_into_workspace "${repo_root}/identity/keycloak-realms-job.yaml" "${workspace}/keycloak-realms-job.yaml"
-  link_into_workspace "${repo_root}/identity/keycloak-configure-realms.sh.tftpl" "${workspace}/keycloak-configure-realms.sh.tftpl"
   link_into_workspace "${cluster_identity_constants_path}" "${workspace}/constants.tf"
   link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/k8s_net_constants.tf"
   link_into_workspace "${cluster_ceph_constants_path}" "${workspace}/ceph_constants.tf"
   link_into_workspace "${cluster_certs_dir}" "${workspace}/certs"
   if [[ -r "${repo_root}/identity/.terraform.lock.hcl" ]]; then
     link_into_workspace "${repo_root}/identity/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
+  fi
+}
+
+prepare_identity_config_workspace() {
+  local workspace="${cluster_identity_config_workspace}"
+
+  mkdir -p "${workspace}"
+  if [[ -d "${repo_root}/identity-config/.terraform" ]]; then
+    link_into_workspace "${repo_root}/identity-config/.terraform" "${workspace}/.terraform"
+  fi
+  link_into_workspace "${repo_root}/identity-config/main.tf" "${workspace}/main.tf"
+  link_into_workspace "${repo_root}/identity-config/configure-keycloak-realms.sh" "${workspace}/configure-keycloak-realms.sh"
+  if [[ -r "${repo_root}/identity-config/.terraform.lock.hcl" ]]; then
+    link_into_workspace "${repo_root}/identity-config/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
   fi
 }
 
@@ -682,6 +694,8 @@ wait_for_job_complete() {
   local now
   local elapsed
   local last_progress
+  local printed_wait_status
+  local printed_dots
   local complete_status
   local failed_status
   local bad_pods
@@ -693,12 +707,16 @@ wait_for_job_complete() {
 
   start="$(date +%s)"
   last_progress=0
+  printed_wait_status=false
+  printed_dots=false
   while true; do
     now="$(date +%s)"
     elapsed=$((now - start))
     complete_status="$(kubectl -n "${namespace}" get job "${job_name}" -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || true)"
     if [[ "${complete_status}" == "True" ]]; then
-      printf '\n'
+      if [[ "${printed_dots}" == "true" ]]; then
+        printf '\n'
+      fi
       message "Job ${namespace}/${job_name} completed."
       return 0
     fi
@@ -715,26 +733,35 @@ wait_for_job_complete() {
     fi
 
     if (( elapsed >= timeout_seconds )); then
-      printf '\n'
+      if [[ "${printed_dots}" == "true" ]]; then
+        printf '\n'
+      fi
       error "Timed out waiting for job ${namespace}/${job_name} to complete." >&2
       print_job_failure_context "${namespace}" "${job_name}"
       exit 1
     fi
 
-    if (( elapsed - last_progress >= 30 )); then
+    if [[ "${printed_wait_status}" != "true" ]]; then
       active_status="$(kubectl -n "${namespace}" get job "${job_name}" -o jsonpath='{.status.active}' 2>/dev/null || true)"
       ready_status="$(kubectl -n "${namespace}" get job "${job_name}" -o jsonpath='{.status.ready}' 2>/dev/null || true)"
       succeeded_status="$(kubectl -n "${namespace}" get job "${job_name}" -o jsonpath='{.status.succeeded}' 2>/dev/null || true)"
       pod_summary="$(kubectl -n "${namespace}" get pods -l "job-name=${job_name}" --no-headers 2>/dev/null | awk '{ print $1 ":" $3 ":restarts=" $4 }' | paste -sd ', ' - || true)"
-      printf '\n'
-      message "Waiting for job ${namespace}/${job_name} (${elapsed}s/${timeout_seconds}s): active=${active_status:-0} ready=${ready_status:-0} succeeded=${succeeded_status:-0}; pods=${pod_summary:-none}"
-      recent_logs="$(kubectl -n "${namespace}" logs "job/${job_name}" --since=35s --tail=20 2>/dev/null || true)"
+      if [[ "${printed_dots}" == "true" ]]; then
+        printf '\n'
+      fi
+      message "Waiting for job ${namespace}/${job_name} (timeout ${timeout_seconds}s): active=${active_status:-0} ready=${ready_status:-0} succeeded=${succeeded_status:-0}; pods=${pod_summary:-none}"
+      printed_wait_status=true
+      last_progress="${elapsed}"
+    elif (( elapsed - last_progress >= 30 )); then
+      recent_logs="$(kubectl -n "${namespace}" logs "job/${job_name}" --since=31s --tail=20 2>/dev/null || true)"
       if [[ -n "${recent_logs}" ]]; then
+        printf '\n'
         printf '%s\n' "${recent_logs}" | sed 's/^/  /'
       fi
       last_progress="${elapsed}"
     else
       printf '.'
+      printed_dots=true
     fi
 
     sleep 5
@@ -1182,6 +1209,7 @@ if [[ "${skip_identity}" == "true" ]]; then
   message "Skipping identity services."
 else
   prepare_identity_workspace
+  prepare_identity_config_workspace
   message "Deploying identity services..."
   run_tofu_init "${cluster_identity_workspace}"
   message "Refreshing one-shot Keycloak jobs before apply..."
@@ -1191,10 +1219,9 @@ else
   wait_for_pvcs_bound "identity" "600" "keycloak-postgres-data"
   wait_for_deployments_ready "identity" "900s" "keycloak-postgres" "keycloak"
   wait_for_service_endpoints "identity" "900" "keycloak-postgres" "keycloak"
-  wait_for_job_complete "identity" "keycloak-bootstrap-admin" "300"
-  if kubectl -n identity get job/keycloak-configure-realms >/dev/null 2>&1; then
-    wait_for_job_complete "identity" "keycloak-configure-realms" "900"
-  fi
+  message "Configuring Keycloak realms via API..."
+  run_tofu_init "${cluster_identity_config_workspace}"
+  run tofu -chdir="${cluster_identity_config_workspace}" apply -auto-approve
   keycloak_url="$(tofu -chdir="${cluster_identity_workspace}" output -raw keycloak_url)"
   keycloak_admin_user="$(tofu -chdir="${cluster_identity_workspace}" output -raw keycloak_admin_user)"
   keycloak_admin_password="$(tofu -chdir="${cluster_identity_workspace}" output -raw keycloak_admin_password)"
