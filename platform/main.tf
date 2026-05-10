@@ -334,6 +334,252 @@ locals {
       groupPrincipalName = principal_id
     }
   } : {}
+  rancher_managed_resource_patches = {
+    "cattle-capi-system/capi-controller-manager" = {
+      namespace = "cattle-capi-system"
+      resource  = "deployment"
+      name      = "capi-controller-manager"
+      patch = jsonencode({
+        spec = {
+          template = {
+            spec = {
+              containers = [{
+                name = "manager"
+                resources = {
+                  requests = {
+                    cpu    = "25m"
+                    memory = "64Mi"
+                  }
+                  limits = {
+                    cpu    = "200m"
+                    memory = "64Mi"
+                  }
+                }
+              }]
+            }
+          }
+        }
+      })
+    }
+    "cattle-fleet-local-system/fleet-agent" = {
+      namespace = "cattle-fleet-local-system"
+      resource  = "deployment"
+      name      = "fleet-agent"
+      patch = jsonencode({
+        spec = {
+          template = {
+            spec = {
+              containers = [{
+                name = "fleet-agent"
+                resources = {
+                  requests = {
+                    cpu    = "25m"
+                    memory = "64Mi"
+                  }
+                  limits = {
+                    cpu    = "200m"
+                    memory = "64Mi"
+                  }
+                }
+              }]
+            }
+          }
+        }
+      })
+    }
+    "cattle-fleet-system/fleet-cleanup-gitrepo-jobs" = {
+      namespace = "cattle-fleet-system"
+      resource  = "cronjob"
+      name      = "fleet-cleanup-gitrepo-jobs"
+      patch = jsonencode({
+        spec = {
+          jobTemplate = {
+            spec = {
+              template = {
+                spec = {
+                  containers = [{
+                    name = "cleanup"
+                    resources = {
+                      requests = {
+                        cpu    = "50m"
+                        memory = "128Mi"
+                      }
+                      limits = {
+                        cpu    = "200m"
+                        memory = "128Mi"
+                      }
+                    }
+                  }]
+                }
+              }
+            }
+          }
+        }
+      })
+    }
+    "cattle-fleet-system/fleet-controller" = {
+      namespace = "cattle-fleet-system"
+      resource  = "deployment"
+      name      = "fleet-controller"
+      patch = jsonencode({
+        spec = {
+          template = {
+            spec = {
+              containers = [
+                {
+                  name = "fleet-agentmanagement"
+                  resources = {
+                    requests = {
+                      cpu    = "25m"
+                      memory = "64Mi"
+                    }
+                    limits = {
+                      cpu    = "200m"
+                      memory = "64Mi"
+                    }
+                  }
+                },
+                {
+                  name = "fleet-cleanup"
+                  resources = {
+                    requests = {
+                      cpu    = "25m"
+                      memory = "64Mi"
+                    }
+                    limits = {
+                      cpu    = "200m"
+                      memory = "64Mi"
+                    }
+                  }
+                },
+                {
+                  name = "fleet-controller"
+                  resources = {
+                    requests = {
+                      cpu    = "25m"
+                      memory = "64Mi"
+                    }
+                    limits = {
+                      cpu    = "200m"
+                      memory = "64Mi"
+                    }
+                  }
+                },
+              ]
+            }
+          }
+        }
+      })
+    }
+    "cattle-fleet-system/gitjob" = {
+      namespace = "cattle-fleet-system"
+      resource  = "deployment"
+      name      = "gitjob"
+      patch = jsonencode({
+        spec = {
+          template = {
+            spec = {
+              containers = [{
+                name = "gitjob"
+                resources = {
+                  requests = {
+                    cpu    = "25m"
+                    memory = "64Mi"
+                  }
+                  limits = {
+                    cpu    = "200m"
+                    memory = "64Mi"
+                  }
+                }
+              }]
+            }
+          }
+        }
+      })
+    }
+    "cattle-fleet-system/helmops" = {
+      namespace = "cattle-fleet-system"
+      resource  = "deployment"
+      name      = "helmops"
+      patch = jsonencode({
+        spec = {
+          template = {
+            spec = {
+              containers = [{
+                name = "helmops"
+                resources = {
+                  requests = {
+                    cpu    = "25m"
+                    memory = "64Mi"
+                  }
+                  limits = {
+                    cpu    = "200m"
+                    memory = "64Mi"
+                  }
+                }
+              }]
+            }
+          }
+        }
+      })
+    }
+    "cattle-system/rancher-webhook" = {
+      namespace = "cattle-system"
+      resource  = "deployment"
+      name      = "rancher-webhook"
+      patch = jsonencode({
+        spec = {
+          template = {
+            spec = {
+              containers = [{
+                name = "rancher-webhook"
+                resources = {
+                  requests = {
+                    cpu    = "25m"
+                    memory = "128Mi"
+                  }
+                  limits = {
+                    cpu    = "200m"
+                    memory = "128Mi"
+                  }
+                }
+              }]
+            }
+          }
+        }
+      })
+    }
+    "fleet-local/rke2-machineconfig-cleanup-cronjob" = {
+      namespace = "fleet-local"
+      resource  = "cronjob"
+      name      = "rke2-machineconfig-cleanup-cronjob"
+      patch = jsonencode({
+        spec = {
+          jobTemplate = {
+            spec = {
+              template = {
+                spec = {
+                  containers = [{
+                    name = "rke2-machineconfig-cleanup-pod"
+                    resources = {
+                      requests = {
+                        cpu    = "50m"
+                        memory = "128Mi"
+                      }
+                      limits = {
+                        cpu    = "200m"
+                        memory = "128Mi"
+                      }
+                    }
+                  }]
+                }
+              }
+            }
+          }
+        }
+      })
+    }
+  }
 }
 
 check "tls_source_valid" {
@@ -567,6 +813,23 @@ resource "null_resource" "rancher_auth_global_role_bindings" {
   }
 
   depends_on = [local_file.rancher_auth_global_role_bindings]
+}
+
+resource "null_resource" "rancher_managed_resource_patches" {
+  for_each = !var.skip_platform && local.rancher_enabled ? local.rancher_managed_resource_patches : {}
+
+  triggers = {
+    patch_sha = sha256(each.value.patch)
+  }
+
+  provisioner "local-exec" {
+    command = "for i in $(seq 1 60); do KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n ${each.value.namespace} get ${each.value.resource} ${each.value.name} >/dev/null 2>&1 && break; if [ \"$i\" -eq 60 ]; then KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n ${each.value.namespace} get ${each.value.resource} ${each.value.name}; exit 1; fi; sleep 10; done; KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n ${each.value.namespace} patch ${each.value.resource} ${each.value.name} --type=strategic --patch '${each.value.patch}'"
+  }
+
+  depends_on = [
+    null_resource.rancher_ready,
+    null_resource.rancher_keycloakoidc_authconfig,
+  ]
 }
 
 resource "local_sensitive_file" "portainer_oauth_configure" {
