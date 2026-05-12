@@ -1347,9 +1347,9 @@
   "schemaVersion": 39,
   "style": "dark",
   "tags": [
-    "loki",
-    "internal",
-    "monitoring"
+    "infrastructure",
+    "monitoring",
+    "loki"
   ],
   "templating": {
     "list": [
@@ -1446,7 +1446,7 @@
     ]
   },
   "timezone": "",
-  "title": "Loki Internal Metrics",
+  "title": "Loki internal metrics",
   "uid": "loki-internal-metrics",
   "version": 1
 }

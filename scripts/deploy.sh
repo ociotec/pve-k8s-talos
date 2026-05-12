@@ -657,6 +657,17 @@ wait_for_rollout_ready() {
     fi
   fi
 
+  if [[ "${resource}" == deploy/* ]] && printf '%s\n' "${output}" | grep -q 'exceeded its progress deadline'; then
+    message "warning: ${namespace}/${resource} reported progress deadline exceeded; waiting for current deployment state once more."
+    if kubectl -n "${namespace}" wait --for=condition=Available "${resource}" --timeout="${timeout}" 1>/dev/null 2>&1 \
+      && output="$(kubectl -n "${namespace}" rollout status "${resource}" --timeout=30s 2>&1)"; then
+      if [[ "${verbose}" == "true" && -n "${output}" ]]; then
+        printf '%s\n' "${output}"
+      fi
+      return 0
+    fi
+  fi
+
   error "Rollout failed or timed out for ${namespace}/${resource}." >&2
   if [[ -n "${output}" ]]; then
     printf '%s\n' "${output}" >&2
@@ -1275,6 +1286,16 @@ else
   wait_for_deployments_ready "monitoring" "600s" "${monitoring_deployments[@]}"
   wait_for_daemonsets_ready "monitoring" "600s" "${monitoring_daemonsets[@]}"
   wait_for_service_endpoints "monitoring" "600" "${monitoring_services[@]}"
+  grafana_dashboard_sync_job="$(
+    kubectl -n monitoring get jobs -l app=grafana-dashboard-sync \
+      -o jsonpath='{range .items[*]}{.metadata.creationTimestamp}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null \
+      | sort \
+      | tail -n 1 \
+      | awk '{ print $2 }'
+  )"
+  if [[ -n "${grafana_dashboard_sync_job}" ]]; then
+    wait_for_job_complete "monitoring" "${grafana_dashboard_sync_job}" "600"
+  fi
   grafana_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw grafana_url)"
   prometheus_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw prometheus_url)"
   prometheus_api_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw prometheus_api_url)"

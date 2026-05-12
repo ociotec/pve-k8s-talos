@@ -401,6 +401,11 @@ spec:
         - name: dashboards
           configMap:
             name: grafana-dashboards
+            items:
+%{ for item in grafana_dashboard_volume_items ~}
+              - key: ${item.key}
+                path: ${item.path}
+%{ endfor ~}
 %{ if grafana_auth_ca_enabled ~}
         - name: grafana-oauth-ca
           secret:
@@ -419,6 +424,160 @@ spec:
     - name: http
       port: 3000
       targetPort: monitoring
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: grafana-dashboard-sync-${grafana_dashboard_sync_hash}
+  namespace: monitoring
+  labels:
+    app: grafana-dashboard-sync
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: grafana-dashboard-sync
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: sync
+          image: grafana/grafana:${grafana_image_tag}
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -ec
+          args:
+            - |
+              api_url="http://grafana.monitoring.svc.cluster.local:3000"
+
+              curl_grafana() {
+                curl --connect-timeout 5 --max-time 30 -fsS -u "$GRAFANA_ADMIN_USER:$GRAFANA_ADMIN_PASSWORD" "$@"
+              }
+
+              until curl_grafana "$api_url/api/health" >/dev/null; do
+                sleep 5
+              done
+
+              ensure_folder() {
+                uid="$1"
+                title="$2"
+                parent_uid="$${3:-}"
+
+                if curl_grafana "$api_url/api/folders/$uid" >/dev/null 2>&1; then
+                  return 0
+                fi
+
+                payload="/tmp/folder-$${uid}.json"
+                if [ -n "$parent_uid" ]; then
+                  printf '{"uid":"%s","title":"%s","parentUid":"%s"}' "$uid" "$title" "$parent_uid" > "$payload"
+                else
+                  printf '{"uid":"%s","title":"%s"}' "$uid" "$title" > "$payload"
+                fi
+
+                code="$(curl --connect-timeout 5 --max-time 30 -sS -u "$GRAFANA_ADMIN_USER:$GRAFANA_ADMIN_PASSWORD" \
+                  -H 'Content-Type: application/json' \
+                  -o /tmp/folder-response.json \
+                  -w '%%{http_code}' \
+                  -X POST "$api_url/api/folders" \
+                  --data-binary "@$payload")"
+                if [ "$code" != "200" ] && [ "$code" != "412" ]; then
+                  cat /tmp/folder-response.json
+                  exit 1
+                fi
+              }
+
+              sync_dashboard() {
+                file="$1"
+                folder_uid="$2"
+                uid="$(sed -n 's/^  "uid"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file" | head -n 1)"
+                if [ -z "$uid" ]; then
+                  echo "Dashboard $file has no uid" >&2
+                  exit 1
+                fi
+
+                echo "Syncing dashboard $uid into $folder_uid"
+                payload="/tmp/dashboard-$${uid}.json"
+                printf '{"dashboard":' > "$payload"
+                cat "$file" >> "$payload"
+                printf ',"folderUid":"%s","overwrite":true,"message":"provisioned from repository"}' "$folder_uid" >> "$payload"
+
+                code="$(curl --connect-timeout 5 --max-time 30 -sS -u "$GRAFANA_ADMIN_USER:$GRAFANA_ADMIN_PASSWORD" \
+                  -H 'Content-Type: application/json' \
+                  -o /tmp/dashboard-response.json \
+                  -w '%%{http_code}' \
+                  -X POST "$api_url/api/dashboards/db" \
+                  --data-binary "@$payload")"
+
+                if [ "$code" != "200" ] && [ "$code" != "201" ]; then
+                  cat /tmp/dashboard-response.json
+                  exit 1
+                fi
+              }
+
+              sync_dir() {
+                dir="$1"
+                folder_uid="$2"
+                for dashboard in "$dir"/*.json; do
+                  [ -e "$dashboard" ] || continue
+                  sync_dashboard "$dashboard" "$folder_uid"
+                done
+              }
+
+              ensure_folder "infrastructure" "Infrastructure"
+              ensure_folder "infrastructure-k8s" "K8s" "infrastructure"
+              ensure_folder "infrastructure-k8s-net" "K8s net" "infrastructure"
+              ensure_folder "infrastructure-nodes" "Nodes" "infrastructure"
+              ensure_folder "infrastructure-monitoring" "Monitoring" "infrastructure"
+              ensure_folder "infrastructure-identity" "Identity" "infrastructure"
+              ensure_folder "infrastructure-platform" "Platform" "infrastructure"
+              ensure_folder "infrastructure-rook-ceph" "Rook Ceph" "infrastructure"
+
+              sync_dir /var/lib/grafana/dashboards/infrastructure/k8s infrastructure-k8s
+              sync_dir /var/lib/grafana/dashboards/infrastructure/k8s-net infrastructure-k8s-net
+              sync_dir /var/lib/grafana/dashboards/infrastructure/nodes infrastructure-nodes
+              sync_dir /var/lib/grafana/dashboards/infrastructure/monitoring infrastructure-monitoring
+              sync_dir /var/lib/grafana/dashboards/infrastructure/identity infrastructure-identity
+              sync_dir /var/lib/grafana/dashboards/infrastructure/rook-ceph infrastructure-rook-ceph
+          env:
+            - name: GRAFANA_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin
+                  key: admin-user
+            - name: GRAFANA_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin
+                  key: admin-password
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+              readOnly: true
+      volumes:
+        - name: dashboards
+          configMap:
+            name: grafana-dashboards
+            items:
+%{ for item in grafana_dashboard_volume_items ~}
+              - key: ${item.key}
+                path: ${item.path}
+%{ endfor ~}
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate

@@ -957,10 +957,9 @@
   "schemaVersion": 39,
   "style": "dark",
   "tags": [
-    "promtail",
-    "loki",
-    "internal",
-    "monitoring"
+    "infrastructure",
+    "monitoring",
+    "promtail"
   ],
   "templating": {
     "list": [
@@ -1081,7 +1080,7 @@
     ]
   },
   "timezone": "",
-  "title": "Promtail Internal Metrics",
+  "title": "Promtail internal metrics",
   "uid": "promtail-internal-metrics",
   "version": 1
 }

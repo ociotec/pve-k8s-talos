@@ -818,8 +818,8 @@
   "schemaVersion": 14,
   "style": "dark",
   "tags": [
-    "host",
-    "linux",
+    "infrastructure",
+    "nodes",
     "node-exporter"
   ],
   "templating": {
@@ -890,7 +890,7 @@
     ]
   },
   "timezone": "browser",
-  "title": "Node Exporter: Linux Node",
+  "title": "Node exporter: Linux node",
   "version": 0,
   "description": "A quickstart to setup Prometheus Node Exporter with preconfigured dashboards, alerting rules, and recording rules.",
   "uid": "node-exporter-quickstart"

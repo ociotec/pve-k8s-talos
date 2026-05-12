@@ -1957,9 +1957,9 @@
   "schemaVersion": 39,
   "style": "dark",
   "tags": [
-    "prometheus",
-    "internal",
-    "monitoring"
+    "infrastructure",
+    "monitoring",
+    "prometheus"
   ],
   "templating": {
     "list": [
@@ -2056,7 +2056,7 @@
     ]
   },
   "timezone": "",
-  "title": "Prometheus Internal Metrics",
+  "title": "Prometheus internal metrics",
   "uid": "prometheus-internal-metrics",
   "version": 1
 }

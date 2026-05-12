@@ -1266,7 +1266,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "The percentage of CPU time spent on garbage collection, indicating the impact of GC on application performance in the JVM. It refers to the proportion of the total CPU processing time that is dedicated to executing garbage collection (GC) operations, as opposed to running application code or performing other tasks. This metric helps determine how much overhead GC introduces, affecting the overall performance of the Keycloak\u2019s JVM.",
+          "description": "The percentage of CPU time spent on garbage collection, indicating the impact of GC on application performance in the JVM. It refers to the proportion of the total CPU processing time that is dedicated to executing garbage collection (GC) operations, as opposed to running application code or performing other tasks. This metric helps determine how much overhead GC introduces, affecting the overall performance of the Keycloak’s JVM.",
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -2228,7 +2228,7 @@
               "color": "rgba(255,0,255,0.7)"
             },
             "filterValues": {
-              "le": 1e-09
+              "le": 1E-9
             },
             "legend": {
               "show": true
@@ -6563,7 +6563,11 @@
   ],
   "refresh": "",
   "schemaVersion": 42,
-  "tags": [],
+  "tags": [
+    "infrastructure",
+    "identity",
+    "keycloak"
+  ],
   "templating": {
     "list": [
       {
@@ -6711,7 +6715,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Keycloak Troubleshooting",
+  "title": "Keycloak troubleshooting",
   "uid": "keycloak-troubleshooting",
   "version": 1,
   "weekStart": "",

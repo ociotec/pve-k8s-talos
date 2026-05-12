@@ -184,8 +184,26 @@ locals {
     for group_name in local.prometheus_auth_allowed_groups_value : group_name
     if !contains(keys(try(local.identity_realm_groups[local.prometheus_auth_keycloak_realm_value], {})), group_name)
   ] : []
-  available_identity_realms              = keys(local.identity_oidc_metadata)
-  monitoring_namespace                   = yamldecode(file("${path.module}/namespace.yaml"))
+  available_identity_realms = keys(local.identity_oidc_metadata)
+  monitoring_namespace      = yamldecode(file("${path.module}/namespace.yaml"))
+  grafana_dashboard_files   = sort(fileset("${path.module}/grafana/dashboards", "**/*.json"))
+  grafana_dashboard_configmap_keys = {
+    for filename in local.grafana_dashboard_files :
+    filename => replace(filename, "/", "__")
+  }
+  grafana_dashboard_volume_items = [
+    for filename in local.grafana_dashboard_files : {
+      key  = local.grafana_dashboard_configmap_keys[filename]
+      path = filename
+    }
+  ]
+  grafana_dashboard_sync_hash = substr(sha256(join("", concat(
+    [file("${path.module}/grafana.yaml")],
+    [
+      for filename in local.grafana_dashboard_files :
+      file("${path.module}/grafana/dashboards/${filename}")
+    ]
+  ))), 0, 12)
   prometheus_storage_class_value         = local.prometheus_storage_class
   prometheus_wal_compression_value       = try(local.prometheus_wal_compression, true)
   prometheus_query_max_concurrency_value = try(local.prometheus_query_max_concurrency, 10)
@@ -288,6 +306,8 @@ locals {
       grafana_oidc_api_url               = local.grafana_oidc_api_url
       grafana_oidc_jwk_set_url           = local.grafana_oidc_jwk_set_url
       grafana_oauth_signout_redirect_url = local.grafana_oauth_signout_redirect_url
+      grafana_dashboard_volume_items     = local.grafana_dashboard_volume_items
+      grafana_dashboard_sync_hash        = local.grafana_dashboard_sync_hash
     })) :
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
@@ -386,8 +406,8 @@ locals {
           name      = "grafana-dashboards"
           namespace = "monitoring"
         }
-        data = { for filename in fileset("${path.module}/grafana/dashboards", "*.json") :
-          filename => file("${path.module}/grafana/dashboards/${filename}")
+        data = { for filename in local.grafana_dashboard_files :
+          local.grafana_dashboard_configmap_keys[filename] => file("${path.module}/grafana/dashboards/${filename}")
         }
       },
     ],
@@ -406,11 +426,15 @@ locals {
   ]
   monitoring_other = [
     for m in local.monitoring_resources : m
-    if !contains(["Certificate", "Ingress", "Namespace", "DaemonSet"], try(m.kind, ""))
+    if !contains(["Certificate", "Ingress", "Namespace", "DaemonSet", "Job"], try(m.kind, ""))
   ]
   monitoring_daemonsets = [
     for m in local.monitoring_resources : m
     if try(m.kind, "") == "DaemonSet"
+  ]
+  monitoring_jobs = [
+    for m in local.monitoring_resources : m
+    if try(m.kind, "") == "Job"
   ]
   extra_namespaces = [
     for m in local.monitoring_resources : m
@@ -653,7 +677,10 @@ resource "kubernetes_secret_v1" "prometheus_oauth_ca" {
 }
 
 resource "kubernetes_manifest" "monitoring_other" {
-  for_each = { for i, m in local.monitoring_other : i => m }
+  for_each = {
+    for m in local.monitoring_other :
+    format("%s/%s/%s", try(m.metadata.namespace, "cluster"), m.kind, m.metadata.name) => m
+  }
   manifest = each.value
   computed_fields = concat([
     "metadata.annotations",
@@ -707,6 +734,33 @@ resource "null_resource" "monitoring_daemonsets" {
     kubernetes_manifest.extra_namespaces,
     kubernetes_manifest.monitoring_other,
     local_file.monitoring_daemonsets,
+  ]
+}
+
+resource "local_file" "monitoring_jobs" {
+  count = length(local.monitoring_jobs) > 0 ? 1 : 0
+
+  filename = "${path.module}/.generated-monitoring-jobs.yaml"
+  content  = join("\n---\n", [for m in local.monitoring_jobs : yamlencode(m)])
+}
+
+resource "null_resource" "monitoring_jobs" {
+  count = length(local.monitoring_jobs) > 0 ? 1 : 0
+
+  triggers = {
+    manifest_sha = sha256(local_file.monitoring_jobs[0].content)
+  }
+
+  provisioner "local-exec" {
+    command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl apply -f ${local_file.monitoring_jobs[0].filename}"
+  }
+
+  depends_on = [
+    kubernetes_manifest.monitoring_namespace,
+    kubernetes_manifest.extra_namespaces,
+    kubernetes_manifest.monitoring_other,
+    kubernetes_secret_v1.grafana_admin,
+    local_file.monitoring_jobs,
   ]
 }
 

@@ -14,7 +14,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
-  "id": 2,
+  "id": null,
   "links": [],
   "panels": [
     {
@@ -494,11 +494,10 @@
   "refresh": "30s",
   "schemaVersion": 42,
   "tags": [
-    "kubernetes",
-    "workers",
-    "requests",
-    "limits",
-    "normalized"
+    "infrastructure",
+    "k8s",
+    "kube-resources",
+    "worker"
   ],
   "templating": {
     "list": [
@@ -562,7 +561,7 @@
     ]
   },
   "timezone": "browser",
-  "title": "K8s: CPU & memory (usage / requests / limits) per worker",
+  "title": "K8s: CPU & memory usage, requests and limits per worker",
   "uid": "adhxgfb",
   "version": 1,
   "weekStart": ""

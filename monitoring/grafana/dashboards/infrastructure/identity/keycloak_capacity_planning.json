@@ -824,7 +824,11 @@
   ],
   "refresh": "",
   "schemaVersion": 42,
-  "tags": [],
+  "tags": [
+    "infrastructure",
+    "identity",
+    "keycloak"
+  ],
   "templating": {
     "list": [
       {
@@ -892,7 +896,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Keycloak Capacity Planning",
+  "title": "Keycloak capacity planning",
   "uid": "keycloak-capacity-planning",
   "version": 1,
   "weekStart": "monday",

@@ -21,7 +21,7 @@
       }
     ]
   },
-  "description": "Operational view of ingress-nginx: scrape health, request rate, status codes, latency, reload status, workqueue, and controller process resources.",
+  "description": "Operational view of CoreDNS: target health, request rate, response codes, latency, cache behavior, panics, CPU, and memory.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
@@ -81,7 +81,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "min(up{job=~\"$job\", namespace=\"ingress-nginx\", pod=~\"$pod\"})",
+          "expr": "min(up{job=~\"$job\", instance=~\"$instance\"})",
           "legendFormat": "up",
           "refId": "A"
         }
@@ -130,12 +130,12 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(rate(nginx_ingress_controller_requests{job=~\"$job\", pod=~\"$pod\", namespace=~\"$ingress_namespace\"}[$__rate_interval])) or vector(0)",
+          "expr": "sum(rate(coredns_dns_requests_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
           "legendFormat": "requests",
           "refId": "A"
         }
       ],
-      "title": "Request rate",
+      "title": "DNS query rate",
       "type": "stat"
     },
     {
@@ -198,12 +198,12 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(rate(nginx_ingress_controller_requests{job=~\"$job\", pod=~\"$pod\", namespace=~\"$ingress_namespace\", status=~\"5..\"}[$__rate_interval])) / clamp_min(sum(rate(nginx_ingress_controller_requests{job=~\"$job\", pod=~\"$pod\", namespace=~\"$ingress_namespace\"}[$__rate_interval])), 0.001) or vector(0)",
-          "legendFormat": "5xx",
+          "expr": "sum(rate(coredns_dns_responses_total{job=~\"$job\", instance=~\"$instance\", rcode=\"SERVFAIL\"}[$__rate_interval])) / clamp_min(sum(rate(coredns_dns_responses_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])), 0.001)",
+          "legendFormat": "servfail",
           "refId": "A"
         }
       ],
-      "title": "5xx ratio",
+      "title": "SERVFAIL ratio",
       "type": "stat"
     },
     {
@@ -226,11 +226,11 @@
               },
               {
                 "color": "orange",
-                "value": 0.5
+                "value": 0.05
               },
               {
                 "color": "red",
-                "value": 1
+                "value": 0.2
               }
             ]
           },
@@ -264,12 +264,12 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(nginx_ingress_controller_request_duration_seconds_bucket{job=~\"$job\", pod=~\"$pod\", namespace=~\"$ingress_namespace\"}[$__rate_interval]))) or vector(0)",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(coredns_dns_request_duration_seconds_bucket{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))",
           "legendFormat": "p99",
           "refId": "A"
         }
       ],
-      "title": "P99 request latency",
+      "title": "P99 latency",
       "type": "stat"
     },
     {
@@ -287,11 +287,11 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "green",
                 "value": null
               },
               {
-                "color": "green",
+                "color": "red",
                 "value": 1
               }
             ]
@@ -326,12 +326,12 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "min(nginx_ingress_controller_config_last_reload_successful{job=~\"$job\", pod=~\"$pod\"})",
-          "legendFormat": "reload",
+          "expr": "sum(increase(coredns_panics_total{job=~\"$job\", instance=~\"$instance\"}[$__range]))",
+          "legendFormat": "panics",
           "refId": "A"
         }
       ],
-      "title": "Last reload ok",
+      "title": "Panics in range",
       "type": "stat"
     },
     {
@@ -375,7 +375,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "count(up{job=~\"$job\", namespace=\"ingress-nginx\", pod=~\"$pod\"})",
+          "expr": "count(up{job=~\"$job\", instance=~\"$instance\"})",
           "legendFormat": "targets",
           "refId": "A"
         }
@@ -397,6 +397,7 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
+            "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
@@ -455,12 +456,12 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (status) (rate(nginx_ingress_controller_requests{job=~\"$job\", pod=~\"$pod\", namespace=~\"$ingress_namespace\"}[$__rate_interval]))",
-          "legendFormat": "{{status}}",
+          "expr": "sum by (type) (rate(coredns_dns_requests_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "{{type}}",
           "refId": "A"
         }
       ],
-      "title": "Requests by status",
+      "title": "Queries by type",
       "type": "timeseries"
     },
     {
@@ -477,98 +478,7 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 12,
-        "y": 4
-      },
-      "id": 8,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(nginx_ingress_controller_request_duration_seconds_bucket{job=~\"$job\", pod=~\"$pod\", namespace=~\"$ingress_namespace\"}[$__rate_interval])))",
-          "legendFormat": "p50",
-          "refId": "A"
-        },
-        {
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.90, sum by (le) (rate(nginx_ingress_controller_request_duration_seconds_bucket{job=~\"$job\", pod=~\"$pod\", namespace=~\"$ingress_namespace\"}[$__rate_interval])))",
-          "legendFormat": "p90",
-          "refId": "B"
-        },
-        {
-          "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(nginx_ingress_controller_request_duration_seconds_bucket{job=~\"$job\", pod=~\"$pod\", namespace=~\"$ingress_namespace\"}[$__rate_interval])))",
-          "legendFormat": "p99",
-          "refId": "C"
-        }
-      ],
-      "title": "Request latency",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
+            "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
@@ -604,10 +514,10 @@
       "gridPos": {
         "h": 7,
         "w": 12,
-        "x": 0,
-        "y": 11
+        "x": 12,
+        "y": 4
       },
-      "id": 9,
+      "id": 8,
       "options": {
         "legend": {
           "calcs": [
@@ -627,12 +537,12 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "topk(10, sum by (namespace, ingress) (rate(nginx_ingress_controller_requests{job=~\"$job\", pod=~\"$pod\", namespace=~\"$ingress_namespace\"}[$__rate_interval])))",
-          "legendFormat": "{{namespace}}/{{ingress}}",
+          "expr": "sum by (rcode) (rate(coredns_dns_responses_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "{{rcode}}",
           "refId": "A"
         }
       ],
-      "title": "Top ingresses by request rate",
+      "title": "Responses by RCODE",
       "type": "timeseries"
     },
     {
@@ -649,6 +559,100 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 11
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(coredns_dns_request_duration_seconds_bucket{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.90, sum by (le) (rate(coredns_dns_request_duration_seconds_bucket{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "p90",
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(coredns_dns_request_duration_seconds_bucket{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "title": "DNS request latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
@@ -707,12 +711,12 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (method) (rate(nginx_ingress_controller_requests{job=~\"$job\", pod=~\"$pod\", namespace=~\"$ingress_namespace\"}[$__rate_interval]))",
-          "legendFormat": "{{method}}",
+          "expr": "sum by (pod) (rate(coredns_dns_requests_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "{{pod}}",
           "refId": "A"
         }
       ],
-      "title": "Requests by method",
+      "title": "Queries by pod",
       "type": "timeseries"
     },
     {
@@ -729,246 +733,7 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 0,
-        "y": 18
-      },
-      "id": 11,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "nginx_ingress_controller_nginx_process_connections{job=~\"$job\", pod=~\"$pod\"}",
-          "legendFormat": "{{pod}} {{state}}",
-          "refId": "A"
-        }
-      ],
-      "title": "NGINX connections",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "unit": "ops"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 12,
-        "y": 18
-      },
-      "id": 12,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "mean"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "rate(nginx_ingress_controller_success{job=~\"$job\", pod=~\"$pod\"}[$__rate_interval])",
-          "legendFormat": "{{pod}} {{ingress}}",
-          "refId": "A"
-        }
-      ],
-      "title": "Controller sync success rate",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 0,
-        "y": 25
-      },
-      "id": 13,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "workqueue_depth{job=~\"$job\", pod=~\"$pod\"}",
-          "legendFormat": "{{pod}} {{name}}",
-          "refId": "A"
-        }
-      ],
-      "title": "Workqueue depth",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
+            "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
@@ -1003,11 +768,11 @@
       },
       "gridPos": {
         "h": 7,
-        "w": 8,
-        "x": 8,
-        "y": 25
+        "w": 12,
+        "x": 0,
+        "y": 18
       },
-      "id": 14,
+      "id": 11,
       "options": {
         "legend": {
           "calcs": [
@@ -1027,12 +792,12 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (pod) (rate(process_cpu_seconds_total{job=~\"$job\", pod=~\"$pod\"}[$__rate_interval]))",
-          "legendFormat": "{{pod}}",
+          "expr": "sum(rate(coredns_cache_hits_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])) / clamp_min(sum(rate(coredns_cache_hits_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])) + sum(rate(coredns_cache_misses_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])), 0.001)",
+          "legendFormat": "hit ratio",
           "refId": "A"
         }
       ],
-      "title": "Controller CPU",
+      "title": "Cache hit ratio",
       "type": "timeseries"
     },
     {
@@ -1049,6 +814,169 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (type) (coredns_cache_entries{job=~\"$job\", instance=~\"$instance\"})",
+          "legendFormat": "{{type}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Cache entries",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (pod) (rate(process_cpu_seconds_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CPU by pod",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
@@ -1083,11 +1011,11 @@
       },
       "gridPos": {
         "h": 7,
-        "w": 8,
-        "x": 16,
+        "w": 12,
+        "x": 12,
         "y": 25
       },
-      "id": 15,
+      "id": 14,
       "options": {
         "legend": {
           "calcs": [
@@ -1107,12 +1035,12 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "process_resident_memory_bytes{job=~\"$job\", pod=~\"$pod\"}",
+          "expr": "process_resident_memory_bytes{job=~\"$job\", instance=~\"$instance\"}",
           "legendFormat": "{{pod}}",
           "refId": "A"
         }
       ],
-      "title": "Controller memory",
+      "title": "Resident memory",
       "type": "timeseries"
     },
     {
@@ -1142,7 +1070,7 @@
         "x": 0,
         "y": 32
       },
-      "id": 16,
+      "id": 15,
       "options": {
         "cellHeight": "sm",
         "footer": {
@@ -1160,7 +1088,7 @@
         {
           "editorMode": "code",
           "exemplar": false,
-          "expr": "nginx_ingress_controller_build_info{job=~\"$job\", pod=~\"$pod\"}",
+          "expr": "coredns_build_info{job=~\"$job\", instance=~\"$instance\"}",
           "format": "table",
           "instant": true,
           "legendFormat": "__auto",
@@ -1168,6 +1096,28 @@
         }
       ],
       "title": "Build info",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true,
+              "job": true
+            },
+            "indexByName": {},
+            "renameByName": {
+              "goversion": "Go version",
+              "instance": "Instance",
+              "namespace": "Namespace",
+              "pod": "Pod",
+              "revision": "Revision",
+              "version": "Version"
+            }
+          }
+        }
+      ],
       "type": "table"
     }
   ],
@@ -1175,9 +1125,9 @@
   "refresh": "30s",
   "schemaVersion": 41,
   "tags": [
+    "infrastructure",
     "k8s",
-    "ingress",
-    "nginx"
+    "coredns"
   ],
   "templating": {
     "list": [
@@ -1202,14 +1152,14 @@
         "allValue": ".*",
         "current": {
           "selected": false,
-          "text": "kubernetes-pods",
-          "value": "kubernetes-pods"
+          "text": "coredns",
+          "value": "coredns"
         },
         "datasource": {
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(nginx_ingress_controller_build_info, job)",
+        "definition": "label_values(coredns_dns_requests_total, job)",
         "hide": 0,
         "includeAll": false,
         "label": "Job",
@@ -1218,7 +1168,7 @@
         "options": [],
         "query": {
           "qryType": 1,
-          "query": "label_values(nginx_ingress_controller_build_info, job)",
+          "query": "label_values(coredns_dns_requests_total, job)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,
@@ -1237,44 +1187,16 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(nginx_ingress_controller_build_info{job=~\"$job\"}, pod)",
+        "definition": "label_values(coredns_dns_requests_total{job=~\"$job\"}, instance)",
         "hide": 0,
         "includeAll": true,
-        "label": "Pod",
+        "label": "Instance",
         "multi": true,
-        "name": "pod",
+        "name": "instance",
         "options": [],
         "query": {
           "qryType": 1,
-          "query": "label_values(nginx_ingress_controller_build_info{job=~\"$job\"}, pod)",
-          "refId": "PrometheusVariableQueryEditor-VariableQuery"
-        },
-        "refresh": 1,
-        "regex": "",
-        "sort": 1,
-        "type": "query"
-      },
-      {
-        "allValue": ".*",
-        "current": {
-          "selected": true,
-          "text": "All",
-          "value": "$__all"
-        },
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${datasource}"
-        },
-        "definition": "label_values(nginx_ingress_controller_requests{job=~\"$job\", pod=~\"$pod\"}, namespace)",
-        "hide": 0,
-        "includeAll": true,
-        "label": "Ingress namespace",
-        "multi": true,
-        "name": "ingress_namespace",
-        "options": [],
-        "query": {
-          "qryType": 1,
-          "query": "label_values(nginx_ingress_controller_requests{job=~\"$job\", pod=~\"$pod\"}, namespace)",
+          "query": "label_values(coredns_dns_requests_total{job=~\"$job\"}, instance)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,
@@ -1290,8 +1212,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Ingress NGINX Internal Metrics",
-  "uid": "ingress-nginx-internal-metrics",
+  "title": "CoreDNS internal metrics",
+  "uid": "coredns-internal-metrics",
   "version": 1,
   "weekStart": ""
 }

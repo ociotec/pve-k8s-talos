@@ -5782,7 +5782,11 @@
   "preload": false,
   "refresh": "",
   "schemaVersion": 42,
-  "tags": [],
+  "tags": [
+    "infrastructure",
+    "monitoring",
+    "grafana"
+  ],
   "templating": {
     "list": [
       {
@@ -5844,7 +5848,7 @@
     ]
   },
   "timezone": "browser",
-  "title": "Grafana Internal Metrics",
+  "title": "Grafana internal metrics",
   "uid": "grafana-internal-metrics",
   "version": 1,
   "weekStart": ""

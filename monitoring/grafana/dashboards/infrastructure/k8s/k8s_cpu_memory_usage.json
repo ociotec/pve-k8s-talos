@@ -21,13 +21,36 @@
   "liveNow": false,
   "panels": [
     {
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "fieldConfig": { "defaults": { "min": 0, "unit": "cores" }, "overrides": [] },
-      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "unit": "cores"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
       "id": 1,
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
-        "tooltip": { "mode": "single" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "single"
+        }
       },
       "targets": [
         {
@@ -53,13 +76,36 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "fieldConfig": { "defaults": { "min": 0, "unit": "percent" }, "overrides": [] },
-      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
       "id": 2,
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
-        "tooltip": { "mode": "single" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "single"
+        }
       },
       "targets": [
         {
@@ -79,13 +125,36 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "fieldConfig": { "defaults": { "min": 0, "unit": "bytes" }, "overrides": [] },
-      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 10 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 10
+      },
       "id": 3,
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
-        "tooltip": { "mode": "single" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "single"
+        }
       },
       "targets": [
         {
@@ -111,13 +180,36 @@
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
-      "fieldConfig": { "defaults": { "min": 0, "unit": "percent" }, "overrides": [] },
-      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 10 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 10
+      },
       "id": 4,
       "options": {
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
-        "tooltip": { "mode": "single" }
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "single"
+        }
       },
       "targets": [
         {
@@ -140,11 +232,19 @@
   "refresh": "30s",
   "schemaVersion": 39,
   "style": "dark",
-  "tags": ["kubernetes", "prometheus", "kube-state-metrics", "cadvisor"],
+  "tags": [
+    "infrastructure",
+    "k8s",
+    "kube-resources"
+  ],
   "templating": {
     "list": [
       {
-        "current": { "selected": false, "text": "Prometheus", "value": "Prometheus" },
+        "current": {
+          "selected": false,
+          "text": "Prometheus",
+          "value": "Prometheus"
+        },
         "hide": 0,
         "includeAll": false,
         "label": "Datasource",
@@ -156,54 +256,107 @@
       },
       {
         "allValue": ".*",
-        "current": { "selected": false, "text": "All", "value": "$__all" },
-        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
         "definition": "label_values(kube_pod_info, namespace)",
         "hide": 0,
         "includeAll": true,
         "label": "Namespace",
         "multi": true,
         "name": "namespace",
-        "query": { "query": "label_values(kube_pod_info, namespace)", "refId": "A" },
+        "query": {
+          "query": "label_values(kube_pod_info, namespace)",
+          "refId": "A"
+        },
         "refresh": 2,
         "type": "query"
       },
       {
         "allValue": ".*",
-        "current": { "selected": false, "text": "All", "value": "$__all" },
-        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
         "definition": "label_values(kube_pod_info{namespace=~\"$namespace\"}, pod)",
         "hide": 0,
         "includeAll": true,
         "label": "Pod",
         "multi": true,
         "name": "pod",
-        "query": { "query": "label_values(kube_pod_info{namespace=~\"$namespace\"}, pod)", "refId": "A" },
+        "query": {
+          "query": "label_values(kube_pod_info{namespace=~\"$namespace\"}, pod)",
+          "refId": "A"
+        },
         "refresh": 2,
         "type": "query"
       },
       {
         "allValue": ".*",
-        "current": { "selected": false, "text": "All", "value": "$__all" },
-        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
         "definition": "label_values(kube_pod_container_info{namespace=~\"$namespace\",pod=~\"$pod\"}, container)",
         "hide": 0,
         "includeAll": true,
         "label": "Container",
         "multi": true,
         "name": "container",
-        "query": { "query": "label_values(kube_pod_container_info{namespace=~\"$namespace\",pod=~\"$pod\"}, container)", "refId": "A" },
+        "query": {
+          "query": "label_values(kube_pod_container_info{namespace=~\"$namespace\",pod=~\"$pod\"}, container)",
+          "refId": "A"
+        },
         "refresh": 2,
         "type": "query"
       }
     ]
   },
-  "time": { "from": "now-1h", "to": "now" },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
   "timepicker": {
-    "refresh_intervals": ["5s", "10s", "30s", "1m", "5m", "15m", "30m", "1h"],
-    "time_options": ["5m", "15m", "1h", "6h", "12h", "24h", "2d", "7d", "30d"]
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m",
+      "30m",
+      "1h"
+    ],
+    "time_options": [
+      "5m",
+      "15m",
+      "1h",
+      "6h",
+      "12h",
+      "24h",
+      "2d",
+      "7d",
+      "30d"
+    ]
   },
   "timezone": "",
-  "title": "K8s: CPU & memory (usage / requests / limits)",
-  "version": 1
+  "title": "K8s: CPU & memory usage, requests and limits",
+  "version": 1,
+  "uid": "k8s-cpu-memory-usage"
 }

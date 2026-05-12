@@ -846,8 +846,8 @@
   "schemaVersion": 39,
   "style": "dark",
   "tags": [
-    "postgres",
-    "prometheus",
+    "infrastructure",
+    "monitoring",
     "postgres-exporter"
   ],
   "templating": {
@@ -919,7 +919,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Postgres Exporter",
+  "title": "Postgres exporter",
   "uid": "postgres-exporter",
   "version": 1,
   "weekStart": ""

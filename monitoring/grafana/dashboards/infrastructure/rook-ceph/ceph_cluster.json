@@ -17,7 +17,7 @@
   "editable": false,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 3,
+  "id": null,
   "links": [],
   "panels": [
     {
@@ -5428,7 +5428,9 @@
   "refresh": "1m",
   "schemaVersion": 42,
   "tags": [
-    "ceph-mixin"
+    "infrastructure",
+    "rook-ceph",
+    "ceph"
   ],
   "templating": {
     "list": [
