@@ -351,6 +351,66 @@ data:
             target_label: section
             replacement: platform
 
+      - job_name: fleet-controller
+        metrics_path: /metrics
+        kubernetes_sd_configs:
+          - role: endpoints
+        relabel_configs:
+          - action: keep
+            source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+            regex: cattle-fleet-system;monitoring-fleet-controller;metrics
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - action: replace
+            source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - action: replace
+            source_labels: [__meta_kubernetes_service_name]
+            target_label: service
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
+          - action: replace
+            target_label: app
+            replacement: fleet
+          - action: replace
+            target_label: component
+            replacement: fleet-controller
+          - action: replace
+            target_label: section
+            replacement: platform
+
+      - job_name: fleet-gitjob
+        metrics_path: /metrics
+        kubernetes_sd_configs:
+          - role: endpoints
+        relabel_configs:
+          - action: keep
+            source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+            regex: cattle-fleet-system;monitoring-gitjob;metrics
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - action: replace
+            source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - action: replace
+            source_labels: [__meta_kubernetes_service_name]
+            target_label: service
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
+          - action: replace
+            target_label: app
+            replacement: fleet
+          - action: replace
+            target_label: component
+            replacement: gitjob
+          - action: replace
+            target_label: section
+            replacement: platform
+
       - job_name: kubelet-cadvisor
         scheme: https
         kubernetes_sd_configs:
