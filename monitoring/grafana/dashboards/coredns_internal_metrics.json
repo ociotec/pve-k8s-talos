@@ -1135,7 +1135,7 @@
         "current": {
           "selected": false,
           "text": "Prometheus",
-          "value": "prometheus"
+          "value": "Prometheus"
         },
         "hide": 0,
         "includeAll": false,

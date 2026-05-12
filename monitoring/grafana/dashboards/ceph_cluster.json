@@ -5435,7 +5435,7 @@
       {
         "current": {
           "text": "Prometheus",
-          "value": "PBFA97CFB590B2093"
+          "value": "Prometheus"
         },
         "label": "Data Source",
         "name": "DS_PROMETHEUS",

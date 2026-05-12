@@ -1983,7 +1983,7 @@
         "current": {
           "selected": false,
           "text": "prometheus",
-          "value": "prometheus"
+          "value": "Prometheus"
         },
         "datasource": {
           "type": "prometheus",
