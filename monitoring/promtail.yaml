@@ -95,6 +95,10 @@ spec:
     metadata:
       labels:
         app: promtail
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3101"
+        prometheus.io/path: /metrics
     spec:
       serviceAccountName: promtail
       containers:
@@ -103,12 +107,12 @@ spec:
           args:
             - -config.file=/etc/promtail/promtail.yaml
           ports:
-            - name: http
+            - name: monitoring
               containerPort: 3101
           startupProbe:
             httpGet:
               path: /ready
-              port: http
+              port: monitoring
               scheme: HTTP
             periodSeconds: 5
             timeoutSeconds: 1
@@ -117,7 +121,7 @@ spec:
           readinessProbe:
             httpGet:
               path: /ready
-              port: http
+              port: monitoring
               scheme: HTTP
             periodSeconds: 10
             timeoutSeconds: 1
@@ -126,7 +130,7 @@ spec:
           livenessProbe:
             httpGet:
               path: /metrics
-              port: http
+              port: monitoring
               scheme: HTTP
             periodSeconds: 30
             timeoutSeconds: 1
