@@ -121,6 +121,7 @@ For any non-trivial change:
 ## Repo-Specific Agent Workflows
 
 - When the user asks to audit or update pinned versions across the repository, follow `docs/agent-workflows/update-versions.md`.
+- When the user asks to update a real cluster directory to match current repository changes or newly required constants, follow `docs/agent-workflows/update-cluster-from-repo.md`.
 - When the user asks to audit Kubernetes CPU/memory requests or limits, follow `docs/agent-workflows/cluster-resource-requests.md`.
 - When the user asks to audit Kubernetes readiness/liveness/startup probe coverage or health-check compliance, follow `docs/agent-workflows/cluster-workload-probes.md`.
 - Treat files under `docs/agent-workflows/` as repo-local operating procedures for agents:
