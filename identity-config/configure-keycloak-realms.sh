@@ -74,22 +74,32 @@ api() {
   local body="${3:-}"
   local status
   local output_file
-  output_file="$(mktemp)"
-  local args=(-k -sS -o "${output_file}" -w "%{http_code}" -X "${method}" "$(api_path "${path}")" -H "Authorization: Bearer ${ACCESS_TOKEN}")
+  local attempt
 
-  if [[ -n "${body}" ]]; then
-    args+=(-H "Content-Type: application/json" --data-binary @"${body}")
-  fi
+  for attempt in 1 2; do
+    output_file="$(mktemp)"
+    local args=(-k -sS -o "${output_file}" -w "%{http_code}" -X "${method}" "$(api_path "${path}")" -H "Authorization: Bearer ${ACCESS_TOKEN}")
 
-  status="$(curl "${args[@]}")"
-  if [[ "${status}" -lt 200 || "${status}" -gt 299 ]]; then
-    echo "[keycloak-api] ${method} ${path} failed with HTTP ${status}" >&2
-    cat "${output_file}" >&2 || true
+    if [[ -n "${body}" ]]; then
+      args+=(-H "Content-Type: application/json" --data-binary @"${body}")
+    fi
+
+    status="$(curl "${args[@]}")"
+    if [[ "${status}" == "401" && "${attempt}" -eq 1 ]]; then
+      rm -f "${output_file}"
+      login >/dev/null 2>&1 || return 1
+      continue
+    fi
+    if [[ "${status}" -lt 200 || "${status}" -gt 299 ]]; then
+      echo "[keycloak-api] ${method} ${path} failed with HTTP ${status}" >&2
+      cat "${output_file}" >&2 || true
+      rm -f "${output_file}"
+      return 1
+    fi
+    cat "${output_file}"
     rm -f "${output_file}"
-    return 1
-  fi
-  cat "${output_file}"
-  rm -f "${output_file}"
+    return 0
+  done
 }
 
 api_allow_404() {
@@ -98,25 +108,35 @@ api_allow_404() {
   local body="${3:-}"
   local status
   local output_file
-  output_file="$(mktemp)"
-  local args=(-k -sS -o "${output_file}" -w "%{http_code}" -X "${method}" "$(api_path "${path}")" -H "Authorization: Bearer ${ACCESS_TOKEN}")
+  local attempt
 
-  if [[ -n "${body}" ]]; then
-    args+=(-H "Content-Type: application/json" --data-binary @"${body}")
-  fi
+  for attempt in 1 2; do
+    output_file="$(mktemp)"
+    local args=(-k -sS -o "${output_file}" -w "%{http_code}" -X "${method}" "$(api_path "${path}")" -H "Authorization: Bearer ${ACCESS_TOKEN}")
 
-  status="$(curl "${args[@]}")"
-  if [[ "${status}" == "404" ]]; then
+    if [[ -n "${body}" ]]; then
+      args+=(-H "Content-Type: application/json" --data-binary @"${body}")
+    fi
+
+    status="$(curl "${args[@]}")"
+    if [[ "${status}" == "401" && "${attempt}" -eq 1 ]]; then
+      rm -f "${output_file}"
+      login >/dev/null 2>&1 || return 1
+      continue
+    fi
+    if [[ "${status}" == "404" ]]; then
+      rm -f "${output_file}"
+      return 44
+    fi
+    if [[ "${status}" -lt 200 || "${status}" -gt 299 ]]; then
+      cat "${output_file}" >&2 || true
+      rm -f "${output_file}"
+      return 1
+    fi
+    cat "${output_file}"
     rm -f "${output_file}"
-    return 44
-  fi
-  if [[ "${status}" -lt 200 || "${status}" -gt 299 ]]; then
-    cat "${output_file}" >&2 || true
-    rm -f "${output_file}"
-    return 1
-  fi
-  cat "${output_file}"
-  rm -f "${output_file}"
+    return 0
+  done
 }
 
 json_file() {
@@ -451,7 +471,14 @@ assign_group_client_role() {
   local group_id_value
   local client_id_value
   local role_payload
-  group_id_value="$(wait_for_group "${realm}" "${group_name}")"
+  group_id_value="$(group_id_by_path "${realm}" "/${group_name}" 2>/dev/null || true)"
+  if [[ -z "${group_id_value}" ]]; then
+    group_id_value="$(group_id "${realm}" "${group_name}" 2>/dev/null || true)"
+  fi
+  if [[ -z "${group_id_value}" ]]; then
+    echo "[keycloak-api] warning: skipping login gate role for missing group ${realm}/${group_name}" >&2
+    return 0
+  fi
   client_id_value="$(client_uuid "${realm}" "${client_identifier}")"
   role_payload="${TMPDIR}/role-map-${realm}-${group_name}-${client_identifier}-${role_name}.json"
   role_json "${realm}" "${client_id_value}" "${role_name}" | jq '[.]' > "${role_payload}"
