@@ -70,7 +70,7 @@
         ]
       },
       "gridPos": {
-        "h": 6,
+        "h": 7,
         "w": 24,
         "x": 0,
         "y": 0
@@ -87,21 +87,21 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(rate(container_cpu_usage_seconds_total{container!=\"\",container!=\"POD\"}[5m]) * on(namespace,pod) group_left(node) kube_pod_info{node=\"$node\"})",
+          "expr": "sum(rate(container_cpu_usage_seconds_total{container!=\"\",container!=\"POD\"}[5m]) * on(namespace,pod) group_left(node) (max by(namespace,pod,node) (kube_pod_info{node=\"$node\"})))",
           "instant": true,
           "legendFormat": "Usage (cores)",
           "refId": "A"
         },
         {
           "editorMode": "code",
-          "expr": "sum(kube_pod_container_resource_requests{resource=\"cpu\"} * on(namespace,pod) group_left(node) kube_pod_info{node=\"$node\"})",
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"cpu\"} * on(namespace,pod) group_left(node) (max by(namespace,pod,node) (kube_pod_info{node=\"$node\"})))",
           "instant": true,
           "legendFormat": "Requests (cores)",
           "refId": "B"
         },
         {
           "editorMode": "code",
-          "expr": "sum(kube_pod_container_resource_limits{resource=\"cpu\"} * on(namespace,pod) group_left(node) kube_pod_info{node=\"$node\"})",
+          "expr": "sum(kube_pod_container_resource_limits{resource=\"cpu\"} * on(namespace,pod) group_left(node) (max by(namespace,pod,node) (kube_pod_info{node=\"$node\"})))",
           "instant": true,
           "legendFormat": "Limits (cores)",
           "refId": "C"
@@ -204,7 +204,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 6
+        "y": 7
       },
       "id": 102,
       "maxPerRow": 6,
@@ -215,11 +215,11 @@
           "placement": "bottom",
           "showLegend": true
         },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
-        }
+          "tooltip": {
+            "hideZeros": false,
+            "mode": "multi",
+            "sort": "desc"
+          }
       },
       "pluginVersion": "12.4.0-20648027705",
       "repeat": "node",
@@ -227,19 +227,19 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "100 * (sum(rate(container_cpu_usage_seconds_total{container!=\"\",container!=\"POD\"}[5m]) * on(namespace,pod) group_left(node) kube_pod_info{node=\"$node\"}) / clamp_min(max(kube_node_status_allocatable{resource=\"cpu\",node=\"$node\"}), 0.001))",
+          "expr": "100 * (sum(rate(container_cpu_usage_seconds_total{container!=\"\",container!=\"POD\"}[5m]) * on(namespace,pod) group_left(node) (max by(namespace,pod,node) (kube_pod_info{node=\"$node\"}))) / clamp_min(max(kube_node_status_allocatable{resource=\"cpu\",node=\"$node\"}), 0.001))",
           "legendFormat": "usage",
           "refId": "A"
         },
         {
           "editorMode": "code",
-          "expr": "100 * (sum(kube_pod_container_resource_requests{resource=\"cpu\"} * on(namespace,pod) group_left(node) kube_pod_info{node=\"$node\"}) / clamp_min(max(kube_node_status_allocatable{resource=\"cpu\",node=\"$node\"}), 0.001))",
+          "expr": "100 * (sum(kube_pod_container_resource_requests{resource=\"cpu\"} * on(namespace,pod) group_left(node) (max by(namespace,pod,node) (kube_pod_info{node=\"$node\"}))) / clamp_min(max(kube_node_status_allocatable{resource=\"cpu\",node=\"$node\"}), 0.001))",
           "legendFormat": "requests",
           "refId": "B"
         },
         {
           "editorMode": "code",
-          "expr": "100 * (sum(kube_pod_container_resource_limits{resource=\"cpu\"} * on(namespace,pod) group_left(node) kube_pod_info{node=\"$node\"}) / clamp_min(max(kube_node_status_allocatable{resource=\"cpu\",node=\"$node\"}), 0.001))",
+          "expr": "100 * (sum(kube_pod_container_resource_limits{resource=\"cpu\"} * on(namespace,pod) group_left(node) (max by(namespace,pod,node) (kube_pod_info{node=\"$node\"}))) / clamp_min(max(kube_node_status_allocatable{resource=\"cpu\",node=\"$node\"}), 0.001))",
           "legendFormat": "limits",
           "refId": "C"
         },
@@ -306,10 +306,10 @@
         ]
       },
       "gridPos": {
-        "h": 6,
+        "h": 7,
         "w": 24,
         "x": 0,
-        "y": 15
+        "y": 16
       },
       "id": 201,
       "maxPerRow": 6,
@@ -323,21 +323,21 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(((container_memory_working_set_bytes{container!=\"\",container!=\"POD\"}) or (container_memory_usage_bytes{container!=\"\",container!=\"POD\"})) * on(namespace,pod) group_left(node) kube_pod_info{node=\"$node\"})",
+          "expr": "sum(((container_memory_working_set_bytes{container!=\"\",container!=\"POD\"}) or (container_memory_usage_bytes{container!=\"\",container!=\"POD\"})) * on(namespace,pod) group_left(node) (max by(namespace,pod,node) (kube_pod_info{node=\"$node\"})))",
           "instant": true,
           "legendFormat": "Usage (bytes)",
           "refId": "A"
         },
         {
           "editorMode": "code",
-          "expr": "sum(kube_pod_container_resource_requests{resource=\"memory\"} * on(namespace,pod) group_left(node) kube_pod_info{node=\"$node\"})",
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"memory\"} * on(namespace,pod) group_left(node) (max by(namespace,pod,node) (kube_pod_info{node=\"$node\"})))",
           "instant": true,
           "legendFormat": "Requests (bytes)",
           "refId": "B"
         },
         {
           "editorMode": "code",
-          "expr": "sum(kube_pod_container_resource_limits{resource=\"memory\"} * on(namespace,pod) group_left(node) kube_pod_info{node=\"$node\"})",
+          "expr": "sum(kube_pod_container_resource_limits{resource=\"memory\"} * on(namespace,pod) group_left(node) (max by(namespace,pod,node) (kube_pod_info{node=\"$node\"})))",
           "instant": true,
           "legendFormat": "Limits (bytes)",
           "refId": "C"
@@ -440,7 +440,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 21
+        "y": 23
       },
       "id": 202,
       "maxPerRow": 6,
@@ -451,11 +451,11 @@
           "placement": "bottom",
           "showLegend": true
         },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
-        }
+          "tooltip": {
+            "hideZeros": false,
+            "mode": "multi",
+            "sort": "desc"
+          }
       },
       "pluginVersion": "12.4.0-20648027705",
       "repeat": "node",
@@ -463,19 +463,19 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "100 * (sum(((container_memory_working_set_bytes{container!=\"\",container!=\"POD\"}) or (container_memory_usage_bytes{container!=\"\",container!=\"POD\"})) * on(namespace,pod) group_left(node) kube_pod_info{node=\"$node\"}) / clamp_min(max(kube_node_status_allocatable{resource=\"memory\",node=\"$node\"}), 1))",
+          "expr": "100 * (sum(((container_memory_working_set_bytes{container!=\"\",container!=\"POD\"}) or (container_memory_usage_bytes{container!=\"\",container!=\"POD\"})) * on(namespace,pod) group_left(node) (max by(namespace,pod,node) (kube_pod_info{node=\"$node\"}))) / clamp_min(max(kube_node_status_allocatable{resource=\"memory\",node=\"$node\"}), 1))",
           "legendFormat": "usage",
           "refId": "A"
         },
         {
           "editorMode": "code",
-          "expr": "100 * (sum(kube_pod_container_resource_requests{resource=\"memory\"} * on(namespace,pod) group_left(node) kube_pod_info{node=\"$node\"}) / clamp_min(max(kube_node_status_allocatable{resource=\"memory\",node=\"$node\"}), 1))",
+          "expr": "100 * (sum(kube_pod_container_resource_requests{resource=\"memory\"} * on(namespace,pod) group_left(node) (max by(namespace,pod,node) (kube_pod_info{node=\"$node\"}))) / clamp_min(max(kube_node_status_allocatable{resource=\"memory\",node=\"$node\"}), 1))",
           "legendFormat": "requests",
           "refId": "B"
         },
         {
           "editorMode": "code",
-          "expr": "100 * (sum(kube_pod_container_resource_limits{resource=\"memory\"} * on(namespace,pod) group_left(node) kube_pod_info{node=\"$node\"}) / clamp_min(max(kube_node_status_allocatable{resource=\"memory\",node=\"$node\"}), 1))",
+          "expr": "100 * (sum(kube_pod_container_resource_limits{resource=\"memory\"} * on(namespace,pod) group_left(node) (max by(namespace,pod,node) (kube_pod_info{node=\"$node\"}))) / clamp_min(max(kube_node_status_allocatable{resource=\"memory\",node=\"$node\"}), 1))",
           "legendFormat": "limits",
           "refId": "C"
         },
