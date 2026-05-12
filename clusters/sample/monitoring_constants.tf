@@ -22,7 +22,7 @@ locals {
   loki_retention       = "168h" # 7 days
 
   grafana_image_tag            = "13.0.1"
-  prometheus_image_tag         = "v3.11.2"
+  prometheus_image_tag         = "v3.11.3"
   loki_image_tag               = "3.7.1"
   promtail_image_tag           = "3.6.10"
   kube_state_metrics_image_tag = "v2.18.0"
@@ -48,7 +48,7 @@ locals {
   prometheus_auth_keycloak_realm            = "company"
   prometheus_auth_allowed_groups            = ["monitoring-view", "monitoring-edit"]
   prometheus_auth_ca_secret_name            = "prometheus-oauth-ca"
-  prometheus_oauth2_proxy_image_tag         = "v7.12.0"
+  prometheus_oauth2_proxy_image_tag         = "v7.15.2"
   prometheus_oauth2_proxy_cookie_name       = "_prometheus_oauth2_proxy"
   prometheus_oauth2_proxy_cpu_request       = "50m"
   prometheus_oauth2_proxy_cpu_limit         = "200m"
