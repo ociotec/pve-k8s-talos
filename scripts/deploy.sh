@@ -934,6 +934,82 @@ talos_max_pods() {
   awk -F'"' '/"max_pods"/ { print $4; exit }' "$1"
 }
 
+talos_kubernetes_version() {
+  awk -F'"' '/"kubernetes_version"/ { print $4; exit }' "$1"
+}
+
+normalize_kubernetes_version() {
+  local version="$1"
+  version="${version#"${version%%[![:space:]]*}"}"
+  version="${version%"${version##*[![:space:]]}"}"
+  version="${version#v}"
+  printf '%s\n' "${version}"
+}
+
+wait_for_kubernetes_version_convergence() {
+  local constants_file="${1:-${cluster_constants_path}}"
+  local timeout_seconds="${2:-1800}"
+  local desired_version
+  local desired_normalized
+  local node_rows
+  local current_normalized
+  local start
+  local all_ready
+  local all_current
+  local seen_mismatch=false
+
+  desired_version="$(talos_kubernetes_version "${constants_file}")"
+  desired_normalized="$(normalize_kubernetes_version "${desired_version}")"
+  if [[ -z "${desired_normalized}" ]]; then
+    return 0
+  fi
+
+  start="$(date +%s)"
+  while true; do
+    node_rows="$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"|"}{.status.nodeInfo.kubeletVersion}{"|"}{range .status.conditions[?(@.type=="Ready")]}{.status}{end}{"\n"}{end}' 2>/dev/null || true)"
+    all_ready=true
+    all_current=true
+
+    if [[ -z "${node_rows}" ]]; then
+      all_ready=false
+      all_current=false
+    fi
+
+    while IFS='|' read -r node_name node_version node_ready; do
+      if [[ -z "${node_name}" ]]; then
+        continue
+      fi
+      current_normalized="$(normalize_kubernetes_version "${node_version}")"
+      if [[ "${current_normalized}" != "${desired_normalized}" ]]; then
+        all_current=false
+      fi
+      if [[ "${node_ready}" != "True" ]]; then
+        all_ready=false
+      fi
+    done <<< "${node_rows}"
+
+    if [[ "${all_ready}" == "true" && "${all_current}" == "true" ]]; then
+      if [[ "${seen_mismatch}" == "true" ]]; then
+        message "Kubernetes nodes now report v${desired_normalized} and are Ready."
+      fi
+      return 0
+    fi
+
+    if [[ "${seen_mismatch}" != "true" ]]; then
+      message "Waiting for Kubernetes nodes to converge to v${desired_normalized} and Ready state..."
+      seen_mismatch=true
+    fi
+
+    if (( $(date +%s) - start >= timeout_seconds )); then
+      error "Timed out waiting for Kubernetes nodes to converge to v${desired_normalized}. Current nodes:" >&2
+      kubectl get nodes -o wide >&2 || true
+      exit 1
+    fi
+
+    sleep 10
+  done
+}
+
 reboot_nodes_with_pending_kubelet_max_pods() {
   local constants_file="${1:-${cluster_constants_path}}"
   local desired_max_pods
@@ -1164,6 +1240,7 @@ if [[ -n "${controlplane_vip}" ]]; then
   rm -f "${bootstrap_kubeconfig_path}"
   bootstrap_kubeconfig_path=""
 fi
+wait_for_kubernetes_version_convergence "${cluster_constants_path}"
 reboot_nodes_with_pending_kubelet_max_pods "${cluster_constants_path}"
 message "k8s cluster is up and running. Current nodes:"
 "${script_dir}/render-k8s-nodes.sh" --kubeconfig "${active_kubeconfig_path}"
