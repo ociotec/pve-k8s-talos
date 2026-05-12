@@ -116,9 +116,12 @@ data:
           - action: keep
             source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
             regex: "true"
-          - action: keep
-            source_labels: [__meta_kubernetes_pod_container_port_name]
-            regex: ".*metrics.*|monitoring|prometheus"
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+            target_label: __tmp_prometheus_port
+          - action: keepequal
+            source_labels: [__meta_kubernetes_pod_container_port_number]
+            target_label: __tmp_prometheus_port
           - action: replace
             source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
             target_label: __metrics_path__
