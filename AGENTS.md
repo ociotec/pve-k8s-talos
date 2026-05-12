@@ -65,6 +65,11 @@ It complements `README.md` and focuses on execution behavior, change safety, and
 - Monitoring storage class defaults must match Rook CSI naming conventions derived from `ceph_name_prefix`.
 - When changing Rook CSI names or pool structure, verify monitoring constants still resolve valid StorageClass names.
 
+## Grafana Dashboard Conventions
+
+- For Grafana time-series panels with more than one series, configure the cursor tooltip to show all series and sort values from highest to lowest (`tooltip.mode = "multi"`, `tooltip.sort = "desc"`).
+- Avoid alert-like colors on neutral inventory/capacity stats. Use red/yellow thresholds only when the color has an explicit operational meaning.
+
 ## Kubernetes Manifest Provider Caveats
 
 - `kubernetes_manifest` can drift on API-normalized fields (`{}` vs `null`, server-set annotations, etc.).
