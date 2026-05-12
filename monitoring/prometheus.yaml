@@ -264,6 +264,48 @@ data:
             target_label: section
             replacement: k8s
 
+      - job_name: capi-controller-manager
+        scheme: https
+        kubernetes_sd_configs:
+          - role: pod
+        tls_config:
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+          - action: keep
+            source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_pod_label_control_plane, __meta_kubernetes_pod_container_port_name]
+            regex: cattle-capi-system;controller-manager;metrics
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - action: replace
+            source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_ip]
+            target_label: pod_ip
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_host_ip]
+            target_label: host_ip
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_controller_name]
+            target_label: workload
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_controller_kind]
+            target_label: workload_type
+          - action: replace
+            target_label: app
+            replacement: capi-controller-manager
+          - action: replace
+            target_label: component
+            replacement: capi-controller-manager
+          - action: replace
+            target_label: section
+            replacement: platform
+
       - job_name: kubelet-cadvisor
         scheme: https
         kubernetes_sd_configs:

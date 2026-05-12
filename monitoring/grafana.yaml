@@ -532,6 +532,29 @@ spec:
                 done
               }
 
+              cleanup_legacy_dashboard() {
+                legacy_uid="$1"
+                legacy_title="$2"
+                response="/tmp/legacy-dashboard-$legacy_uid.json"
+
+                code="$(curl --connect-timeout 5 --max-time 30 -sS -u "$GRAFANA_ADMIN_USER:$GRAFANA_ADMIN_PASSWORD" \
+                  -o "$response" \
+                  -w '%%{http_code}' \
+                  "$api_url/api/dashboards/uid/$legacy_uid")"
+
+                if [ "$code" = "404" ]; then
+                  return 0
+                fi
+                if [ "$code" != "200" ]; then
+                  cat "$response"
+                  exit 1
+                fi
+                if grep -q "\"title\":\"$legacy_title\"" "$response"; then
+                  echo "Deleting legacy dashboard $legacy_uid"
+                  curl_grafana -X DELETE "$api_url/api/dashboards/uid/$legacy_uid" >/dev/null
+                fi
+              }
+
               ensure_folder "infrastructure" "Infrastructure"
               ensure_folder "infrastructure-k8s" "K8s" "infrastructure"
               ensure_folder "infrastructure-k8s-net" "K8s net" "infrastructure"
@@ -541,11 +564,14 @@ spec:
               ensure_folder "infrastructure-platform" "Platform" "infrastructure"
               ensure_folder "infrastructure-rook-ceph" "Rook Ceph" "infrastructure"
 
+              cleanup_legacy_dashboard "grafana" "CoreDNS internal metrics"
+
               sync_dir /var/lib/grafana/dashboards/infrastructure/k8s infrastructure-k8s
               sync_dir /var/lib/grafana/dashboards/infrastructure/k8s-net infrastructure-k8s-net
               sync_dir /var/lib/grafana/dashboards/infrastructure/nodes infrastructure-nodes
               sync_dir /var/lib/grafana/dashboards/infrastructure/monitoring infrastructure-monitoring
               sync_dir /var/lib/grafana/dashboards/infrastructure/identity infrastructure-identity
+              sync_dir /var/lib/grafana/dashboards/infrastructure/platform infrastructure-platform
               sync_dir /var/lib/grafana/dashboards/infrastructure/rook-ceph infrastructure-rook-ceph
           env:
             - name: GRAFANA_ADMIN_USER
