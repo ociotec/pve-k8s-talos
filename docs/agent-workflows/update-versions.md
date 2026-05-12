@@ -75,6 +75,7 @@ If the user chooses all or partial updates, execute the required repo validation
   - inventory the parent component once when the images clearly belong to one release train
 - For products with multiple channels, prefer stable GA only
   - choose LTS only if the repo is clearly following LTS; otherwise choose latest stable GA and mention channel differences in `Note`
+- For Portainer, always prefer the latest maintained LTS patch release, even when a newer STS release exists.
 
 ## Compatibility Checks
 
