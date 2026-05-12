@@ -241,6 +241,29 @@ data:
         static_configs:
           - targets: ["kube-state-metrics.monitoring.svc.cluster.local:8080"]
 
+      - job_name: coredns
+        kubernetes_sd_configs:
+          - role: endpoints
+        relabel_configs:
+          - action: keep
+            source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+            regex: kube-system;kube-dns;metrics
+          - action: replace
+            source_labels: [__meta_kubernetes_endpoint_node_name]
+            target_label: node
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - action: replace
+            source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - action: replace
+            source_labels: [__meta_kubernetes_service_name]
+            target_label: service
+          - action: replace
+            target_label: section
+            replacement: k8s
+
       - job_name: kubelet-cadvisor
         scheme: https
         kubernetes_sd_configs:
