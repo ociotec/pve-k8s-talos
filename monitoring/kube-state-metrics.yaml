@@ -137,6 +137,8 @@ spec:
       containers:
         - name: kube-state-metrics
           image: registry.k8s.io/kube-state-metrics/kube-state-metrics:${kube_state_metrics_image_tag}
+          args:
+            - --metric-labels-allowlist=pods=[app.kubernetes.io/component,component,app.kubernetes.io/name,app]
           ports:
             - name: metrics
               containerPort: 8080

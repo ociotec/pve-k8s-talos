@@ -1,0 +1,1610 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "datasource",
+          "uid": "grafana"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "target": {
+          "limit": 100,
+          "matchAny": false,
+          "tags": [],
+          "type": "dashboard"
+        },
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Kubernetes PVC and CSI storage usage from kubelet volume stats and kube-state-metrics.",
+  "editable": true,
+  "fiscalYearStart": null,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": null,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.0.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(kubelet_volume_stats_used_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
+          "legendFormat": "Used",
+          "refId": "A"
+        }
+      ],
+      "title": "Used storage",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.0.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(kubelet_volume_stats_capacity_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
+          "legendFormat": "Capacity",
+          "refId": "A"
+        }
+      ],
+      "title": "Capacity",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 0
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.0.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * sum(kubelet_volume_stats_used_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})) / clamp_min(sum(kubelet_volume_stats_capacity_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})), 1)",
+          "legendFormat": "Used %",
+          "refId": "A"
+        }
+      ],
+      "title": "Used %",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 0
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.0.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "count((kube_persistentvolumeclaim_status_phase{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\",phase=\"Bound\"} == 1) * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
+          "legendFormat": "Bound",
+          "refId": "A"
+        }
+      ],
+      "title": "Bound PVCs",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 0
+      },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.0.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "count((100 * kubelet_volume_stats_used_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} / clamp_min(kubelet_volume_stats_capacity_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"}, 1) > 85) * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})) or on() vector(0)",
+          "legendFormat": ">85%",
+          "refId": "A"
+        }
+      ],
+      "title": "PVCs >85%",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 0
+      },
+      "id": 6,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.0.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum((kubelet_volume_stats_health_status_abnormal{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} == 1) * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})) or on() vector(0)",
+          "legendFormat": "Abnormal",
+          "refId": "A"
+        }
+      ],
+      "title": "Abnormal volumes",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (namespace,persistentvolumeclaim,storageclass,provisioner) (kubelet_volume_stats_used_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
+          "legendFormat": "{{namespace}}/{{persistentvolumeclaim}} used",
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by (namespace,persistentvolumeclaim,storageclass,provisioner) (kubelet_volume_stats_capacity_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
+          "legendFormat": "{{namespace}}/{{persistentvolumeclaim}} capacity",
+          "refId": "B"
+        }
+      ],
+      "title": "PVC used vs capacity",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * sum by (namespace,persistentvolumeclaim,storageclass,provisioner) (kubelet_volume_stats_used_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})) / clamp_min(sum by (namespace,persistentvolumeclaim,storageclass,provisioner) (kubelet_volume_stats_capacity_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})), 1)",
+          "legendFormat": "{{namespace}}/{{persistentvolumeclaim}}",
+          "refId": "A"
+        }
+      ],
+      "title": "PVC used %",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "min"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (namespace,persistentvolumeclaim,storageclass,provisioner) (kubelet_volume_stats_available_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
+          "legendFormat": "{{namespace}}/{{persistentvolumeclaim}}",
+          "refId": "A"
+        }
+      ],
+      "title": "PVC available bytes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * sum by (namespace,persistentvolumeclaim,storageclass,provisioner) (kubelet_volume_stats_inodes_used{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})) / clamp_min(sum by (namespace,persistentvolumeclaim,storageclass,provisioner) (kubelet_volume_stats_inodes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})), 1)",
+          "legendFormat": "{{namespace}}/{{persistentvolumeclaim}}",
+          "refId": "A"
+        }
+      ],
+      "title": "PVC inode used %",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "id": 11,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * sum by (namespace,persistentvolumeclaim,storageclass,provisioner) (kubelet_volume_stats_used_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})) / clamp_min(sum by (namespace,persistentvolumeclaim,storageclass,provisioner) (kubelet_volume_stats_capacity_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})), 1)",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{namespace}}/{{persistentvolumeclaim}}",
+          "refId": "A"
+        }
+      ],
+      "title": "PVC usage table",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "renameByName": {
+              "Value": "Used %",
+              "namespace": "Namespace",
+              "persistentvolumeclaim": "PVC",
+              "provisioner": "CSI",
+              "storageclass": "StorageClass"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "desc": true,
+                "field": "Used %"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "min": 0,
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "id": 12,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (namespace,persistentvolumeclaim,storageclass,provisioner) (kubelet_volume_stats_used_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{namespace}}/{{persistentvolumeclaim}}",
+          "refId": "A"
+        }
+      ],
+      "title": "PVC used bytes table",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "renameByName": {
+              "Value": "Used bytes",
+              "namespace": "Namespace",
+              "persistentvolumeclaim": "PVC",
+              "provisioner": "CSI",
+              "storageclass": "StorageClass"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "desc": true,
+                "field": "Used bytes"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 29
+      },
+      "id": 13,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "(kube_persistentvolumeclaim_status_phase{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\",phase=~\"Pending|Lost\"} == 1) * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{namespace}}/{{persistentvolumeclaim}} {{phase}}",
+          "refId": "A"
+        }
+      ],
+      "title": "PVCs not bound",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true
+            },
+            "renameByName": {
+              "namespace": "Namespace",
+              "persistentvolumeclaim": "PVC",
+              "phase": "Phase",
+              "provisioner": "CSI",
+              "storageclass": "StorageClass"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 29
+      },
+      "id": 14,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max by (namespace,persistentvolumeclaim,pod,label_app_kubernetes_io_component) (kube_pod_spec_volumes_persistentvolumeclaims_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,pod) group_left(label_app_kubernetes_io_component) kube_pod_labels{namespace=~\"$namespace\",label_app_kubernetes_io_component=~\"$component\"}) and on(namespace,persistentvolumeclaim) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{namespace}}/{{persistentvolumeclaim}} {{pod}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Mounted PVCs by component",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true
+            },
+            "renameByName": {
+              "label_app_kubernetes_io_component": "Component",
+              "namespace": "Namespace",
+              "persistentvolumeclaim": "PVC",
+              "pod": "Pod"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 37
+      },
+      "id": 15,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.0.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "count(kube_storageclass_info{provisioner=~\"$csi\"})",
+          "legendFormat": "StorageClasses",
+          "refId": "A"
+        }
+      ],
+      "title": "CSI StorageClasses",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 37
+      },
+      "id": 16,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.0.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "count(kube_persistentvolume_info{csi_driver=~\"$csi\"})",
+          "legendFormat": "PVs",
+          "refId": "A"
+        }
+      ],
+      "title": "CSI PVs",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 37
+      },
+      "id": 17,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.0.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(kube_volumeattachment_status_attached * on(volumeattachment) group_left(attacher,node) kube_volumeattachment_info{attacher=~\"$csi\"})",
+          "legendFormat": "Attached",
+          "refId": "A"
+        }
+      ],
+      "title": "CSI attachments",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 37
+      },
+      "id": 18,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.0.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "count((kube_volumeattachment_status_attached == 0) * on(volumeattachment) group_left(attacher,node) kube_volumeattachment_info{attacher=~\"$csi\"}) or on() vector(0)",
+          "legendFormat": "Unattached",
+          "refId": "A"
+        }
+      ],
+      "title": "Unattached attachments",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 37
+      },
+      "id": 19,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.0.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "count(kube_pod_status_ready{namespace=\"rook-ceph\",pod=~\".*csi.*\",condition=\"true\"} == 0) or on() vector(0)",
+          "legendFormat": "Not ready",
+          "refId": "A"
+        }
+      ],
+      "title": "CSI pods not ready",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "min": 0,
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 37
+      },
+      "id": 20,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "13.0.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"rook-ceph\",pod=~\".*csi.*\"}[$__range]))",
+          "legendFormat": "Restarts",
+          "refId": "A"
+        }
+      ],
+      "title": "CSI restarts in range",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 41
+      },
+      "id": 21,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (driver_name,method_name,grpc_status_code) (rate(csi_operations_seconds_count{driver_name=~\"$csi\"}[$__rate_interval]))",
+          "legendFormat": "{{driver_name}} {{method_name}} {{grpc_status_code}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CSI operation rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 41
+      },
+      "id": 22,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.99, sum by (le,driver_name,method_name) (rate(csi_operations_seconds_bucket{driver_name=~\"$csi\"}[$__rate_interval]))) >= 0",
+          "legendFormat": "p99 {{driver_name}} {{method_name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CSI operation latency p99",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 49
+      },
+      "id": 23,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "kube_storageclass_info{provisioner=~\"$csi\"}",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{storageclass}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CSI StorageClasses",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true
+            },
+            "renameByName": {
+              "provisioner": "CSI",
+              "reclaim_policy": "Reclaim policy",
+              "storageclass": "StorageClass",
+              "volume_binding_mode": "Binding mode"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 49
+      },
+      "id": 24,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "kube_volumeattachment_status_attached * on(volumeattachment) group_left(attacher,node) kube_volumeattachment_info{attacher=~\"$csi\"} * on(volumeattachment) group_left(volumename) kube_volumeattachment_spec_source_persistentvolume",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{volumeattachment}}",
+          "refId": "A"
+        }
+      ],
+      "title": "CSI volume attachments",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "renameByName": {
+              "Value": "Attached",
+              "attacher": "CSI",
+              "node": "Node",
+              "volumeattachment": "VolumeAttachment",
+              "volumename": "PV"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 41,
+  "style": null,
+  "tags": [
+    "infrastructure",
+    "k8s",
+    "storage",
+    "pvc",
+    "csi"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "Prometheus",
+          "value": "Prometheus"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "type": "datasource"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "hide": 0,
+        "includeAll": true,
+        "label": "Section",
+        "multi": false,
+        "name": "section",
+        "options": [
+          {
+            "selected": false,
+            "text": "k8s",
+            "value": "kube-system"
+          },
+          {
+            "selected": false,
+            "text": "k8s-net",
+            "value": "cert-manager|metallb-system|ingress-nginx"
+          },
+          {
+            "selected": false,
+            "text": "monitoring",
+            "value": "monitoring"
+          },
+          {
+            "selected": false,
+            "text": "identity",
+            "value": "identity"
+          },
+          {
+            "selected": false,
+            "text": "rook",
+            "value": "rook-ceph"
+          },
+          {
+            "selected": false,
+            "text": "platform",
+            "value": "cattle-system|cattle-capi-system|cattle-fleet-system|cattle-fleet-local-system|cattle-provisioning-capi-system|fleet-default|portainer"
+          }
+        ],
+        "query": "k8s : kube-system,k8s-net : cert-manager|metallb-system|ingress-nginx,monitoring : monitoring,identity : identity,rook : rook-ceph,platform : cattle-system|cattle-capi-system|cattle-fleet-system|cattle-fleet-local-system|cattle-provisioning-capi-system|fleet-default|portainer",
+        "type": "custom"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kube_persistentvolumeclaim_info{namespace=~\"$section\"}, namespace)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Namespace",
+        "multi": true,
+        "name": "namespace",
+        "query": {
+          "query": "label_values(kube_persistentvolumeclaim_info{namespace=~\"$section\"}, namespace)",
+          "refId": "A"
+        },
+        "refresh": 2,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kube_storageclass_info, provisioner)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "CSI",
+        "multi": true,
+        "name": "csi",
+        "query": {
+          "query": "label_values(kube_storageclass_info, provisioner)",
+          "refId": "A"
+        },
+        "refresh": 2,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kube_pod_labels{namespace=~\"$namespace\",label_app_kubernetes_io_component!=\"\"}, label_app_kubernetes_io_component)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Component",
+        "multi": true,
+        "name": "component",
+        "query": {
+          "query": "label_values(kube_pod_labels{namespace=~\"$namespace\",label_app_kubernetes_io_component!=\"\"}, label_app_kubernetes_io_component)",
+          "refId": "A"
+        },
+        "refresh": 2,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kube_persistentvolumeclaim_info{namespace=~\"$namespace\"}, persistentvolumeclaim)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "PVC",
+        "multi": true,
+        "name": "pvc",
+        "query": {
+          "query": "label_values(kube_persistentvolumeclaim_info{namespace=~\"$namespace\"}, persistentvolumeclaim)",
+          "refId": "A"
+        },
+        "refresh": 2,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "K8s: PVC and CSI storage",
+  "uid": "k8s-pvc-csi-storage",
+  "version": 1,
+  "weekStart": ""
+}
