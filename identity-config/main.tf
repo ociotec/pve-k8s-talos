@@ -10,17 +10,6 @@ locals {
   keycloak_url                   = try(data.terraform_remote_state.identity.outputs.keycloak_url, "")
   keycloak_master_realm_settings = try(data.terraform_remote_state.identity.outputs.keycloak_master_realm_settings, null)
   keycloak_realms                = try(data.terraform_remote_state.identity.outputs.keycloak_realm_definitions, [])
-  unsupported_keycloak_api_features = flatten([
-    for realm in local.keycloak_realms : concat(
-      length(try(realm.user_federation, [])) > 0 ? [format("%s/user_federation", realm.name)] : [],
-      flatten([
-        for group in try(realm.groups, []) : concat(
-          length(try(group.extra_members, [])) > 0 ? [format("%s/groups/%s/extra_members", realm.name, group.name)] : [],
-          length(try(group.included_ldap_groups, [])) > 0 ? [format("%s/groups/%s/included_ldap_groups", realm.name, group.name)] : []
-        )
-      ])
-    )
-  ])
 }
 
 data "terraform_remote_state" "identity" {
@@ -28,13 +17,6 @@ data "terraform_remote_state" "identity" {
 
   config = {
     path = local.identity_state_path
-  }
-}
-
-check "keycloak_api_supported_config" {
-  assert {
-    condition     = length(local.unsupported_keycloak_api_features) == 0
-    error_message = format("identity-config API mode does not yet support these Keycloak features: %s", join(", ", local.unsupported_keycloak_api_features))
   }
 }
 

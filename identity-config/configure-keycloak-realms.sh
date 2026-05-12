@@ -243,6 +243,20 @@ client_protocol_mapper_id() {
     head -n1
 }
 
+component_id() {
+  local realm="$1"
+  local parent_id="$2"
+  local provider_type="$3"
+  local component_name="$4"
+  api GET "realms/$(urlencode "${realm}")/components?parent=$(urlencode "${parent_id}")&type=$(urlencode "${provider_type}")&name=$(urlencode "${component_name}")" |
+    jq -r \
+      --arg parent_id "${parent_id}" \
+      --arg provider_type "${provider_type}" \
+      --arg component_name "${component_name}" \
+      '.[] | select(.parentId == $parent_id and .providerType == $provider_type and .name == $component_name) | .id' |
+    head -n1
+}
+
 role_json() {
   local realm="$1"
   local client_id_value="$2"
@@ -432,6 +446,103 @@ upsert_client_mapper() {
   api POST "realms/$(urlencode "${realm}")/clients/${client_id_value}/protocol-mappers/models" "${payload}" >/dev/null
 }
 
+component_payload() {
+  local source_json="$1"
+  local parent_id="$2"
+  local payload="$3"
+
+  jq --arg parent_id "${parent_id}" '
+    def config_arrays:
+      with_entries(
+        .value = (
+          if .value == null then []
+          elif (.value | type) == "array" then [.value[] | tostring]
+          else [(.value | tostring)]
+          end
+        )
+      );
+    {
+      name: .name,
+      providerId: .provider_id,
+      providerType: .provider_type,
+      parentId: $parent_id,
+      config: ((.component_config // .config // {}) | config_arrays)
+    }' "${source_json}" > "${payload}"
+}
+
+upsert_component() {
+  local realm="$1"
+  local component_json="$2"
+  local component_name
+  local existing_id
+  local parent_id
+  local provider_type
+  local payload
+
+  component_name="$(jq -r '.name' "${component_json}")"
+  parent_id="$(jq -r '.parentId' "${component_json}")"
+  provider_type="$(jq -r '.providerType' "${component_json}")"
+  payload="${TMPDIR}/component-${realm}-${component_name}.json"
+  existing_id="$(component_id "${realm}" "${parent_id}" "${provider_type}" "${component_name}")"
+
+  if [[ -n "${existing_id}" ]]; then
+    jq --arg id "${existing_id}" '.id = $id' "${component_json}" > "${payload}"
+    api PUT "realms/$(urlencode "${realm}")/components/${existing_id}" "${payload}" >/dev/null
+    printf '%s\n' "${existing_id}"
+  else
+    api POST "realms/$(urlencode "${realm}")/components" "${component_json}" >/dev/null
+    component_id "${realm}" "${parent_id}" "${provider_type}" "${component_name}"
+  fi
+}
+
+sync_ldap_mapper() {
+  local realm="$1"
+  local federation_id="$2"
+  local mapper_id="$3"
+
+  api POST "realms/$(urlencode "${realm}")/user-storage/${federation_id}/mappers/${mapper_id}/sync?direction=fedToKeycloak" >/dev/null
+}
+
+configure_user_federation() {
+  local realm="$1"
+  local federation_json="$2"
+  local realm_id
+  local federation_file
+  local federation_id
+  local mapper_file
+  local mapper_id
+  local mapper_name
+
+  realm_id="$(realm_uuid "${realm}")"
+  federation_file="${TMPDIR}/federation-${realm}-$(jq -r '.name' "${federation_json}").json"
+  component_payload "${federation_json}" "${realm_id}" "${federation_file}"
+  federation_id="$(upsert_component "${realm}" "${federation_file}")"
+
+  if [[ -z "${federation_id}" ]]; then
+    echo "[keycloak-api] could not resolve federation component ${realm}/$(jq -r '.name' "${federation_json}")" >&2
+    exit 1
+  fi
+
+  jq -c '.mappers[]?' "${federation_json}" | while IFS= read -r mapper; do
+    mapper_name="$(jq -r '.name' <<< "${mapper}")"
+    mapper_file="${TMPDIR}/federation-mapper-${realm}-${mapper_name}.json"
+    printf '%s\n' "${mapper}" > "${TMPDIR}/federation-mapper-input.json"
+    component_payload "${TMPDIR}/federation-mapper-input.json" "${federation_id}" "${mapper_file}"
+    upsert_component "${realm}" "${mapper_file}" >/dev/null
+  done
+
+  if [[ "$(jq -r '.group_federation == null' "${federation_json}")" == "false" ]]; then
+    mapper_name="$(jq -r '.group_federation.name' "${federation_json}")"
+    mapper_file="${TMPDIR}/group-federation-mapper-${realm}-${mapper_name}.json"
+    jq '.group_federation' "${federation_json}" > "${TMPDIR}/group-federation-input.json"
+    component_payload "${TMPDIR}/group-federation-input.json" "${federation_id}" "${mapper_file}"
+    mapper_id="$(upsert_component "${realm}" "${mapper_file}")"
+    if [[ -n "${mapper_id}" ]]; then
+      sync_ldap_mapper "${realm}" "${federation_id}" "${mapper_id}" || true
+    fi
+  fi
+}
+
 upsert_group() {
   local realm="$1"
   local group_json="$2"
@@ -439,7 +550,7 @@ upsert_group() {
   local existing_id
   local payload
   group_name="$(jq -r '.name' "${group_json}")"
-  payload="${TMPDIR}/group-${realm}-${group_name}.json"
+  payload="${TMPDIR}/group-payload-${realm}-${group_name}.json"
 
   jq '{name: .name, path: ("/" + .name), attributes: {}, subGroups: [], description: .description}' "${group_json}" > "${payload}"
   existing_id="$(group_id "${realm}" "${group_name}")"
@@ -448,6 +559,21 @@ upsert_group() {
   else
     api POST "realms/$(urlencode "${realm}")/groups" "${payload}" >/dev/null
   fi
+}
+
+assign_user_group() {
+  local realm="$1"
+  local username="$2"
+  local group_id_value="$3"
+  local user_id_value
+
+  user_id_value="$(user_id "${realm}" "${username}")"
+  if [[ -z "${user_id_value}" ]]; then
+    echo "[keycloak-api] could not resolve configured group member ${realm}/${username}" >&2
+    return 1
+  fi
+
+  api PUT "realms/$(urlencode "${realm}")/users/${user_id_value}/groups/${group_id_value}" >/dev/null
 }
 
 ensure_client_role() {
@@ -598,6 +724,7 @@ configure_login_gate() {
 configure_realm() {
   local realm_json="$1"
   local realm
+  local federation_file
   local group_file
   local client_file
   local mapper_file
@@ -606,6 +733,13 @@ configure_realm() {
 
   echo "[keycloak-api] realm ${realm}: settings"
   upsert_realm "${realm_json}"
+
+  jq -c '.user_federation[]?' "${realm_json}" | while IFS= read -r federation; do
+    federation_file="${TMPDIR}/federation-input.json"
+    printf '%s\n' "${federation}" > "${federation_file}"
+    echo "[keycloak-api] realm ${realm}: user federation $(jq -r '.name' "${federation_file}")"
+    configure_user_federation "${realm}" "${federation_file}"
+  done
 
   jq -c '.oidc_clients[]' "${realm_json}" | while IFS= read -r client; do
     client_file="${TMPDIR}/client-input.json"
@@ -632,7 +766,13 @@ configure_realm() {
       assign_group_realm_management_role "${realm}" "${group_id_value}" "query-users"
       assign_group_realm_management_role "${realm}" "${group_id_value}" "query-groups"
       assign_group_realm_management_role "${realm}" "${group_id_value}" "view-users"
+      jq -c '.included_ldap_groups[]' "${group_file}" | while IFS= read -r ldap_group; do
+        wait_for_group "${realm}" "$(jq -r '.group_name' <<< "${ldap_group}")" >/dev/null
+      done
     fi
+    jq -r '.extra_members[]?' "${group_file}" | while IFS= read -r username; do
+      assign_user_group "${realm}" "${username}" "${group_id_value}"
+    done
   done
 
   jq -c '.oidc_clients[] | select((.login_allowed_groups // []) | length > 0)' "${realm_json}" | while IFS= read -r client; do
