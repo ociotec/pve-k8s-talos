@@ -1,3 +1,15 @@
+variable "keycloak_ldap_bind_dn" {
+  type        = string
+  sensitive   = true
+  description = "LDAP bind user/DN used by Keycloak user federation."
+}
+
+variable "keycloak_ldap_bind_credential" {
+  type        = string
+  sensitive   = true
+  description = "LDAP bind credential used by Keycloak user federation."
+}
+
 locals {
   identity_namespace = "identity"
 
@@ -265,8 +277,8 @@ locals {
           enabled         = true
           edit_mode       = "READ_ONLY"
           import_users    = true
-          bind_dn         = "bind-user"
-          bind_credential = "replace-me"
+          bind_dn         = var.keycloak_ldap_bind_dn
+          bind_credential = var.keycloak_ldap_bind_credential
 
           connection = {
             url                = "ldap://ldap-server:389"

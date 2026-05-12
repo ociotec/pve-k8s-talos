@@ -38,6 +38,8 @@ Manual recovery paths:
 
 Declare access groups under `keycloak_realms[*].groups` in `clusters/<cluster>/identity_constants.tf`.
 
+Keep LDAP bind credentials out of `identity_constants.tf`. Declare the bind fields as `var.keycloak_ldap_bind_dn` and `var.keycloak_ldap_bind_credential`, then provide them from the cluster `.envrc` with `TF_VAR_keycloak_ldap_bind_dn` and `TF_VAR_keycloak_ldap_bind_credential`.
+
 Declare the Rancher, Portainer, and Grafana clients under `keycloak_realms[*].oidc_clients`.
 
 The sample cluster already includes `k8s-admins`, a Rancher client with redirect URI `https://<rancher-host>/verify-auth`, and a Portainer client with redirect URI `https://<portainer-host>/`.
