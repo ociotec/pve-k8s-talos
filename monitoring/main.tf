@@ -66,24 +66,21 @@ locals {
     trimsuffix(replace(replace(trimspace(target), "http://", ""), "https://", ""), "/")
   ])) : []
 
-  grafana_auth_keycloak_realm_value = trimspace(try(local.grafana_auth_keycloak_realm, ""))
-  grafana_auth_enabled              = local.grafana_auth_keycloak_realm_value != ""
-  grafana_auth_view_groups_value    = distinct(compact(try(local.grafana_auth_view_groups, [])))
-  grafana_auth_edit_groups_value    = distinct(compact(try(local.grafana_auth_edit_groups, [])))
-  grafana_auth_name_value           = trimspace(try(local.grafana_auth_name, "Keycloak"))
-  grafana_auth_scopes_value         = trimspace(try(local.grafana_auth_scopes, "openid profile email"))
-  grafana_auth_auto_login_value     = try(local.grafana_auth_auto_login, false)
-  grafana_auth_allow_sign_up_value  = try(local.grafana_auth_allow_sign_up, true)
-  grafana_auth_ca_secret_name_value = try(local.grafana_auth_ca_secret_name, "grafana-oauth-ca")
-  grafana_oauth_secret_name_value   = "grafana-oauth"
-  grafana_db_name_value             = try(local.grafana_db_name, "grafana")
-  grafana_db_username_value         = try(local.grafana_db_username, "grafana")
-  grafana_postgres_image_tag_value  = try(local.grafana_postgres_image_tag, "18.3")
-  grafana_postgres_pvc_size_value   = try(local.grafana_postgres_pvc_size, "8Gi")
-  grafana_postgres_storage_class_value = try(
-    local.grafana_postgres_storage_class,
-    local.storage_class
-  )
+  grafana_auth_keycloak_realm_value      = trimspace(try(local.grafana_auth_keycloak_realm, ""))
+  grafana_auth_enabled                   = local.grafana_auth_keycloak_realm_value != ""
+  grafana_auth_view_groups_value         = distinct(compact(try(local.grafana_auth_view_groups, [])))
+  grafana_auth_edit_groups_value         = distinct(compact(try(local.grafana_auth_edit_groups, [])))
+  grafana_auth_name_value                = trimspace(try(local.grafana_auth_name, "Keycloak"))
+  grafana_auth_scopes_value              = trimspace(try(local.grafana_auth_scopes, "openid profile email"))
+  grafana_auth_auto_login_value          = try(local.grafana_auth_auto_login, false)
+  grafana_auth_allow_sign_up_value       = try(local.grafana_auth_allow_sign_up, true)
+  grafana_auth_ca_secret_name_value      = try(local.grafana_auth_ca_secret_name, "grafana-oauth-ca")
+  grafana_oauth_secret_name_value        = "grafana-oauth"
+  grafana_db_name_value                  = try(local.grafana_db_name, "grafana")
+  grafana_db_username_value              = try(local.grafana_db_username, "grafana")
+  grafana_postgres_image_tag_value       = try(local.grafana_postgres_image_tag, "18.3")
+  grafana_postgres_pvc_size_value        = try(local.grafana_postgres_pvc_size, "8Gi")
+  grafana_postgres_storage_class_value   = local.grafana_postgres_storage_class
   grafana_postgres_password_length_value = try(local.grafana_postgres_password_length, 24)
   grafana_oauth_redirect_uri             = format("https://%s/login/generic_oauth", local.grafana_hostname)
   grafana_oauth_post_logout_uri          = format("https://%s/login", local.grafana_hostname)
@@ -187,12 +184,9 @@ locals {
     for group_name in local.prometheus_auth_allowed_groups_value : group_name
     if !contains(keys(try(local.identity_realm_groups[local.prometheus_auth_keycloak_realm_value], {})), group_name)
   ] : []
-  available_identity_realms = keys(local.identity_oidc_metadata)
-  monitoring_namespace      = yamldecode(file("${path.module}/namespace.yaml"))
-  prometheus_storage_class_value = try(
-    local.prometheus_storage_class,
-    local.storage_class
-  )
+  available_identity_realms              = keys(local.identity_oidc_metadata)
+  monitoring_namespace                   = yamldecode(file("${path.module}/namespace.yaml"))
+  prometheus_storage_class_value         = local.prometheus_storage_class
   prometheus_wal_compression_value       = try(local.prometheus_wal_compression, true)
   prometheus_query_max_concurrency_value = try(local.prometheus_query_max_concurrency, 10)
   prometheus_manifests = [
@@ -243,7 +237,7 @@ locals {
   ]
   grafana_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/grafana.yaml", {
-      storage_class                       = local.storage_class
+      storage_class                       = local.grafana_storage_class
       grafana_storage_size                = local.grafana_storage_size
       grafana_image_tag                   = local.grafana_image_tag
       grafana_hostname                    = local.grafana_hostname
@@ -300,7 +294,7 @@ locals {
   ]
   loki_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/loki.yaml", {
-      storage_class     = local.storage_class
+      storage_class     = local.loki_storage_class
       loki_storage_size = local.loki_storage_size
       loki_retention    = local.loki_retention
       loki_image_tag    = local.loki_image_tag

@@ -6,8 +6,13 @@ locals {
   prometheus_tls_secret_name     = "prometheus-tls"
   prometheus_api_tls_secret_name = local.prometheus_tls_secret_name
 
-  storage_class            = "${local.ceph_name_prefix}-rbd-ec"
-  prometheus_storage_class = "${local.ceph_name_prefix}-rbd-replica"
+  ec_storage_class      = "${local.ceph_name_prefix}-rbd-ec"
+  replica_storage_class = "${local.ceph_name_prefix}-rbd-replica"
+
+  grafana_storage_class          = local.ec_storage_class
+  grafana_postgres_storage_class = local.ec_storage_class
+  loki_storage_class             = local.ec_storage_class
+  prometheus_storage_class       = local.replica_storage_class
 
   grafana_storage_size    = "5Gi"
   prometheus_storage_size = "20Gi"
@@ -31,7 +36,6 @@ locals {
   grafana_postgres_exporter_image_tag = "v0.19.1"
   grafana_postgres_pvc_size           = "8Gi"
   grafana_postgres_password_length    = 24
-  grafana_postgres_storage_class      = local.storage_class
   grafana_auth_keycloak_realm         = "company"
   grafana_auth_view_groups            = ["monitoring-view"]
   grafana_auth_edit_groups            = ["monitoring-edit"]
