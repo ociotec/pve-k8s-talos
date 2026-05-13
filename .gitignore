@@ -46,3 +46,4 @@ monitoring/constants.tf
 /clusters/*
 !/clusters/sample/
 !/clusters/sample/**
+/docs/plans/**
