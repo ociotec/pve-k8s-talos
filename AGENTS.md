@@ -21,6 +21,7 @@ It complements `README.md` and focuses on execution behavior, change safety, and
 - Run scripts from `clusters/<cluster>` (never from `clusters/sample`).
 - Prefer `scripts/deploy.sh` for end-to-end deployment.
 - Do not offer to run deployments on behalf of the user. When changes need to be applied, tell the user they must run the deployment themselves and provide the exact `scripts/deploy.sh` command with the minimum skip flags needed to deploy only the affected components and minimize runtime.
+- After every code or configuration change, include the exact `scripts/deploy.sh` command the user should run with minimum skip flags. If no deployment is needed, say that explicitly.
 - Regenerate Talos assets whenever inputs change:
   - `constants.auto.tfvars`
   - `vms.auto.tfvars`
@@ -48,6 +49,7 @@ It complements `README.md` and focuses on execution behavior, change safety, and
 - Put environment/cluster decisions in:
   - `clusters/<cluster>/*.tfvars`
   - `clusters/<cluster>/*_constants.tf`
+- Add concise comments for constants whose purpose, operational effect, or relationship to adjacent settings is not obvious.
 - Avoid hardcoding cluster names, hostnames, paths, or secrets in shared modules.
 
 ## Certificates and TLS Conventions
