@@ -29,10 +29,16 @@ locals {
 
   external_ceph     = try(local.ceph_external, {})
   external_monitors = try(local.external_ceph.monitors, [])
-  external_mon_data = join(",", [for monitor in local.external_monitors : format("%s=%s", monitor.id, monitor.endpoint)])
+  external_monitors_normalized = [
+    for monitor in local.external_monitors : {
+      id       = startswith(monitor.id, "mon.") ? substr(monitor.id, 4, length(monitor.id) - 4) : monitor.id
+      endpoint = monitor.endpoint
+    }
+  ]
+  external_mon_data = join(",", [for monitor in local.external_monitors_normalized : format("%s=%s", monitor.id, monitor.endpoint)])
   external_mon_mapping = jsonencode({
     node = {
-      for monitor in local.external_monitors : monitor.id => {
+      for monitor in local.external_monitors_normalized : monitor.id => {
         Name     = split(":", monitor.endpoint)[0]
         Hostname = split(":", monitor.endpoint)[0]
         Address  = split(":", monitor.endpoint)[0]
@@ -42,7 +48,7 @@ locals {
   external_csi_cluster_config = jsonencode([
     {
       clusterID = local.effective_ceph_namespace
-      monitors  = [for monitor in local.external_monitors : monitor.endpoint]
+      monitors  = [for monitor in local.external_monitors_normalized : monitor.endpoint]
       namespace = ""
     }
   ])
@@ -76,6 +82,42 @@ locals {
   )
   block_ec_data_size     = try(local.block_ec.data_size, local.block_ec.k + local.block_ec.m)
   block_ec_data_min_size = try(local.block_ec.data_min_size, local.block_ec.k)
+
+  filesystem_replicated = merge(
+    {
+      enabled            = false
+      filesystem_name    = "${local.effective_ceph_name_prefix}-cephfs-replica"
+      metadata_pool_name = "${local.effective_ceph_name_prefix}-cephfs-replica-metadata"
+      data_pool_name     = "${local.effective_ceph_name_prefix}-cephfs-replica-data"
+      metadata_pg_num    = 16
+      data_pg_num        = 128
+      size               = 3
+      min_size           = 2
+    },
+    try(local.ceph_filesystem_replicated, {})
+  )
+  filesystem_ec = merge(
+    {
+      enabled                = false
+      filesystem_name        = "${local.effective_ceph_name_prefix}-cephfs-ec"
+      metadata_pool_name     = "${local.effective_ceph_name_prefix}-cephfs-ec-metadata"
+      default_data_pool_name = "${local.effective_ceph_name_prefix}-cephfs-ec-default"
+      ec_data_pool_name      = "${local.effective_ceph_name_prefix}-cephfs-ec-data"
+      metadata_pg_num        = 16
+      default_data_pg_num    = 128
+      ec_data_pg_num         = 128
+      metadata_size          = 3
+      metadata_min_size      = 2
+      default_data_size      = 3
+      default_data_min_size  = 2
+      k                      = 2
+      m                      = 1
+    },
+    try(local.ceph_filesystem_ec, {})
+  )
+  filesystem_ec_data_size     = try(local.filesystem_ec.ec_data_size, local.filesystem_ec.k + local.filesystem_ec.m)
+  filesystem_ec_data_min_size = try(local.filesystem_ec.ec_data_min_size, local.filesystem_ec.k)
+
   external_block_pools = local.effective_ceph_mode == "external" ? merge(
     try(local.block_replicated.enabled, false) ? {
       (local.block_replicated.pool_name) = {
@@ -102,6 +144,43 @@ locals {
         min_size = local.block_ec_data_min_size
         k        = local.block_ec.k
         m        = local.block_ec.m
+      }
+    } : {}
+  ) : {}
+
+  external_filesystems = local.effective_ceph_mode == "external" ? merge(
+    try(local.filesystem_replicated.enabled, false) ? {
+      (local.filesystem_replicated.filesystem_name) = {
+        name              = local.filesystem_replicated.filesystem_name
+        type              = "replicated"
+        metadata_pool     = local.filesystem_replicated.metadata_pool_name
+        metadata_pg_num   = local.filesystem_replicated.metadata_pg_num
+        metadata_size     = local.filesystem_replicated.size
+        metadata_min_size = local.filesystem_replicated.min_size
+        data_pool         = local.filesystem_replicated.data_pool_name
+        data_pg_num       = local.filesystem_replicated.data_pg_num
+        data_size         = local.filesystem_replicated.size
+        data_min_size     = local.filesystem_replicated.min_size
+      }
+    } : {},
+    try(local.filesystem_ec.enabled, false) ? {
+      (local.filesystem_ec.filesystem_name) = {
+        name              = local.filesystem_ec.filesystem_name
+        type              = "ec"
+        metadata_pool     = local.filesystem_ec.metadata_pool_name
+        metadata_pg_num   = local.filesystem_ec.metadata_pg_num
+        metadata_size     = local.filesystem_ec.metadata_size
+        metadata_min_size = local.filesystem_ec.metadata_min_size
+        data_pool         = local.filesystem_ec.default_data_pool_name
+        data_pg_num       = local.filesystem_ec.default_data_pg_num
+        data_size         = local.filesystem_ec.default_data_size
+        data_min_size     = local.filesystem_ec.default_data_min_size
+        ec_data_pool      = local.filesystem_ec.ec_data_pool_name
+        ec_data_pg_num    = local.filesystem_ec.ec_data_pg_num
+        ec_data_size      = local.filesystem_ec_data_size
+        ec_data_min_size  = local.filesystem_ec_data_min_size
+        k                 = local.filesystem_ec.k
+        m                 = local.filesystem_ec.m
       }
     } : {}
   ) : {}
@@ -183,6 +262,37 @@ resource "null_resource" "external_rbd_pools" {
   }
 }
 
+resource "null_resource" "external_ceph_filesystems" {
+  for_each = local.external_filesystems
+
+  triggers = {
+    filesystem_spec = jsonencode(each.value)
+    converge_every  = timestamp()
+  }
+
+  provisioner "local-exec" {
+    command = format(
+      "%s ensure-cephfs --name %s --type %s --metadata-pool %s --metadata-pg-num %s --metadata-size %s --metadata-min-size %s --data-pool %s --data-pg-num %s --data-size %s --data-min-size %s%s",
+      "${path.module}/pve-ceph-external.sh",
+      each.value.name,
+      each.value.type,
+      each.value.metadata_pool,
+      tostring(each.value.metadata_pg_num),
+      tostring(each.value.metadata_size),
+      tostring(each.value.metadata_min_size),
+      each.value.data_pool,
+      tostring(each.value.data_pg_num),
+      tostring(each.value.data_size),
+      tostring(each.value.data_min_size),
+      each.value.type == "ec" ? format(" --ec-data-pool %s --ec-data-pg-num %s --ec-data-size %s --ec-data-min-size %s --k %s --m %s", each.value.ec_data_pool, tostring(each.value.ec_data_pg_num), tostring(each.value.ec_data_size), tostring(each.value.ec_data_min_size), tostring(each.value.k), tostring(each.value.m)) : ""
+    )
+
+    environment = {
+      CEPH_SSH_HOST = local.external_ceph_ssh_host
+    }
+  }
+}
+
 resource "kubernetes_secret_v1" "rook_ceph_mon" {
   count = local.effective_ceph_mode == "external" ? 1 : 0
 
@@ -227,6 +337,7 @@ resource "kubernetes_manifest" "rook_cluster_internal" {
 
   depends_on = [
     null_resource.external_rbd_pools,
+    null_resource.external_ceph_filesystems,
     kubernetes_secret_v1.rook_ceph_mon,
     kubernetes_config_map_v1.rook_ceph_mon_endpoints,
   ]
@@ -243,6 +354,7 @@ resource "kubernetes_manifest" "rook_cluster_external" {
 
   depends_on = [
     null_resource.external_rbd_pools,
+    null_resource.external_ceph_filesystems,
     kubernetes_secret_v1.rook_ceph_mon,
     kubernetes_config_map_v1.rook_ceph_mon_endpoints,
   ]

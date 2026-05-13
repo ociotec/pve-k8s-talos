@@ -5,6 +5,7 @@ usage() {
   cat <<'EOF'
 Usage:
   pve-ceph-external.sh ensure-rbd-pool [options]
+  pve-ceph-external.sh ensure-cephfs [options]
 
 Options:
   --node <name>            Optional Proxmox node that owns the local Ceph management API.
@@ -17,11 +18,28 @@ Options:
   --k <n>                  EC data chunks.
   --m <n>                  EC coding chunks.
 
+CephFS options:
+  --name <fs-name>                 CephFS filesystem name.
+  --type <replicated|ec>           CephFS data pool shape.
+  --metadata-pool <pool-name>      Replicated metadata pool.
+  --metadata-pg-num <n>            Metadata pool initial PG count.
+  --metadata-size <n>              Metadata pool replicated size.
+  --metadata-min-size <n>          Metadata pool min_size.
+  --data-pool <pool-name>          Replicated data pool, or default data pool for EC CephFS.
+  --data-pg-num <n>                Data/default data pool initial PG count.
+  --data-size <n>                  Data/default data pool replicated size.
+  --data-min-size <n>              Data/default data pool min_size.
+  --ec-data-pool <pool-name>       Additional EC data pool for --type ec.
+  --ec-data-pg-num <n>             EC data pool initial PG count.
+  --ec-data-size <n>               EC data pool EC size.
+  --ec-data-min-size <n>           EC data pool min_size.
+
 Environment:
   PROXMOX_VE_ENDPOINT      Example: https://pve.example.com:8006/
   PROXMOX_VE_API_TOKEN     Example: root@pam!token=secret
   PROXMOX_VE_INSECURE      Set to true/1 to skip TLS verification
   CEPH_SSH_USER            SSH user for Ceph CLI fallback. Default: root
+  CEPH_SSH_HOST            SSH host/IP for ensure-cephfs.
 EOF
 }
 
@@ -108,6 +126,70 @@ ceph_pool_exists_via_ssh() {
   payload="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
     "ceph osd pool ls --format json")"
   printf '%s' "${payload}" | jq -er --arg pool_name "${pool_name}" '.[] | select(. == $pool_name)' >/dev/null
+}
+
+ceph_filesystem_exists_via_ssh() {
+  local ssh_host="$1"
+  local filesystem_name="$2"
+  local ssh_user="${CEPH_SSH_USER:-root}"
+  local payload
+
+  payload="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
+    "ceph fs volume ls --format json")"
+  printf '%s' "${payload}" | jq -er --arg filesystem_name "${filesystem_name}" '.[] | select(.name == $filesystem_name)' >/dev/null
+}
+
+ceph_filesystem_has_data_pool_via_ssh() {
+  local ssh_host="$1"
+  local filesystem_name="$2"
+  local pool_name="$3"
+  local ssh_user="${CEPH_SSH_USER:-root}"
+  local payload
+
+  payload="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
+    "ceph fs ls --format json")"
+  printf '%s' "${payload}" | jq -er \
+    --arg filesystem_name "${filesystem_name}" \
+    --arg pool_name "${pool_name}" \
+    '.[] | select(.name == $filesystem_name) | .data_pools[]? | select(. == $pool_name)' >/dev/null
+}
+
+ceph_subvolume_group_exists_via_ssh() {
+  local ssh_host="$1"
+  local filesystem_name="$2"
+  local group_name="$3"
+  local ssh_user="${CEPH_SSH_USER:-root}"
+  local payload
+
+  payload="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
+    "ceph fs subvolumegroup ls $(shell_quote "${filesystem_name}") --format json")"
+  printf '%s' "${payload}" | jq -er --arg group_name "${group_name}" '.[] | select(.name == $group_name)' >/dev/null
+}
+
+ceph_filesystem_has_active_mds_via_ssh() {
+  local ssh_host="$1"
+  local filesystem_name="$2"
+  local ssh_user="${CEPH_SSH_USER:-root}"
+  local payload
+
+  payload="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
+    "ceph fs dump --format json")"
+  printf '%s' "${payload}" | jq -er \
+    --arg filesystem_name "${filesystem_name}" \
+    '.filesystems[] | select(.mdsmap.fs_name == $filesystem_name) | (.mdsmap.up | length > 0)' >/dev/null
+}
+
+ceph_mds_daemon_exists_via_ssh() {
+  local ssh_host="$1"
+  local mds_name="$2"
+  local ssh_user="${CEPH_SSH_USER:-root}"
+  local payload
+
+  payload="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
+    "ceph fs dump --format json")"
+  printf '%s' "${payload}" | jq -er \
+    --arg mds_name "${mds_name}" \
+    '([.standbys[]?.name] + [.filesystems[]?.mdsmap.info[]?.name])[] | select(. == $mds_name)' >/dev/null
 }
 
 discover_ceph_node() {
@@ -269,14 +351,100 @@ run_ceph_via_ssh() {
     "ceph ${ceph_args}" 1>/dev/null
 }
 
-converge_ec_rbd_pool_via_ssh() {
+run_remote_via_ssh() {
+  local ssh_host="$1"
+  local remote_cmd="$2"
+  local ssh_user="${CEPH_SSH_USER:-root}"
+
+  require_cmd ssh
+  ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
+    "${remote_cmd}" 1>/dev/null
+}
+
+ensure_cephfs_active_mds_via_ssh() {
+  local ssh_host="$1"
+  local filesystem_name="$2"
+  local mds_name="$3"
+  local quoted_mds_name
+
+  if ceph_filesystem_has_active_mds_via_ssh "${ssh_host}" "${filesystem_name}"; then
+    echo "CephFS ${filesystem_name} already has an active MDS."
+    return 0
+  fi
+
+  if ceph_mds_daemon_exists_via_ssh "${ssh_host}" "${mds_name}"; then
+    echo "MDS ${mds_name} already exists on ${ssh_host}; waiting for CephFS ${filesystem_name} to activate."
+  else
+    quoted_mds_name="$(shell_quote "${mds_name}")"
+    run_remote_via_ssh "${ssh_host}" "pveceph mds create --name ${quoted_mds_name}"
+    echo "MDS ${mds_name} created on ${ssh_host}."
+  fi
+}
+
+ensure_cephfs_csi_subvolume_group_via_ssh() {
+  local ssh_host="$1"
+  local filesystem_name="$2"
+  local data_pool="$3"
+  local group_name="csi"
+  local quoted_filesystem quoted_group quoted_data_pool
+
+  if ceph_subvolume_group_exists_via_ssh "${ssh_host}" "${filesystem_name}" "${group_name}"; then
+    echo "CephFS ${filesystem_name} subvolume group ${group_name} already exists."
+    return 0
+  fi
+
+  quoted_filesystem="$(shell_quote "${filesystem_name}")"
+  quoted_group="$(shell_quote "${group_name}")"
+  quoted_data_pool="$(shell_quote "${data_pool}")"
+  run_ceph_via_ssh "${ssh_host}" "fs subvolumegroup create ${quoted_filesystem} ${quoted_group} 0 ${quoted_data_pool}"
+  echo "CephFS ${filesystem_name} subvolume group ${group_name} created with pool layout ${data_pool}."
+}
+
+converge_replicated_pool_via_ssh() {
   local ssh_host="$1"
   local pool_name="$2"
-  local min_size="$3"
+  local size="$3"
+  local min_size="$4"
   local quoted_pool
 
   quoted_pool="$(shell_quote "${pool_name}")"
-  run_ceph_via_ssh "${ssh_host}" "osd pool application enable ${quoted_pool} rbd --yes-i-really-mean-it"
+  run_ceph_via_ssh "${ssh_host}" "osd pool set ${quoted_pool} size ${size}"
+  run_ceph_via_ssh "${ssh_host}" "osd pool set ${quoted_pool} min_size ${min_size}"
+  run_ceph_via_ssh "${ssh_host}" "osd pool set ${quoted_pool} pg_autoscale_mode on"
+  echo "Replicated pool ${pool_name} converged via Ceph CLI."
+}
+
+ensure_replicated_pool_via_ssh() {
+  local ssh_host="$1"
+  local pool_name="$2"
+  local pg_num="$3"
+  local size="$4"
+  local min_size="$5"
+  local quoted_pool
+
+  require_cmd ssh
+  quoted_pool="$(shell_quote "${pool_name}")"
+
+  if ceph_pool_exists_via_ssh "${ssh_host}" "${pool_name}"; then
+    echo "Pool ${pool_name} already exists on ${ssh_host}, converging settings via Ceph CLI."
+    converge_replicated_pool_via_ssh "${ssh_host}" "${pool_name}" "${size}" "${min_size}"
+    return 0
+  fi
+
+  run_ceph_via_ssh "${ssh_host}" "osd pool create ${quoted_pool} ${pg_num} ${pg_num} replicated"
+  echo "Pool ${pool_name} created on ${ssh_host} via Ceph CLI."
+  converge_replicated_pool_via_ssh "${ssh_host}" "${pool_name}" "${size}" "${min_size}"
+}
+
+converge_ec_pool_via_ssh() {
+  local ssh_host="$1"
+  local pool_name="$2"
+  local min_size="$3"
+  local application="$4"
+  local quoted_pool
+
+  quoted_pool="$(shell_quote "${pool_name}")"
+  run_ceph_via_ssh "${ssh_host}" "osd pool application enable ${quoted_pool} ${application} --yes-i-really-mean-it"
   run_ceph_via_ssh "${ssh_host}" "osd pool set ${quoted_pool} min_size ${min_size}"
   run_ceph_via_ssh "${ssh_host}" "osd pool set ${quoted_pool} pg_autoscale_mode on"
   run_ceph_via_ssh "${ssh_host}" "osd pool set ${quoted_pool} allow_ec_overwrites true"
@@ -299,14 +467,40 @@ ensure_ec_rbd_pool_via_ssh() {
 
   if ceph_pool_exists_via_ssh "${ssh_host}" "${pool_name}"; then
     echo "Pool ${pool_name} already exists on ${ssh_host}, converging settings via Ceph CLI."
-    converge_ec_rbd_pool_via_ssh "${ssh_host}" "${pool_name}" "${min_size}"
+    converge_ec_pool_via_ssh "${ssh_host}" "${pool_name}" "${min_size}" "rbd"
     return 0
   fi
 
   run_ceph_via_ssh "${ssh_host}" "osd erasure-code-profile set ${quoted_profile} k=${k} m=${m} crush-failure-domain=host --force"
   run_ceph_via_ssh "${ssh_host}" "osd pool create ${quoted_pool} ${pg_num} ${pg_num} erasure ${quoted_profile}"
   echo "Pool ${pool_name} created on ${ssh_host} via Ceph CLI."
-  converge_ec_rbd_pool_via_ssh "${ssh_host}" "${pool_name}" "${min_size}"
+  converge_ec_pool_via_ssh "${ssh_host}" "${pool_name}" "${min_size}" "rbd"
+}
+
+ensure_ec_cephfs_pool_via_ssh() {
+  local ssh_host="$1"
+  local pool_name="$2"
+  local pg_num="$3"
+  local min_size="$4"
+  local k="$5"
+  local m="$6"
+  local profile_name="${pool_name}-profile"
+  local quoted_pool quoted_profile
+
+  require_cmd ssh
+  quoted_pool="$(shell_quote "${pool_name}")"
+  quoted_profile="$(shell_quote "${profile_name}")"
+
+  if ceph_pool_exists_via_ssh "${ssh_host}" "${pool_name}"; then
+    echo "Pool ${pool_name} already exists on ${ssh_host}, converging settings via Ceph CLI."
+    converge_ec_pool_via_ssh "${ssh_host}" "${pool_name}" "${min_size}" "cephfs"
+    return 0
+  fi
+
+  run_ceph_via_ssh "${ssh_host}" "osd erasure-code-profile set ${quoted_profile} k=${k} m=${m} crush-failure-domain=host --force"
+  run_ceph_via_ssh "${ssh_host}" "osd pool create ${quoted_pool} ${pg_num} ${pg_num} erasure ${quoted_profile}"
+  echo "Pool ${pool_name} created on ${ssh_host} via Ceph CLI."
+  converge_ec_pool_via_ssh "${ssh_host}" "${pool_name}" "${min_size}" "cephfs"
 }
 
 converge_rbd_pool() {
@@ -454,6 +648,166 @@ ensure_rbd_pool() {
   converge_rbd_pool "${node}" "${pool_name}" "${pool_type}" "${size}" "${min_size}"
 }
 
+ensure_cephfs() {
+  local ssh_host="${CEPH_SSH_HOST:-}"
+  local filesystem_name=""
+  local filesystem_type=""
+  local metadata_pool=""
+  local metadata_pg_num=""
+  local metadata_size=""
+  local metadata_min_size=""
+  local data_pool=""
+  local data_pg_num=""
+  local data_size=""
+  local data_min_size=""
+  local ec_data_pool=""
+  local ec_data_pg_num=""
+  local ec_data_size=""
+  local ec_data_min_size=""
+  local k=""
+  local m=""
+  local quoted_filesystem quoted_metadata_pool quoted_data_pool quoted_ec_data_pool
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --ssh-host)
+        ssh_host="$2"
+        shift 2
+        ;;
+      --name)
+        filesystem_name="$2"
+        shift 2
+        ;;
+      --type)
+        filesystem_type="$2"
+        shift 2
+        ;;
+      --metadata-pool)
+        metadata_pool="$2"
+        shift 2
+        ;;
+      --metadata-pg-num)
+        metadata_pg_num="$2"
+        shift 2
+        ;;
+      --metadata-size)
+        metadata_size="$2"
+        shift 2
+        ;;
+      --metadata-min-size)
+        metadata_min_size="$2"
+        shift 2
+        ;;
+      --data-pool)
+        data_pool="$2"
+        shift 2
+        ;;
+      --data-pg-num)
+        data_pg_num="$2"
+        shift 2
+        ;;
+      --data-size)
+        data_size="$2"
+        shift 2
+        ;;
+      --data-min-size)
+        data_min_size="$2"
+        shift 2
+        ;;
+      --ec-data-pool)
+        ec_data_pool="$2"
+        shift 2
+        ;;
+      --ec-data-pg-num)
+        ec_data_pg_num="$2"
+        shift 2
+        ;;
+      --ec-data-size)
+        ec_data_size="$2"
+        shift 2
+        ;;
+      --ec-data-min-size)
+        ec_data_min_size="$2"
+        shift 2
+        ;;
+      --k)
+        k="$2"
+        shift 2
+        ;;
+      --m)
+        m="$2"
+        shift 2
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        echo "Unknown option: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  if [[ -z "${ssh_host}" ]]; then
+    echo "ensure-cephfs requires --ssh-host or CEPH_SSH_HOST." >&2
+    usage >&2
+    exit 1
+  fi
+
+  if [[ -z "${filesystem_name}" || -z "${filesystem_type}" || -z "${metadata_pool}" || -z "${metadata_pg_num}" || -z "${metadata_size}" || -z "${metadata_min_size}" || -z "${data_pool}" || -z "${data_pg_num}" || -z "${data_size}" || -z "${data_min_size}" ]]; then
+    echo "Missing required ensure-cephfs arguments." >&2
+    usage >&2
+    exit 1
+  fi
+
+  if [[ "${filesystem_type}" != "replicated" && "${filesystem_type}" != "ec" ]]; then
+    echo "--type must be replicated or ec" >&2
+    exit 1
+  fi
+
+  if [[ "${filesystem_type}" == "ec" && ( -z "${ec_data_pool}" || -z "${ec_data_pg_num}" || -z "${ec_data_size}" || -z "${ec_data_min_size}" || -z "${k}" || -z "${m}" ) ]]; then
+    echo "EC CephFS requires --ec-data-pool, --ec-data-pg-num, --ec-data-size, --ec-data-min-size, --k, and --m." >&2
+    usage >&2
+    exit 1
+  fi
+
+  require_cmd ssh
+
+  ensure_replicated_pool_via_ssh "${ssh_host}" "${metadata_pool}" "${metadata_pg_num}" "${metadata_size}" "${metadata_min_size}"
+  ensure_replicated_pool_via_ssh "${ssh_host}" "${data_pool}" "${data_pg_num}" "${data_size}" "${data_min_size}"
+
+  quoted_filesystem="$(shell_quote "${filesystem_name}")"
+  quoted_metadata_pool="$(shell_quote "${metadata_pool}")"
+  quoted_data_pool="$(shell_quote "${data_pool}")"
+
+  if ceph_filesystem_exists_via_ssh "${ssh_host}" "${filesystem_name}"; then
+    echo "CephFS ${filesystem_name} already exists on ${ssh_host}."
+  else
+    run_ceph_via_ssh "${ssh_host}" "fs new ${quoted_filesystem} ${quoted_metadata_pool} ${quoted_data_pool}"
+    echo "CephFS ${filesystem_name} created on ${ssh_host}."
+  fi
+
+  if [[ "${filesystem_type}" == "ec" ]]; then
+    ensure_ec_cephfs_pool_via_ssh "${ssh_host}" "${ec_data_pool}" "${ec_data_pg_num}" "${ec_data_min_size}" "${k}" "${m}"
+
+    if ceph_filesystem_has_data_pool_via_ssh "${ssh_host}" "${filesystem_name}" "${ec_data_pool}"; then
+      echo "CephFS ${filesystem_name} already includes data pool ${ec_data_pool}."
+    else
+      quoted_ec_data_pool="$(shell_quote "${ec_data_pool}")"
+      run_ceph_via_ssh "${ssh_host}" "fs add_data_pool ${quoted_filesystem} ${quoted_ec_data_pool}"
+      echo "CephFS ${filesystem_name} data pool ${ec_data_pool} added."
+    fi
+
+    ensure_cephfs_csi_subvolume_group_via_ssh "${ssh_host}" "${filesystem_name}" "${ec_data_pool}"
+  else
+    ensure_cephfs_csi_subvolume_group_via_ssh "${ssh_host}" "${filesystem_name}" "${data_pool}"
+  fi
+
+  ensure_cephfs_active_mds_via_ssh "${ssh_host}" "${filesystem_name}" "${filesystem_name}"
+}
+
 main() {
   require_cmd curl
   require_cmd jq
@@ -469,6 +823,9 @@ main() {
   case "${command}" in
     ensure-rbd-pool)
       ensure_rbd_pool "$@"
+      ;;
+    ensure-cephfs)
+      ensure_cephfs "$@"
       ;;
     -h|--help)
       usage

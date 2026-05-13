@@ -527,6 +527,7 @@ wait_for_cephcluster_ready() {
   local start
   local phase
   local health
+  local connected
 
   start="$(date +%s)"
   while true; do
@@ -534,7 +535,8 @@ wait_for_cephcluster_ready() {
     phase="$(kubectl -n "${namespace}" get cephcluster "${name}" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
     health="$(kubectl -n "${namespace}" get cephcluster "${name}" -o jsonpath='{.status.ceph.health}' 2>/dev/null || true)"
     if [[ "${ceph_mode}" == "external" ]]; then
-      if [[ "${phase}" == "Connected" && "${health}" != "HEALTH_ERR" && -n "${health}" ]]; then
+      connected="$(kubectl -n "${namespace}" get cephcluster "${name}" -o jsonpath='{.status.conditions[?(@.type=="Connected")].status}' 2>/dev/null || true)"
+      if [[ "${connected}" == "True" && "${health}" != "HEALTH_ERR" && -n "${health}" ]]; then
         echo
         message "CephCluster ${namespace}/${name} is Connected (phase=${phase}, health=${health})."
         break
