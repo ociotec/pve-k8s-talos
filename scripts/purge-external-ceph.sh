@@ -151,6 +151,97 @@ remote_ceph() {
   ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ceph_ssh_user}@${ceph_ssh_host}" "${remote_cmd}"
 }
 
+ceph_mon_allow_pool_delete() {
+  local value
+
+  if ! value="$(remote_ceph "ceph config get mon mon_allow_pool_delete")"; then
+    error "Failed to query Ceph mon_allow_pool_delete on ${ceph_ssh_host}." >&2
+    exit 1
+  fi
+
+  value="${value//[[:space:]]/}"
+  case "${value}" in
+    true|false)
+      printf '%s\n' "${value}"
+      ;;
+    *)
+      error "Unexpected Ceph mon_allow_pool_delete value on ${ceph_ssh_host}: ${value}" >&2
+      exit 1
+      ;;
+  esac
+}
+
+ceph_mon_allow_pool_delete_is_configured() {
+  local output
+
+  if ! output="$(remote_ceph "ceph config dump --format json")"; then
+    error "Failed to query Ceph config dump on ${ceph_ssh_host}." >&2
+    exit 1
+  fi
+
+  printf '%s' "${output}" | jq -er '
+    .[]
+    | select((.who? // .section? // "") == "mon")
+    | select((.name? // .option? // "") == "mon_allow_pool_delete")
+  ' >/dev/null 2>&1
+}
+
+set_ceph_mon_allow_pool_delete() {
+  local value="$1"
+
+  remote_ceph "ceph config set mon mon_allow_pool_delete ${value}" 1>/dev/null
+}
+
+unset_ceph_mon_allow_pool_delete() {
+  remote_ceph "ceph config rm mon mon_allow_pool_delete" 1>/dev/null
+}
+
+ensure_ceph_pool_deletion_enabled() {
+  if ceph_mon_allow_pool_delete_is_configured; then
+    pool_delete_original_configured=true
+  fi
+  pool_delete_original_value="$(ceph_mon_allow_pool_delete)"
+
+  if [[ "${pool_delete_original_value}" == "true" ]]; then
+    message "External Ceph pool deletion is already enabled."
+    return 0
+  fi
+
+  message "Temporarily enabling external Ceph pool deletion..."
+  set_ceph_mon_allow_pool_delete true
+  pool_delete_config_changed=true
+}
+
+restore_ceph_pool_deletion_config() {
+  local status=$?
+
+  if [[ "${pool_delete_config_changed}" == "true" && -n "${pool_delete_original_value}" ]]; then
+    if [[ "${pool_delete_original_configured}" == "true" ]]; then
+      message "Restoring external Ceph mon_allow_pool_delete=${pool_delete_original_value}..."
+      if ! set_ceph_mon_allow_pool_delete "${pool_delete_original_value}"; then
+        error "Failed to restore Ceph mon_allow_pool_delete=${pool_delete_original_value} on ${ceph_ssh_host}." >&2
+        if [[ "${status}" -eq 0 ]]; then
+          status=1
+        fi
+      fi
+    else
+      message "Removing temporary external Ceph mon_allow_pool_delete override..."
+      if ! unset_ceph_mon_allow_pool_delete; then
+        error "Failed to remove temporary Ceph mon_allow_pool_delete override on ${ceph_ssh_host}." >&2
+        if [[ "${status}" -eq 0 ]]; then
+          status=1
+        fi
+      fi
+    fi
+  fi
+
+  if [[ "${status}" -eq 0 ]]; then
+    message "External Ceph purge completed."
+  fi
+
+  exit "${status}"
+}
+
 ceph_pool_exists() {
   local pool_name="$1"
   local output
@@ -173,6 +264,19 @@ ceph_filesystem_exists() {
   fi
 
   printf '%s' "${output}" | jq -er --arg fs "${filesystem_name}" '.[] | select(.name == $fs)' >/dev/null 2>&1
+}
+
+ceph_mds_exists() {
+  local mds_name="$1"
+  local output
+
+  if ! output="$(remote_ceph "ceph fs dump --format json")"; then
+    error "Failed to query Ceph MDS daemons while checking ${mds_name} on ${ceph_ssh_host}." >&2
+    exit 1
+  fi
+
+  printf '%s' "${output}" | jq -er --arg mds "${mds_name}" \
+    '([.standbys[]?.name] + [.filesystems[]?.mdsmap.info[]?.name])[] | select(. == $mds)' >/dev/null 2>&1
 }
 
 purge_rbd_pool_images() {
@@ -253,10 +357,29 @@ delete_cephfs_if_present() {
   remote_ceph "ceph fs volume rm ${filesystem_name} --yes-i-really-mean-it" 1>/dev/null
 }
 
+delete_mds_if_present() {
+  local mds_name="$1"
+
+  if [[ -z "${mds_name}" ]]; then
+    return 0
+  fi
+
+  if ! ceph_mds_exists "${mds_name}"; then
+    message "External Ceph MDS ${mds_name} is already absent."
+    return 0
+  fi
+
+  message "Deleting external Ceph MDS ${mds_name}..."
+  remote_ceph "pveceph mds destroy ${mds_name}" 1>/dev/null
+}
+
 cluster_name=""
 ceph_constants_path=""
 ceph_ssh_user="${CEPH_SSH_USER:-root}"
 ceph_ssh_host=""
+pool_delete_original_value=""
+pool_delete_original_configured=false
+pool_delete_config_changed=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -363,9 +486,13 @@ for summary in "${summaries[@]}"; do
   message "  - ${summary}"
 done
 
+trap restore_ceph_pool_deletion_config EXIT
+ensure_ceph_pool_deletion_enabled
+
 for spec in "${cephfs_specs[@]}"; do
   IFS='|' read -r filesystem_name metadata_pool_name data_pool_name extra_pool_name <<< "${spec}"
   delete_cephfs_if_present "${filesystem_name}"
+  delete_mds_if_present "${filesystem_name}"
   delete_pool_if_present "${extra_pool_name}"
   delete_pool_if_present "${data_pool_name}"
   delete_pool_if_present "${metadata_pool_name}"
@@ -378,5 +505,3 @@ for spec in "${rbd_pool_specs[@]}"; do
   fi
   delete_pool_if_present "${pool_name}"
 done
-
-message "External Ceph purge completed."
