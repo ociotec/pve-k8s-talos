@@ -30,6 +30,10 @@ locals {
   rancher_auth_allowed_group        = "k8s-admins"
   rancher_auth_global_role          = "admin"
   rancher_auth_access_mode          = "restricted"
+  rancher_cpu_request               = "200m"
+  rancher_cpu_limit                 = "1"
+  rancher_mem_request               = "2560Mi"
+  rancher_mem_limit                 = "2560Mi"
 
   tls_secrets = [
     {

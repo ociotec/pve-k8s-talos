@@ -52,6 +52,10 @@ locals {
   rancher_hostname_value                 = local.rancher_hostname
   rancher_tls_secret_name_value          = local.rancher_tls_secret_name
   rancher_replicas_value                 = local.rancher_replicas
+  rancher_cpu_request_value              = try(local.rancher_cpu_request, "200m")
+  rancher_cpu_limit_value                = try(local.rancher_cpu_limit, "1")
+  rancher_mem_request_value              = try(local.rancher_mem_request, "2560Mi")
+  rancher_mem_limit_value                = try(local.rancher_mem_limit, "2560Mi")
   rancher_private_ca_value               = local.rancher_private_ca
   rancher_bootstrap_length_value         = local.rancher_bootstrap_password_length
   rancher_auth_keycloak_realm_value      = trimspace(try(local.rancher_auth_keycloak_realm, ""))
@@ -199,8 +203,12 @@ locals {
   ])
   rancher_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/rancher.yaml", {
-      rancher_hostname = local.rancher_hostname_value
-      rancher_replicas = tostring(local.rancher_replicas_value)
+      rancher_hostname    = local.rancher_hostname_value
+      rancher_replicas    = tostring(local.rancher_replicas_value)
+      rancher_cpu_request = local.rancher_cpu_request_value
+      rancher_cpu_limit   = local.rancher_cpu_limit_value
+      rancher_mem_request = local.rancher_mem_request_value
+      rancher_mem_limit   = local.rancher_mem_limit_value
     })) :
     merge(
       yamldecode(doc),

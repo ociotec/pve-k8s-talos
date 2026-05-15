@@ -209,11 +209,11 @@ spec:
           failureThreshold: 5
         resources:
           requests:
-            cpu: 200m
-            memory: 2560Mi
+            cpu: "${rancher_cpu_request}"
+            memory: "${rancher_mem_request}"
           limits:
-            cpu: "1"
-            memory: 2560Mi
+            cpu: "${rancher_cpu_limit}"
+            memory: "${rancher_mem_limit}"
         volumeMounts:
         # Pass CA cert into rancher for private CA
         - mountPath: /etc/rancher/ssl/cacerts.pem
