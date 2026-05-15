@@ -45,6 +45,18 @@ locals {
   grafana_auth_allow_sign_up          = true
   grafana_auth_ca_secret_name         = "grafana-oauth-ca"
 
+  grafana_dashboard_provisioning_enabled           = false
+  grafana_dashboard_provisioning_pvc_create        = false
+  grafana_dashboard_provisioning_pvc_name          = "dashboards-provisioning"
+  grafana_dashboard_provisioning_pvc_storage_class = local.grafana_storage_class
+  grafana_dashboard_provisioning_pvc_access_modes  = ["ReadWriteMany"]
+  grafana_dashboard_provisioning_pvc_size          = "1Gi"
+
+  grafana_dashboard_provisioning_pvc_update_interval_seconds      = 30
+  grafana_dashboard_provisioning_pvc_allow_ui_updates             = false
+  grafana_dashboard_provisioning_pvc_disable_deletion             = false
+  grafana_dashboard_provisioning_pvc_folders_from_files_structure = true
+
   prometheus_auth_keycloak_realm            = "company"
   prometheus_auth_allowed_groups            = ["monitoring-view", "monitoring-edit"]
   prometheus_auth_ca_secret_name            = "prometheus-oauth-ca"

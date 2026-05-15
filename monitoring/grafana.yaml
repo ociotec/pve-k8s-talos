@@ -192,6 +192,23 @@ spec:
   resources:
     requests:
       storage: ${grafana_storage_size}
+%{ if grafana_dashboard_provisioning_pvc_create ~}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ${grafana_dashboard_provisioning_pvc_name}
+  namespace: monitoring
+spec:
+  accessModes:
+%{ for mode in grafana_dashboard_provisioning_pvc_access_modes ~}
+    - ${mode}
+%{ endfor ~}
+  storageClassName: ${grafana_dashboard_provisioning_pvc_storage_class}
+  resources:
+    requests:
+      storage: ${grafana_dashboard_provisioning_pvc_size}
+%{ endif ~}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -383,9 +400,15 @@ spec:
               mountPath: /etc/grafana/provisioning/dashboards
             - name: dashboards
               mountPath: /var/lib/grafana/dashboards
+              readOnly: true
 %{ if grafana_auth_ca_enabled ~}
             - name: grafana-oauth-ca
               mountPath: /run/secrets/grafana-oauth-ca
+              readOnly: true
+%{ endif ~}
+%{ if grafana_dashboard_provisioning_enabled ~}
+            - name: dashboards-provisioning
+              mountPath: /var/lib/grafana/dashboards-provisioning
               readOnly: true
 %{ endif ~}
       volumes:
@@ -410,6 +433,12 @@ spec:
         - name: grafana-oauth-ca
           secret:
             secretName: ${grafana_auth_ca_secret_name}
+%{ endif ~}
+%{ if grafana_dashboard_provisioning_enabled ~}
+        - name: dashboards-provisioning
+          persistentVolumeClaim:
+            claimName: ${grafana_dashboard_provisioning_pvc_name}
+            readOnly: true
 %{ endif ~}
 ---
 apiVersion: v1

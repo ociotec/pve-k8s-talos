@@ -1,2 +1,14 @@
 apiVersion: 1
+%{ if grafana_dashboard_provisioning_enabled ~}
+providers:
+  - name: dashboards-provisioning
+    type: file
+    updateIntervalSeconds: ${grafana_dashboard_provisioning_pvc_update_interval_seconds}
+    allowUiUpdates: ${grafana_dashboard_provisioning_pvc_allow_ui_updates}
+    disableDeletion: ${grafana_dashboard_provisioning_pvc_disable_deletion}
+    options:
+      path: /var/lib/grafana/dashboards-provisioning
+      foldersFromFilesStructure: ${grafana_dashboard_provisioning_pvc_folders_from_files_structure}
+%{ else ~}
 providers: []
+%{ endif ~}

@@ -66,27 +66,40 @@ locals {
     trimsuffix(replace(replace(trimspace(target), "http://", ""), "https://", ""), "/")
   ])) : []
 
-  grafana_auth_keycloak_realm_value      = trimspace(try(local.grafana_auth_keycloak_realm, ""))
-  grafana_auth_enabled                   = local.grafana_auth_keycloak_realm_value != ""
-  grafana_auth_view_groups_value         = distinct(compact(try(local.grafana_auth_view_groups, [])))
-  grafana_auth_edit_groups_value         = distinct(compact(try(local.grafana_auth_edit_groups, [])))
-  grafana_auth_name_value                = trimspace(try(local.grafana_auth_name, "Keycloak"))
-  grafana_auth_scopes_value              = trimspace(try(local.grafana_auth_scopes, "openid profile email"))
-  grafana_auth_auto_login_value          = try(local.grafana_auth_auto_login, false)
-  grafana_auth_allow_sign_up_value       = try(local.grafana_auth_allow_sign_up, true)
-  grafana_auth_ca_secret_name_value      = try(local.grafana_auth_ca_secret_name, "grafana-oauth-ca")
-  grafana_oauth_secret_name_value        = "grafana-oauth"
-  grafana_db_name_value                  = try(local.grafana_db_name, "grafana")
-  grafana_db_username_value              = try(local.grafana_db_username, "grafana")
-  grafana_postgres_image_tag_value       = try(local.grafana_postgres_image_tag, "18.3")
-  grafana_postgres_pvc_size_value        = try(local.grafana_postgres_pvc_size, "8Gi")
-  grafana_postgres_storage_class_value   = local.grafana_postgres_storage_class
-  grafana_postgres_password_length_value = try(local.grafana_postgres_password_length, 24)
-  grafana_oauth_redirect_uri             = format("https://%s/login/generic_oauth", local.grafana_hostname)
-  grafana_oauth_post_logout_uri          = format("https://%s/login", local.grafana_hostname)
-  grafana_auth_ca_content                = local.grafana_auth_enabled ? try(file(local.root_ca_crt), "") : ""
-  grafana_auth_ca_enabled                = trimspace(local.grafana_auth_ca_content) != ""
-  monitoring_keycloak_auth_enabled       = local.grafana_auth_enabled || local.prometheus_auth_enabled
+  grafana_auth_keycloak_realm_value                                = trimspace(try(local.grafana_auth_keycloak_realm, ""))
+  grafana_auth_enabled                                             = local.grafana_auth_keycloak_realm_value != ""
+  grafana_auth_view_groups_value                                   = distinct(compact(try(local.grafana_auth_view_groups, [])))
+  grafana_auth_edit_groups_value                                   = distinct(compact(try(local.grafana_auth_edit_groups, [])))
+  grafana_auth_name_value                                          = trimspace(try(local.grafana_auth_name, "Keycloak"))
+  grafana_auth_scopes_value                                        = trimspace(try(local.grafana_auth_scopes, "openid profile email"))
+  grafana_auth_auto_login_value                                    = try(local.grafana_auth_auto_login, false)
+  grafana_auth_allow_sign_up_value                                 = try(local.grafana_auth_allow_sign_up, true)
+  grafana_auth_ca_secret_name_value                                = try(local.grafana_auth_ca_secret_name, "grafana-oauth-ca")
+  grafana_oauth_secret_name_value                                  = "grafana-oauth"
+  grafana_db_name_value                                            = try(local.grafana_db_name, "grafana")
+  grafana_db_username_value                                        = try(local.grafana_db_username, "grafana")
+  grafana_postgres_image_tag_value                                 = try(local.grafana_postgres_image_tag, "18.3")
+  grafana_postgres_pvc_size_value                                  = try(local.grafana_postgres_pvc_size, "8Gi")
+  grafana_postgres_storage_class_value                             = local.grafana_postgres_storage_class
+  grafana_postgres_password_length_value                           = try(local.grafana_postgres_password_length, 24)
+  grafana_oauth_redirect_uri                                       = format("https://%s/login/generic_oauth", local.grafana_hostname)
+  grafana_oauth_post_logout_uri                                    = format("https://%s/login", local.grafana_hostname)
+  grafana_auth_ca_content                                          = local.grafana_auth_enabled ? try(file(local.root_ca_crt), "") : ""
+  grafana_auth_ca_enabled                                          = trimspace(local.grafana_auth_ca_content) != ""
+  grafana_dashboard_provisioning_enabled_value                     = try(local.grafana_dashboard_provisioning_enabled, false)
+  grafana_dashboard_provisioning_pvc_create_value                  = try(local.grafana_dashboard_provisioning_pvc_create, local.grafana_dashboard_provisioning_enabled_value)
+  grafana_dashboard_provisioning_pvc_name_value                    = trimspace(try(local.grafana_dashboard_provisioning_pvc_name, "dashboards-provisioning"))
+  grafana_dashboard_provisioning_pvc_storage_class_value           = trimspace(try(local.grafana_dashboard_provisioning_pvc_storage_class, local.grafana_storage_class))
+  grafana_dashboard_provisioning_pvc_size_value                    = try(local.grafana_dashboard_provisioning_pvc_size, "1Gi")
+  grafana_dashboard_provisioning_pvc_access_modes_value            = distinct(compact(try(local.grafana_dashboard_provisioning_pvc_access_modes, ["ReadWriteMany"])))
+  grafana_dashboard_provisioning_pvc_update_interval_seconds_value = try(local.grafana_dashboard_provisioning_pvc_update_interval_seconds, 30)
+  grafana_dashboard_provisioning_pvc_allow_ui_updates_value        = try(local.grafana_dashboard_provisioning_pvc_allow_ui_updates, false)
+  grafana_dashboard_provisioning_pvc_disable_deletion_value        = try(local.grafana_dashboard_provisioning_pvc_disable_deletion, false)
+  grafana_dashboard_provisioning_pvc_folders_from_files_structure_value = try(
+    local.grafana_dashboard_provisioning_pvc_folders_from_files_structure,
+    true
+  )
+  monitoring_keycloak_auth_enabled = local.grafana_auth_enabled || local.prometheus_auth_enabled
   identity_realm_groups = local.monitoring_keycloak_auth_enabled ? try(
     data.terraform_remote_state.identity[0].outputs.keycloak_realm_groups,
     {}
@@ -199,6 +212,14 @@ locals {
   ]
   grafana_dashboard_sync_hash = substr(sha256(join("", concat(
     [file("${path.module}/grafana.yaml")],
+    [file("${path.module}/grafana/grafana.yaml")],
+    [
+      tostring(local.grafana_dashboard_provisioning_enabled_value),
+      local.grafana_dashboard_provisioning_pvc_name_value,
+      local.grafana_dashboard_provisioning_pvc_storage_class_value,
+      local.grafana_dashboard_provisioning_pvc_size_value,
+      join(",", local.grafana_dashboard_provisioning_pvc_access_modes_value),
+    ],
     [
       for filename in local.grafana_dashboard_files :
       file("${path.module}/grafana/dashboards/${filename}")
@@ -285,29 +306,37 @@ locals {
         local.grafana_wait_for_postgres_mem_limit,
         "32Mi"
       )
-      grafana_cpu_request                = local.grafana_cpu_request
-      grafana_cpu_limit                  = local.grafana_cpu_limit
-      grafana_mem_request                = local.grafana_mem_request
-      grafana_mem_limit                  = local.grafana_mem_limit
-      grafana_tls_secret_name            = local.grafana_tls_secret_name
-      grafana_auth_enabled               = local.grafana_auth_enabled
-      grafana_auth_ca_enabled            = local.grafana_auth_ca_enabled
-      grafana_auth_ca_secret_name        = local.grafana_auth_ca_secret_name_value
-      grafana_oauth_secret_name          = local.grafana_oauth_secret_name_value
-      grafana_auth_name                  = local.grafana_auth_name_value
-      grafana_auth_scopes                = local.grafana_auth_scopes_value
-      grafana_auth_auto_login            = tostring(local.grafana_auth_auto_login_value)
-      grafana_auth_allow_sign_up         = tostring(local.grafana_auth_allow_sign_up_value)
-      grafana_auth_allowed_groups        = join(",", local.grafana_auth_allowed_groups)
-      grafana_auth_role_attribute_path   = local.grafana_auth_role_attribute_path
-      grafana_oidc_client_id             = local.grafana_oidc_client_id
-      grafana_oidc_auth_url              = local.grafana_oidc_auth_url
-      grafana_oidc_token_url             = local.grafana_oidc_token_url
-      grafana_oidc_api_url               = local.grafana_oidc_api_url
-      grafana_oidc_jwk_set_url           = local.grafana_oidc_jwk_set_url
-      grafana_oauth_signout_redirect_url = local.grafana_oauth_signout_redirect_url
-      grafana_dashboard_volume_items     = local.grafana_dashboard_volume_items
-      grafana_dashboard_sync_hash        = local.grafana_dashboard_sync_hash
+      grafana_cpu_request                       = local.grafana_cpu_request
+      grafana_cpu_limit                         = local.grafana_cpu_limit
+      grafana_mem_request                       = local.grafana_mem_request
+      grafana_mem_limit                         = local.grafana_mem_limit
+      grafana_tls_secret_name                   = local.grafana_tls_secret_name
+      grafana_auth_enabled                      = local.grafana_auth_enabled
+      grafana_auth_ca_enabled                   = local.grafana_auth_ca_enabled
+      grafana_auth_ca_secret_name               = local.grafana_auth_ca_secret_name_value
+      grafana_oauth_secret_name                 = local.grafana_oauth_secret_name_value
+      grafana_auth_name                         = local.grafana_auth_name_value
+      grafana_auth_scopes                       = local.grafana_auth_scopes_value
+      grafana_auth_auto_login                   = tostring(local.grafana_auth_auto_login_value)
+      grafana_auth_allow_sign_up                = tostring(local.grafana_auth_allow_sign_up_value)
+      grafana_auth_allowed_groups               = join(",", local.grafana_auth_allowed_groups)
+      grafana_auth_role_attribute_path          = local.grafana_auth_role_attribute_path
+      grafana_oidc_client_id                    = local.grafana_oidc_client_id
+      grafana_oidc_auth_url                     = local.grafana_oidc_auth_url
+      grafana_oidc_token_url                    = local.grafana_oidc_token_url
+      grafana_oidc_api_url                      = local.grafana_oidc_api_url
+      grafana_oidc_jwk_set_url                  = local.grafana_oidc_jwk_set_url
+      grafana_oauth_signout_redirect_url        = local.grafana_oauth_signout_redirect_url
+      grafana_dashboard_volume_items            = local.grafana_dashboard_volume_items
+      grafana_dashboard_sync_hash               = local.grafana_dashboard_sync_hash
+      grafana_dashboard_provisioning_enabled    = local.grafana_dashboard_provisioning_enabled_value
+      grafana_dashboard_provisioning_pvc_create = local.grafana_dashboard_provisioning_pvc_create_value
+      grafana_dashboard_provisioning_pvc_name   = local.grafana_dashboard_provisioning_pvc_name_value
+      grafana_dashboard_provisioning_pvc_storage_class = (
+        local.grafana_dashboard_provisioning_pvc_storage_class_value
+      )
+      grafana_dashboard_provisioning_pvc_size         = local.grafana_dashboard_provisioning_pvc_size_value
+      grafana_dashboard_provisioning_pvc_access_modes = local.grafana_dashboard_provisioning_pvc_access_modes_value
     })) :
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
@@ -396,7 +425,15 @@ locals {
           namespace = "monitoring"
         }
         data = {
-          "provider.yaml" = file("${path.module}/grafana/grafana.yaml")
+          "provider.yaml" = templatefile("${path.module}/grafana/grafana.yaml", {
+            grafana_dashboard_provisioning_enabled                     = local.grafana_dashboard_provisioning_enabled_value
+            grafana_dashboard_provisioning_pvc_update_interval_seconds = local.grafana_dashboard_provisioning_pvc_update_interval_seconds_value
+            grafana_dashboard_provisioning_pvc_allow_ui_updates        = local.grafana_dashboard_provisioning_pvc_allow_ui_updates_value
+            grafana_dashboard_provisioning_pvc_disable_deletion        = local.grafana_dashboard_provisioning_pvc_disable_deletion_value
+            grafana_dashboard_provisioning_pvc_folders_from_files_structure = (
+              local.grafana_dashboard_provisioning_pvc_folders_from_files_structure_value
+            )
+          })
         }
       },
       {
@@ -488,6 +525,18 @@ check "preissued_tls_secrets_files" {
       trimspace(secret.cert_content) != "" && trimspace(secret.key_content) != ""
     ])
     error_message = "Each preissued_tls_secrets entry must have readable, non-empty cert_path and key_path files."
+  }
+}
+
+check "grafana_dashboard_provisioning_pvc_required" {
+  assert {
+    condition = !local.grafana_dashboard_provisioning_enabled_value || (
+      local.grafana_dashboard_provisioning_pvc_name_value != "" &&
+      local.grafana_dashboard_provisioning_pvc_storage_class_value != "" &&
+      local.grafana_dashboard_provisioning_pvc_size_value != "" &&
+      length(local.grafana_dashboard_provisioning_pvc_access_modes_value) > 0
+    )
+    error_message = "Dashboard provisioning PVC requires grafana_dashboard_provisioning_pvc_name, grafana_dashboard_provisioning_pvc_storage_class, grafana_dashboard_provisioning_pvc_size, and at least one access mode."
   }
 }
 

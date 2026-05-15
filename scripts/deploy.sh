@@ -1357,11 +1357,15 @@ else
   monitoring_deployments=(grafana-postgres grafana loki prometheus kube-state-metrics)
   monitoring_daemonsets=(node-exporter promtail)
   monitoring_services=(grafana-postgres grafana loki prometheus kube-state-metrics node-exporter)
+  monitoring_pvcs=(grafana-postgres-data grafana-data loki-data prometheus-data)
   if kubectl -n monitoring get deploy/prometheus-oauth2-proxy >/dev/null 2>&1; then
     monitoring_deployments+=(prometheus-oauth2-proxy)
     monitoring_services+=(prometheus-oauth2-proxy)
   fi
-  wait_for_pvcs_bound "monitoring" "600" "grafana-postgres-data" "grafana-data" "loki-data" "prometheus-data"
+  if kubectl -n monitoring get pvc dashboards-provisioning >/dev/null 2>&1; then
+    monitoring_pvcs+=(dashboards-provisioning)
+  fi
+  wait_for_pvcs_bound "monitoring" "600" "${monitoring_pvcs[@]}"
   wait_for_deployments_ready "monitoring" "600s" "${monitoring_deployments[@]}"
   wait_for_daemonsets_ready "monitoring" "600s" "${monitoring_daemonsets[@]}"
   wait_for_service_endpoints "monitoring" "600" "${monitoring_services[@]}"
