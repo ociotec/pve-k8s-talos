@@ -118,13 +118,18 @@ locals {
           admin_url                    = local.rancher_url
           standard_flow_enabled        = true
           direct_access_grants_enabled = false
-          service_accounts_enabled     = false
-          full_scope_allowed           = false
-          include_groups_claim         = true
-          groups_claim_name            = "groups"
-          groups_claim_full_path       = false
-          default_scopes               = ["profile", "email", "roles"]
-          optional_scopes              = ["offline_access"]
+          service_accounts_enabled     = true
+          service_account_realm_management_roles = [
+            "query-users",
+            "query-groups",
+            "view-users",
+          ]
+          full_scope_allowed     = false
+          include_groups_claim   = true
+          groups_claim_name      = "groups"
+          groups_claim_full_path = false
+          default_scopes         = ["profile", "email", "roles"]
+          optional_scopes        = ["offline_access"]
           mappers = [
             {
               name            = "full_group_path"

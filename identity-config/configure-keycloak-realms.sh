@@ -169,6 +169,15 @@ user_id() {
     head -n1
 }
 
+service_account_user_id() {
+  local realm="$1"
+  local client_identifier="$2"
+  local client_id_value
+  client_id_value="$(client_uuid "${realm}" "${client_identifier}")"
+  api GET "realms/$(urlencode "${realm}")/clients/${client_id_value}/service-account-user" |
+    jq -r '.id // empty'
+}
+
 group_id() {
   local realm="$1"
   local group_name="$2"
@@ -291,6 +300,21 @@ assign_user_client_role() {
   role_payload="${TMPDIR}/user-role-${realm}-${user_id_value}-${client_identifier}-${role_name}.json"
   role_json "${realm}" "${client_id_value}" "${role_name}" | jq '[.]' > "${role_payload}"
   api POST "realms/$(urlencode "${realm}")/users/${user_id_value}/role-mappings/clients/${client_id_value}" "${role_payload}" >/dev/null || true
+}
+
+assign_client_scope_client_role() {
+  local realm="$1"
+  local client_identifier="$2"
+  local role_client_identifier="$3"
+  local role_name="$4"
+  local client_id_value
+  local role_client_id
+  local role_payload
+  client_id_value="$(client_uuid "${realm}" "${client_identifier}")"
+  role_client_id="$(client_uuid "${realm}" "${role_client_identifier}")"
+  role_payload="${TMPDIR}/client-scope-${realm}-${client_identifier}-${role_client_identifier}-${role_name}.json"
+  role_json "${realm}" "${role_client_id}" "${role_name}" | jq '[.]' > "${role_payload}"
+  api POST "realms/$(urlencode "${realm}")/clients/${client_id_value}/scope-mappings/clients/${role_client_id}" "${role_payload}" >/dev/null || true
 }
 
 ensure_master_admin_user() {
@@ -623,6 +647,34 @@ assign_group_realm_management_role() {
   api POST "realms/$(urlencode "${realm}")/groups/${group_id_value}/role-mappings/clients/${realm_management_client_id}" "${role_payload}" >/dev/null
 }
 
+configure_client_service_account_roles() {
+  local realm="$1"
+  local client_json="$2"
+  local client_identifier
+  local service_account_id
+
+  if [[ "$(jq -r '.service_account_realm_management_roles | length' "${client_json}")" -eq 0 ]]; then
+    return 0
+  fi
+
+  client_identifier="$(jq -r '.client_id' "${client_json}")"
+  if [[ "$(jq -r '.service_accounts_enabled' "${client_json}")" != "true" ]]; then
+    echo "[keycloak-api] ${realm}/${client_identifier}: service account roles configured but service account disabled" >&2
+    exit 1
+  fi
+
+  service_account_id="$(service_account_user_id "${realm}" "${client_identifier}")"
+  if [[ -z "${service_account_id}" ]]; then
+    echo "[keycloak-api] could not resolve service account user ${realm}/${client_identifier}" >&2
+    exit 1
+  fi
+
+  jq -r '.service_account_realm_management_roles[]' "${client_json}" | while IFS= read -r role_name; do
+    assign_user_client_role "${realm}" "${service_account_id}" "realm-management" "${role_name}"
+    assign_client_scope_client_role "${realm}" "${client_identifier}" "realm-management" "${role_name}"
+  done
+}
+
 configure_login_gate() {
   local realm="$1"
   local client_json="$2"
@@ -746,6 +798,7 @@ configure_realm() {
     printf '%s\n' "${client}" > "${client_file}"
     echo "[keycloak-api] realm ${realm}: client $(jq -r '.client_id' "${client_file}")"
     upsert_client "${realm}" "${client_file}"
+    configure_client_service_account_roles "${realm}" "${client_file}"
     jq -c '.mappers[]?' "${client_file}" | while IFS= read -r mapper; do
       mapper_file="${TMPDIR}/mapper-input.json"
       printf '%s\n' "${mapper}" > "${mapper_file}"

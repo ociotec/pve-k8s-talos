@@ -157,9 +157,12 @@ locals {
           standard_flow_enabled        = try(client.standard_flow_enabled, true)
           direct_access_grants_enabled = try(client.direct_access_grants_enabled, false)
           service_accounts_enabled     = try(client.service_accounts_enabled, false)
-          full_scope_allowed           = try(client.full_scope_allowed, false)
-          client_secret                = try(client.client_secret, "")
-          client_secret_length         = try(client.client_secret_length, 32)
+          service_account_realm_management_roles = distinct(
+            try(client.service_account_realm_management_roles, [])
+          )
+          full_scope_allowed   = try(client.full_scope_allowed, false)
+          client_secret        = try(client.client_secret, "")
+          client_secret_length = try(client.client_secret_length, 32)
           login_allowed_groups = distinct(compact(concat(
             try(client.login_allowed_groups, try(client.allowed_groups, [])),
             flatten([
