@@ -590,6 +590,7 @@ spec:
               ensure_folder "infrastructure-nodes" "Nodes" "infrastructure"
               ensure_folder "infrastructure-monitoring" "Monitoring" "infrastructure"
               ensure_folder "infrastructure-identity" "Identity" "infrastructure"
+              ensure_folder "infrastructure-kafka" "Kafka" "infrastructure"
               ensure_folder "infrastructure-platform" "Platform" "infrastructure"
               ensure_folder "infrastructure-rook-ceph" "Rook Ceph" "infrastructure"
 
@@ -600,6 +601,7 @@ spec:
               sync_dir /var/lib/grafana/dashboards/infrastructure/nodes infrastructure-nodes
               sync_dir /var/lib/grafana/dashboards/infrastructure/monitoring infrastructure-monitoring
               sync_dir /var/lib/grafana/dashboards/infrastructure/identity infrastructure-identity
+              sync_dir /var/lib/grafana/dashboards/infrastructure/kafka infrastructure-kafka
               sync_dir /var/lib/grafana/dashboards/infrastructure/platform infrastructure-platform
               sync_dir /var/lib/grafana/dashboards/infrastructure/rook-ceph infrastructure-rook-ceph
           env:
