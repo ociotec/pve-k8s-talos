@@ -988,6 +988,17 @@ resource "kubernetes_manifest" "console_deployment" {
                   memory = local.redpanda_console_mem_limit_value
                 }
               }
+              startupProbe = {
+                httpGet = {
+                  path   = "/health"
+                  port   = 8080
+                  scheme = "HTTP"
+                }
+                periodSeconds    = 5
+                timeoutSeconds   = 1
+                successThreshold = 1
+                failureThreshold = 30
+              }
               readinessProbe = {
                 httpGet = {
                   path   = "/health"
@@ -1239,6 +1250,17 @@ resource "kubernetes_manifest" "console_oauth2_proxy_deployment" {
                 capabilities = {
                   drop = ["ALL"]
                 }
+              }
+              startupProbe = {
+                httpGet = {
+                  path   = "/ping"
+                  port   = "http"
+                  scheme = "HTTP"
+                }
+                periodSeconds    = 5
+                timeoutSeconds   = 1
+                successThreshold = 1
+                failureThreshold = 30
               }
               readinessProbe = {
                 httpGet = {
