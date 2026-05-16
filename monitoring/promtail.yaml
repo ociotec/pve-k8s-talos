@@ -100,6 +100,7 @@ spec:
         prometheus.io/port: "3101"
         prometheus.io/path: /metrics
     spec:
+      priorityClassName: infra-observability
       serviceAccountName: promtail
       containers:
         - name: promtail

@@ -78,6 +78,16 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
 - `k8s_net_constants.tf`
   - Domain, TLS mode, root CA path, MetalLB range, and ingress fixed IP.
   - Certificate catalog (`available_certificates`) and default certificate entry.
+  - The `k8s-net` deployment also creates shared non-default `PriorityClass`
+    objects for repository-managed infrastructure:
+    `infra-critical` (`900000000`), `infra-high` (`800000000`), and
+    `infra-observability` (`700000000`). These sit below Kubernetes
+    `system-*` and Rancher priorities, and above normal application pods.
+  - Repository workloads use these priorities directly in shared manifests:
+    Keycloak and Redpanda brokers use `infra-critical`; cert-manager,
+    MetalLB, ingress-nginx, and the Rook operator use `infra-high`;
+    Grafana, Prometheus, Loki, exporters, Portainer, Redpanda Console, and
+    operational tool pods use `infra-observability`.
 - `identity_constants.tf`
   - Keycloak hostname, TLS secret, PostgreSQL sizing/image, bootstrap admin settings, realm groups, and optional OIDC clients for consumers such as Rancher, Portainer, and Grafana.
 - `monitoring_constants.tf`
@@ -88,6 +98,11 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
 - `kafka_constants.tf`
   - Redpanda namespace, resource names, broker label key, local data path, Console hostname/TLS secret, optional Keycloak ingress authentication, images, and CPU/memory sizing.
   - Broker placement comes from `vms.auto.tfvars` labels; local PV capacity comes from the matching mounted disk in `resources.auto.tfvars`.
+  - Brokers use `infra-critical` priority plus a PodDisruptionBudget by
+    default. This does not dedicate nodes to Kafka, but allows Kubernetes to
+    preempt lower-priority application pods on the same shared nodes when a
+    broker must be scheduled. Redpanda Console and its oauth2-proxy use
+    `infra-observability`.
 
 For the Rancher/Portainer/Grafana + Keycloak authentication split of responsibilities and the shared group model, see [docs/rancher-keycloak-auth.md](docs/rancher-keycloak-auth.md).
 - `ceph_constants.tf`

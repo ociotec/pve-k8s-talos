@@ -15,6 +15,7 @@ spec:
       labels:
         app: rook-ceph-tools
     spec:
+      priorityClassName: infra-observability
       dnsPolicy: ClusterFirstWithHostNet
       serviceAccountName: rook-ceph-default
       containers:

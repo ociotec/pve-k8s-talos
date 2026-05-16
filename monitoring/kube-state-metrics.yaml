@@ -133,6 +133,7 @@ spec:
       labels:
         app: kube-state-metrics
     spec:
+      priorityClassName: infra-observability
       serviceAccountName: kube-state-metrics
       containers:
         - name: kube-state-metrics

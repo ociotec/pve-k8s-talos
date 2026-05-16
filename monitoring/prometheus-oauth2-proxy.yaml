@@ -13,6 +13,7 @@ spec:
       labels:
         app: prometheus-oauth2-proxy
     spec:
+      priorityClassName: infra-observability
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532

@@ -110,6 +110,7 @@ spec:
         app.kubernetes.io/name: portainer
         app.kubernetes.io/instance: portainer
     spec:
+      priorityClassName: infra-observability
       nodeSelector:
         {}
       securityContext:

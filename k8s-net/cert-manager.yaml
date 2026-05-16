@@ -13261,6 +13261,7 @@ spec:
         prometheus.io/port: '9402'
     spec:
       serviceAccountName: cert-manager-cainjector
+      priorityClassName: infra-high
       enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
@@ -13331,6 +13332,7 @@ spec:
         prometheus.io/port: '9402'
     spec:
       serviceAccountName: cert-manager
+      priorityClassName: infra-high
       enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
@@ -13420,6 +13422,7 @@ spec:
         prometheus.io/port: '9402'
     spec:
       serviceAccountName: cert-manager-webhook
+      priorityClassName: infra-high
       enableServiceLinks: false
       securityContext:
         runAsNonRoot: true

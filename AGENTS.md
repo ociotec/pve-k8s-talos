@@ -90,6 +90,15 @@ It complements `README.md` and focuses on execution behavior, change safety, and
 - Write whole-Gi memory quantities in Kubernetes-canonical Gi form for the same reason: use `"1Gi"` instead of `"1024Mi"`, `"2Gi"` instead of `"2048Mi"`, and so on. Keep non-whole values like `1536Mi` in Mi.
 - `scripts/deploy.sh` has a preflight check that blocks integer CPU millicore values and whole-Gi memory values written as Mi in deployed modules for the same reason.
 
+## Kubernetes Priority Requirements
+
+- Repository-managed infrastructure workloads should set `priorityClassName` in the pod template instead of relying on the Kubernetes default priority.
+- Use the shared non-default classes created by `k8s-net/main.tf`:
+  - `infra-critical` for core cluster services whose absence breaks dependent workloads, such as identity data plane and Kafka brokers.
+  - `infra-high` for cluster plumbing and controllers, such as ingress, certificate management, load balancing, and storage operators.
+  - `infra-observability` for monitoring, logging, dashboards, operational UIs, oauth2-proxy sidecars, and toolbox/debug service pods.
+- Do not use Kubernetes `system-node-critical` or `system-cluster-critical` for repository application manifests unless the component is truly part of the Kubernetes node/control-plane runtime. Do not reuse Rancher-managed priority classes for non-Rancher workloads.
+
 ## Kubernetes Probe Requirements
 
 - Every long-running service workload deployed into the cluster must define `readinessProbe` and `livenessProbe` for every regular container.

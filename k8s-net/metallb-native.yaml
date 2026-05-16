@@ -1988,6 +1988,7 @@ spec:
         app: metallb
         component: controller
     spec:
+      priorityClassName: infra-high
       containers:
       - args:
         - --port=7472
@@ -2077,6 +2078,7 @@ spec:
         app: metallb
         component: speaker
     spec:
+      priorityClassName: infra-high
       containers:
       - args:
         - --port=7472

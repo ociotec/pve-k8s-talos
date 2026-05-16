@@ -36,6 +36,21 @@ provider "kubernetes" {
 }
 
 locals {
+  infrastructure_priority_classes = {
+    infra-critical = {
+      value       = 900000000
+      description = "Critical repository-managed infrastructure services that should preempt normal application workloads."
+    }
+    infra-high = {
+      value       = 800000000
+      description = "High-priority repository-managed infrastructure services such as ingress, certificates, and network controllers."
+    }
+    infra-observability = {
+      value       = 700000000
+      description = "Repository-managed observability and operational UI services."
+    }
+  }
+
   constants_source = file("${path.module}/constants.tf")
   cert_manager = [
     for doc in split("\n---\n", file("${path.module}/cert-manager.yaml")) :
@@ -285,6 +300,24 @@ check "tls_source_valid" {
   }
 }
 
+resource "kubernetes_manifest" "infrastructure_priority_classes" {
+  for_each = local.infrastructure_priority_classes
+
+  manifest = {
+    apiVersion = "scheduling.k8s.io/v1"
+    kind       = "PriorityClass"
+    metadata = {
+      name = each.key
+      labels = {
+        "app.kubernetes.io/managed-by" = "pve-k8s-talos"
+      }
+    }
+    value            = each.value.value
+    preemptionPolicy = "PreemptLowerPriority"
+    description      = each.value.description
+  }
+}
+
 resource "kubernetes_manifest" "cert_manager_crds" {
   for_each = { for i, m in local.cert_manager_crds : i => m }
   manifest = each.value
@@ -297,9 +330,12 @@ resource "kubernetes_manifest" "cert_manager_namespace" {
 }
 
 resource "kubernetes_manifest" "cert_manager" {
-  for_each   = { for i, m in local.cert_manager_other : i => m }
-  manifest   = each.value
-  depends_on = [kubernetes_manifest.cert_manager_namespace]
+  for_each = { for i, m in local.cert_manager_other : i => m }
+  manifest = each.value
+  depends_on = [
+    kubernetes_manifest.cert_manager_namespace,
+    kubernetes_manifest.infrastructure_priority_classes,
+  ]
 }
 
 resource "kubernetes_manifest" "metallb_native_crds" {
@@ -318,8 +354,23 @@ resource "kubernetes_manifest" "metallb_native" {
   manifest = each.value
   computed_fields = [
     "metadata.annotations",
+    "metadata.annotations[\"deprecated.daemonset.template.generation\"]",
+    "object.metadata.annotations",
+    "object.metadata.annotations[\"deprecated.daemonset.template.generation\"]",
   ]
-  depends_on = [kubernetes_manifest.metallb_native_namespace]
+  lifecycle {
+    ignore_changes = [
+      manifest.metadata.annotations,
+      object.metadata.annotations,
+    ]
+  }
+  field_manager {
+    force_conflicts = true
+  }
+  depends_on = [
+    kubernetes_manifest.metallb_native_namespace,
+    kubernetes_manifest.infrastructure_priority_classes,
+  ]
 }
 
 resource "kubernetes_manifest" "metallb_pool" {
@@ -339,6 +390,7 @@ resource "kubernetes_manifest" "ingress_nginx" {
   depends_on = [
     kubernetes_manifest.metallb_pool,
     kubernetes_manifest.ingress_nginx_namespace,
+    kubernetes_manifest.infrastructure_priority_classes,
   ]
 }
 

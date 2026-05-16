@@ -12,6 +12,7 @@ spec:
       labels:
         app: node-exporter
     spec:
+      priorityClassName: infra-observability
       hostNetwork: true
       hostPID: true
       dnsPolicy: ClusterFirstWithHostNet

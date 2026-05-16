@@ -460,6 +460,7 @@ spec:
       labels:
         app: prometheus
     spec:
+      priorityClassName: infra-observability
       terminationGracePeriodSeconds: 120
       serviceAccountName: prometheus
       securityContext:

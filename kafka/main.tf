@@ -93,25 +93,29 @@ locals {
     local.redpanda_console_oauth2_proxy_trusted_proxy_ips,
     []
   )))
-  redpanda_console_auth_ca_secret_name_value = try(local.redpanda_console_auth_ca_secret_name, "redpanda-console-oauth-ca")
-  redpanda_console_auth_ca_content           = local.redpanda_console_auth_enabled ? try(file(local.root_ca_crt), "") : ""
-  redpanda_console_auth_ca_enabled           = trimspace(local.redpanda_console_auth_ca_content) != ""
-  redpanda_broker_cpu_request_value          = try(local.redpanda_broker_cpu_request, "2")
-  redpanda_broker_cpu_limit_value            = try(local.redpanda_broker_cpu_limit, "2500m")
-  redpanda_broker_mem_request_value          = try(local.redpanda_broker_mem_request, "5Gi")
-  redpanda_broker_mem_limit_value            = try(local.redpanda_broker_mem_limit, "5Gi")
-  redpanda_enable_smp_memory_flags_value     = try(local.redpanda_enable_smp_memory_flags, true)
-  redpanda_smp_value                         = try(local.redpanda_smp, 2)
-  redpanda_memory_value                      = try(local.redpanda_memory, "4Gi")
-  redpanda_config_renderer_cpu_request_value = try(local.redpanda_config_renderer_cpu_request, "50m")
-  redpanda_config_renderer_cpu_limit_value   = try(local.redpanda_config_renderer_cpu_limit, "200m")
-  redpanda_config_renderer_mem_request_value = try(local.redpanda_config_renderer_mem_request, "64Mi")
-  redpanda_config_renderer_mem_limit_value   = try(local.redpanda_config_renderer_mem_limit, "64Mi")
-  redpanda_console_cpu_request_value         = try(local.redpanda_console_cpu_request, "100m")
-  redpanda_console_cpu_limit_value           = try(local.redpanda_console_cpu_limit, "500m")
-  redpanda_console_mem_request_value         = try(local.redpanda_console_mem_request, "256Mi")
-  redpanda_console_mem_limit_value           = try(local.redpanda_console_mem_limit, "512Mi")
-  tls_source_value                           = try(local.tls_source, "ca_issuer")
+  redpanda_console_auth_ca_secret_name_value              = try(local.redpanda_console_auth_ca_secret_name, "redpanda-console-oauth-ca")
+  redpanda_console_auth_ca_content                        = local.redpanda_console_auth_enabled ? try(file(local.root_ca_crt), "") : ""
+  redpanda_console_auth_ca_enabled                        = trimspace(local.redpanda_console_auth_ca_content) != ""
+  redpanda_broker_cpu_request_value                       = try(local.redpanda_broker_cpu_request, "2")
+  redpanda_broker_cpu_limit_value                         = try(local.redpanda_broker_cpu_limit, "2500m")
+  redpanda_broker_mem_request_value                       = try(local.redpanda_broker_mem_request, "5Gi")
+  redpanda_broker_mem_limit_value                         = try(local.redpanda_broker_mem_limit, "5Gi")
+  redpanda_broker_priority_class_name_value               = "infra-critical"
+  redpanda_broker_pdb_min_available_value                 = 2
+  redpanda_enable_smp_memory_flags_value                  = try(local.redpanda_enable_smp_memory_flags, true)
+  redpanda_smp_value                                      = try(local.redpanda_smp, 2)
+  redpanda_memory_value                                   = try(local.redpanda_memory, "4Gi")
+  redpanda_config_renderer_cpu_request_value              = try(local.redpanda_config_renderer_cpu_request, "50m")
+  redpanda_config_renderer_cpu_limit_value                = try(local.redpanda_config_renderer_cpu_limit, "200m")
+  redpanda_config_renderer_mem_request_value              = try(local.redpanda_config_renderer_mem_request, "64Mi")
+  redpanda_config_renderer_mem_limit_value                = try(local.redpanda_config_renderer_mem_limit, "64Mi")
+  redpanda_console_cpu_request_value                      = try(local.redpanda_console_cpu_request, "100m")
+  redpanda_console_cpu_limit_value                        = try(local.redpanda_console_cpu_limit, "500m")
+  redpanda_console_mem_request_value                      = try(local.redpanda_console_mem_request, "256Mi")
+  redpanda_console_mem_limit_value                        = try(local.redpanda_console_mem_limit, "512Mi")
+  redpanda_console_priority_class_name_value              = "infra-observability"
+  redpanda_console_oauth2_proxy_priority_class_name_value = local.redpanda_console_priority_class_name_value
+  tls_source_value                                        = try(local.tls_source, "ca_issuer")
 
   broker_label_values = [
     for _, vm in var.vms : try(vm.k8s_labels[local.redpanda_broker_k8s_annotation_value], null)
@@ -326,6 +330,20 @@ check "broker_data_disk_sizes" {
   assert {
     condition     = length(local.broker_data_disk_sizes) == local.broker_count && length(distinct(local.broker_data_disk_sizes)) == 1
     error_message = "All Redpanda broker data disks must have the same size in v1."
+  }
+}
+
+check "redpanda_broker_pdb_min_available" {
+  assert {
+    condition = (
+      local.redpanda_broker_pdb_min_available_value >= 1 &&
+      local.redpanda_broker_pdb_min_available_value < local.broker_count
+    )
+    error_message = format(
+      "redpanda_broker_pdb_min_available must be at least 1 and lower than broker count (%d), got %s.",
+      local.broker_count,
+      tostring(local.redpanda_broker_pdb_min_available_value)
+    )
   }
 }
 
@@ -600,6 +618,7 @@ resource "kubernetes_manifest" "statefulset" {
         }
         spec = {
           terminationGracePeriodSeconds = 120
+          priorityClassName             = local.redpanda_broker_priority_class_name_value
           affinity = {
             podAntiAffinity = {
               requiredDuringSchedulingIgnoredDuringExecution = [
@@ -811,6 +830,33 @@ resource "kubernetes_manifest" "statefulset" {
   ]
 }
 
+resource "kubernetes_manifest" "broker_pdb" {
+  manifest = {
+    apiVersion = "policy/v1"
+    kind       = "PodDisruptionBudget"
+    metadata = {
+      name      = "${local.redpanda_resource_name_value}-brokers"
+      namespace = local.redpanda_namespace_value
+      labels = {
+        app = local.redpanda_resource_name_value
+      }
+    }
+    spec = {
+      minAvailable = local.redpanda_broker_pdb_min_available_value
+      selector = {
+        matchLabels = {
+          app = local.redpanda_resource_name_value
+        }
+      }
+    }
+  }
+
+  depends_on = [
+    kubernetes_manifest.namespace,
+    kubernetes_manifest.statefulset,
+  ]
+}
+
 resource "null_resource" "community_feature_config" {
   count = 1
 
@@ -914,6 +960,7 @@ resource "kubernetes_manifest" "console_deployment" {
           }
         }
         spec = {
+          priorityClassName = local.redpanda_console_priority_class_name_value
           containers = [
             {
               name            = "console"
@@ -1108,6 +1155,7 @@ resource "kubernetes_manifest" "console_oauth2_proxy_deployment" {
           }
         }
         spec = {
+          priorityClassName = local.redpanda_console_oauth2_proxy_priority_class_name_value
           securityContext = {
             runAsNonRoot = true
             runAsUser    = 65532
