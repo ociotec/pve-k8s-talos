@@ -23,15 +23,15 @@ locals {
   redpanda_console_oauth2_proxy_trusted_proxy_ips = []
 
   redpanda_broker_cpu_request = "2"
-  redpanda_broker_cpu_limit   = "2500m"
-  redpanda_broker_mem_request = "5Gi"
-  redpanda_broker_mem_limit   = "5Gi"
+  redpanda_broker_cpu_limit   = "3"
+  redpanda_broker_mem_request = "4Gi"
+  redpanda_broker_mem_limit   = "4Gi"
 
   # Keep Redpanda internal memory below the Kubernetes memory limit so the process
   # has headroom for non-Redpanda allocations inside the container.
   redpanda_enable_smp_memory_flags = true
   redpanda_smp                     = 2
-  redpanda_memory                  = "3Gi"
+  redpanda_memory                  = "2Gi"
 
   redpanda_config_renderer_cpu_request = "50m"
   redpanda_config_renderer_cpu_limit   = "200m"
@@ -40,6 +40,6 @@ locals {
 
   redpanda_console_cpu_request = "100m"
   redpanda_console_cpu_limit   = "500m"
-  redpanda_console_mem_request = "256Mi"
-  redpanda_console_mem_limit   = "512Mi"
+  redpanda_console_mem_request = "128Mi"
+  redpanda_console_mem_limit   = "256Mi"
 }
