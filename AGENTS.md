@@ -131,6 +131,14 @@ For any non-trivial change:
 - When the user asks to update a real cluster directory to match current repository changes or newly required constants, follow `docs/agent-workflows/update-cluster-from-repo.md`.
 - When the user asks to audit Kubernetes CPU/memory requests or limits, follow `docs/agent-workflows/cluster-resource-requests.md`.
 - When the user asks to audit Kubernetes readiness/liveness/startup probe coverage or health-check compliance, follow `docs/agent-workflows/cluster-workload-probes.md`.
+- When the user indicates they are working with a specific real cluster, inspect
+  `clusters/<cluster>/.repo-status.json` if it exists and compare its
+  `repo_commit` with `git rev-parse HEAD`. If the stamp is missing or differs,
+  tell the user before other work that the cluster has no repo validation stamp,
+  or that it was last validated against the old commit and the repo is now at
+  the new commit. Do not update the stamp just because a new commit is detected;
+  only update it after a successful `update-cluster-from-repo` run, or after
+  explicit user confirmation that the relevant deployment already succeeded.
 - Treat files under `docs/agent-workflows/` as repo-local operating procedures for agents:
   - use them when the user request clearly matches the workflow
   - apply them together with this `AGENTS.md`, not instead of it
