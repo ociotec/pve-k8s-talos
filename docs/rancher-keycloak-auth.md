@@ -1,6 +1,6 @@
 # Rancher, Portainer, Grafana + Keycloak authentication
 
-This repository automates the Keycloak side of Rancher, Portainer, and Grafana authentication.
+This repository automates the Keycloak side of Rancher, Portainer, Grafana, Prometheus, and Redpanda Console authentication.
 
 ## Automation boundary
 
@@ -11,6 +11,7 @@ Automated in `identity`:
 - The Rancher OIDC client, including redirect URIs and a generated confidential client secret.
 - The Portainer OIDC client, including redirect URI and a generated confidential client secret.
 - The Grafana OIDC client, including redirect URI and a generated confidential client secret.
+- The Redpanda Console OIDC client for ingress `oauth2-proxy`, including redirect URI and a generated confidential client secret.
 - Optional Keycloak-side Portainer login restriction by OIDC client `login_allowed_groups`.
 - Optional Keycloak-side Grafana login restriction by OIDC client `login_allowed_groups`.
 - The `groups` OIDC claim with full group path enabled.
@@ -28,6 +29,11 @@ Automated in `monitoring`:
 - Grafana group-to-role mapping for `Viewer` and `Editor`.
 - Grafana OAuth client secret and optional private CA trust secret.
 
+Automated in `kafka`:
+
+- Redpanda Console ingress protection through `oauth2-proxy`.
+- Redpanda Console OAuth client secret and optional private CA trust secret.
+
 Manual recovery paths:
 
 - Keeping local Rancher users for break-glass recovery.
@@ -40,7 +46,7 @@ Declare access groups under `keycloak_realms[*].groups` in `clusters/<cluster>/i
 
 Keep LDAP bind credentials out of `identity_constants.tf`. Declare the bind fields as `var.keycloak_ldap_bind_dn` and `var.keycloak_ldap_bind_credential`, then provide them from the cluster `.envrc` with `TF_VAR_keycloak_ldap_bind_dn` and `TF_VAR_keycloak_ldap_bind_credential`.
 
-Declare the Rancher, Portainer, and Grafana clients under `keycloak_realms[*].oidc_clients`.
+Declare the Rancher, Portainer, Grafana, Prometheus, and Redpanda Console clients under `keycloak_realms[*].oidc_clients`.
 
 The sample cluster already includes `k8s-admins`, a Rancher client with redirect URI `https://<rancher-host>/verify-auth`, and a Portainer client with redirect URI `https://<portainer-host>/`.
 For Grafana, use redirect URI `https://<grafana-host>/login/generic_oauth`.
@@ -57,7 +63,7 @@ tofu -chdir=out/identity output -json keycloak_oidc_client_secrets
 Use:
 
 - issuer URL: `https://<keycloak-host>/realms/<realm>`
-- client ID: `rancher`, `portainer`, or `grafana`
+- client ID: `rancher`, `portainer`, `grafana`, `prometheus`, or `redpanda-console`
 - client secret: from `keycloak_oidc_client_secrets`
 
 ## Platform configuration
@@ -106,3 +112,4 @@ Current simplified mapping:
 
 For Rancher, `k8s-admins` is bound to the configured global role. For Portainer, Keycloak restricts login for the `portainer` client to the configured `login_allowed_groups`. Portainer CE then keeps its usual local authorization model; deployment creates the configured default team, assigns auto-created OAuth users to it, grants that team access to the existing Portainer environments, and grants the team access to Kubernetes namespaces that exist at apply time. Use `portainer_auth_default_team_existing_users` to reconcile OAuth users that logged in before this default team was configured. Keep local Portainer admin access for break-glass recovery.
 For Grafana, Keycloak restricts login for the `grafana` client to the configured groups, and Grafana maps those groups to `Viewer` or `Editor`. Grafana OSS `Viewer` is intentionally strict; users who need Explore and dashboard editing should be in `monitoring-edit`. For Prometheus, Keycloak restricts login for the `prometheus` client and ingress-nginx delegates browser auth to oauth2-proxy; Prometheus itself does not provide per-user RBAC in this deployment.
+For Redpanda Console, Keycloak restricts login for the `redpanda-console` client and ingress-nginx delegates browser auth to oauth2-proxy. Redpanda Console native OIDC is intentionally not used here because Console authentication is an Enterprise feature; the Community deployment keeps Console unauthenticated internally and protects only the browser ingress.

@@ -1464,6 +1464,7 @@ else
   kafka_namespace="$(tofu -chdir="${cluster_kafka_workspace}" output -raw redpanda_namespace)"
   redpanda_resource_name="$(tofu -chdir="${cluster_kafka_workspace}" output -raw redpanda_resource_name)"
   redpanda_broker_count="$(tofu -chdir="${cluster_kafka_workspace}" output -raw redpanda_broker_count)"
+  redpanda_console_auth_enabled="$(tofu -chdir="${cluster_kafka_workspace}" output -raw redpanda_console_auth_enabled 2>/dev/null || printf "false")"
   kafka_pvcs=()
   for ((i = 0; i < redpanda_broker_count; i++)); do
     kafka_pvcs+=("datadir-${redpanda_resource_name}-${i}")
@@ -1473,6 +1474,10 @@ else
   wait_for_rollout_ready "${kafka_namespace}" "statefulset/${redpanda_resource_name}" "900s"
   wait_for_deployments_ready "${kafka_namespace}" "600s" "${redpanda_resource_name}-console"
   wait_for_service_endpoints "${kafka_namespace}" "600" "${redpanda_resource_name}" "${redpanda_resource_name}-console"
+  if [[ "${redpanda_console_auth_enabled}" == "true" ]]; then
+    wait_for_deployments_ready "${kafka_namespace}" "600s" "${redpanda_resource_name}-console-oauth2-proxy"
+    wait_for_service_endpoints "${kafka_namespace}" "600" "${redpanda_resource_name}-console-oauth2-proxy"
+  fi
   redpanda_console_url="$(tofu -chdir="${cluster_kafka_workspace}" output -raw redpanda_console_url)"
   message "Redpanda Console URL: ${URL_FMT_START}${redpanda_console_url}${URL_FMT_END}"
 fi

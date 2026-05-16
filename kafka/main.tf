@@ -8,6 +8,10 @@ terraform {
       source  = "hashicorp/null"
       version = ">= 3.2.4, < 3.3.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = ">= 3.8.1"
+    }
   }
 }
 
@@ -41,6 +45,15 @@ variable "resources" {
   }))
 }
 
+data "terraform_remote_state" "identity" {
+  count = local.redpanda_console_auth_enabled ? 1 : 0
+
+  backend = "local"
+  config = {
+    path = abspath("${path.root}/../identity/terraform.tfstate")
+  }
+}
+
 provider "kubernetes" {
   config_path = abspath("${path.module}/${var.kubeconfig_path}")
 }
@@ -56,6 +69,33 @@ locals {
   redpanda_image_value                       = try(local.redpanda_image, "docker.redpanda.com/redpandadata/redpanda:v26.1.6")
   redpanda_console_image_value               = try(local.redpanda_console_image, "docker.redpanda.com/redpandadata/console:v3.7.2")
   redpanda_storage_class_name_value          = try(local.redpanda_storage_class_name, "${local.redpanda_resource_name_value}-local")
+  redpanda_console_auth_keycloak_realm_value = trimspace(try(local.redpanda_console_auth_keycloak_realm, ""))
+  redpanda_console_auth_enabled              = local.redpanda_console_auth_keycloak_realm_value != ""
+  redpanda_console_auth_allowed_groups_value = distinct(compact(try(local.redpanda_console_auth_allowed_groups, ["k8s-admins"])))
+  redpanda_console_oauth_client_id           = "redpanda-console"
+  redpanda_console_oauth_secret_name_value   = "redpanda-console-oauth"
+  redpanda_console_oauth_redirect_uri        = format("https://%s/oauth2/callback", local.redpanda_console_hostname_value)
+  redpanda_console_oauth_post_logout_uri     = format("https://%s/", local.redpanda_console_hostname_value)
+  redpanda_console_oidc_end_session_url      = local.redpanda_console_oidc_issuer != "" ? format("%s/protocol/openid-connect/logout", local.redpanda_console_oidc_issuer) : ""
+  redpanda_console_oauth_backend_logout_url = local.redpanda_console_oidc_end_session_url != "" ? format(
+    "%s?client_id=%s&id_token_hint={id_token}&post_logout_redirect_uri=%s",
+    local.redpanda_console_oidc_end_session_url,
+    urlencode(local.redpanda_console_oauth_client_id),
+    urlencode(local.redpanda_console_oauth_post_logout_uri)
+  ) : ""
+  redpanda_console_oauth2_proxy_image_tag_value   = try(local.redpanda_console_oauth2_proxy_image_tag, "v7.15.2")
+  redpanda_console_oauth2_proxy_cookie_name_value = try(local.redpanda_console_oauth2_proxy_cookie_name, "_redpanda_console_oauth2_proxy")
+  redpanda_console_oauth2_proxy_cpu_request_value = try(local.redpanda_console_oauth2_proxy_cpu_request, "50m")
+  redpanda_console_oauth2_proxy_cpu_limit_value   = try(local.redpanda_console_oauth2_proxy_cpu_limit, "200m")
+  redpanda_console_oauth2_proxy_mem_request_value = try(local.redpanda_console_oauth2_proxy_mem_request, "128Mi")
+  redpanda_console_oauth2_proxy_mem_limit_value   = try(local.redpanda_console_oauth2_proxy_mem_limit, "128Mi")
+  redpanda_console_oauth2_proxy_trusted_proxy_ips_value = distinct(compact(try(
+    local.redpanda_console_oauth2_proxy_trusted_proxy_ips,
+    []
+  )))
+  redpanda_console_auth_ca_secret_name_value = try(local.redpanda_console_auth_ca_secret_name, "redpanda-console-oauth-ca")
+  redpanda_console_auth_ca_content           = local.redpanda_console_auth_enabled ? try(file(local.root_ca_crt), "") : ""
+  redpanda_console_auth_ca_enabled           = trimspace(local.redpanda_console_auth_ca_content) != ""
   redpanda_broker_cpu_request_value          = try(local.redpanda_broker_cpu_request, "2")
   redpanda_broker_cpu_limit_value            = try(local.redpanda_broker_cpu_limit, "2500m")
   redpanda_broker_mem_request_value          = try(local.redpanda_broker_mem_request, "5Gi")
@@ -188,6 +228,43 @@ locals {
       }
     )
   }
+  identity_realm_groups = local.redpanda_console_auth_enabled ? try(
+    data.terraform_remote_state.identity[0].outputs.keycloak_realm_groups,
+    {}
+  ) : {}
+  identity_oidc_metadata = local.redpanda_console_auth_enabled ? try(
+    data.terraform_remote_state.identity[0].outputs.keycloak_oidc_client_metadata,
+    {}
+  ) : {}
+  identity_oidc_secrets = local.redpanda_console_auth_enabled ? try(
+    data.terraform_remote_state.identity[0].outputs.keycloak_oidc_client_secrets,
+    {}
+  ) : {}
+  available_identity_realms = keys(local.identity_oidc_metadata)
+  redpanda_console_oidc_issuer = local.redpanda_console_auth_enabled ? try(
+    local.identity_oidc_metadata[local.redpanda_console_auth_keycloak_realm_value].issuer_url,
+    ""
+  ) : ""
+  redpanda_console_oidc_client_id = local.redpanda_console_auth_enabled ? try(
+    local.identity_oidc_metadata[local.redpanda_console_auth_keycloak_realm_value].clients[local.redpanda_console_oauth_client_id].client_id,
+    ""
+  ) : ""
+  redpanda_console_oidc_client_secret = local.redpanda_console_auth_enabled ? try(
+    local.identity_oidc_secrets[local.redpanda_console_auth_keycloak_realm_value][local.redpanda_console_oauth_client_id],
+    ""
+  ) : ""
+  redpanda_console_auth_effective_allowed_groups = distinct(compact(concat(
+    local.redpanda_console_auth_allowed_groups_value,
+    flatten([
+      for group_name in local.redpanda_console_auth_allowed_groups_value : [
+        for ldap_group in try(local.identity_realm_groups[local.redpanda_console_auth_keycloak_realm_value][group_name].included_ldap_groups, []) : ldap_group.group_name
+      ]
+    ])
+  )))
+  missing_redpanda_console_auth_group_definitions = local.redpanda_console_auth_enabled ? [
+    for group_name in local.redpanda_console_auth_allowed_groups_value : group_name
+    if !contains(keys(try(local.identity_realm_groups[local.redpanda_console_auth_keycloak_realm_value], {})), group_name)
+  ] : []
 }
 
 check "broker_labels_numeric" {
@@ -248,6 +325,25 @@ check "preissued_tls_secret_files" {
       trimspace(secret.cert_content) != "" && trimspace(secret.key_content) != ""
     ])
     error_message = "default_certificate_name must reference a readable certificate/key pair in available_certificates for Redpanda Console."
+  }
+}
+
+check "redpanda_console_auth_identity_client" {
+  assert {
+    condition = !local.redpanda_console_auth_enabled || (
+      contains(local.available_identity_realms, local.redpanda_console_auth_keycloak_realm_value) &&
+      trimspace(local.redpanda_console_oidc_issuer) != "" &&
+      trimspace(local.redpanda_console_oidc_client_id) != "" &&
+      trimspace(local.redpanda_console_oidc_client_secret) != ""
+    )
+    error_message = format("Redpanda Console Keycloak auth is enabled for realm %q, but identity state does not expose that realm with a confidential redpanda-console OIDC client. Available realms: %s", local.redpanda_console_auth_keycloak_realm_value, join(", ", local.available_identity_realms))
+  }
+}
+
+check "redpanda_console_auth_groups" {
+  assert {
+    condition     = !local.redpanda_console_auth_enabled || (length(local.redpanda_console_auth_effective_allowed_groups) > 0 && length(local.missing_redpanda_console_auth_group_definitions) == 0)
+    error_message = format("Redpanda Console auth groups must exist in the selected Keycloak realm. Missing logical groups: %s", join(", ", local.missing_redpanda_console_auth_group_definitions))
   }
 }
 
@@ -827,10 +923,303 @@ resource "kubernetes_manifest" "console_certificate" {
   ]
 }
 
+resource "random_password" "redpanda_console_oauth_cookie_secret" {
+  count   = local.redpanda_console_auth_enabled ? 1 : 0
+  length  = 32
+  special = false
+}
+
+resource "kubernetes_secret_v1" "redpanda_console_oauth" {
+  count = local.redpanda_console_auth_enabled ? 1 : 0
+
+  metadata {
+    name      = local.redpanda_console_oauth_secret_name_value
+    namespace = local.redpanda_namespace_value
+  }
+
+  data = {
+    "client-secret" = local.redpanda_console_oidc_client_secret
+    "cookie-secret" = random_password.redpanda_console_oauth_cookie_secret[0].result
+  }
+
+  type = "Opaque"
+
+  depends_on = [
+    kubernetes_manifest.namespace,
+  ]
+}
+
+resource "kubernetes_secret_v1" "redpanda_console_oauth_ca" {
+  count = local.redpanda_console_auth_ca_enabled ? 1 : 0
+
+  metadata {
+    name      = local.redpanda_console_auth_ca_secret_name_value
+    namespace = local.redpanda_namespace_value
+  }
+
+  data = {
+    "ca.crt" = local.redpanda_console_auth_ca_content
+  }
+
+  type = "Opaque"
+
+  depends_on = [
+    kubernetes_manifest.namespace,
+  ]
+}
+
+resource "kubernetes_manifest" "console_oauth2_proxy_deployment" {
+  count = local.redpanda_console_auth_enabled ? 1 : 0
+
+  manifest = {
+    apiVersion = "apps/v1"
+    kind       = "Deployment"
+    metadata = {
+      name      = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+      namespace = local.redpanda_namespace_value
+      labels = {
+        app = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+      }
+    }
+    spec = {
+      replicas = 1
+      selector = {
+        matchLabels = {
+          app = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+        }
+      }
+      template = {
+        metadata = {
+          labels = {
+            app = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+          }
+        }
+        spec = {
+          securityContext = {
+            runAsNonRoot = true
+            runAsUser    = 65532
+            runAsGroup   = 65532
+            seccompProfile = {
+              type = "RuntimeDefault"
+            }
+          }
+          containers = [
+            {
+              name            = "oauth2-proxy"
+              image           = "quay.io/oauth2-proxy/oauth2-proxy:${local.redpanda_console_oauth2_proxy_image_tag_value}"
+              imagePullPolicy = "IfNotPresent"
+              args = concat([
+                "--http-address=0.0.0.0:4180",
+                "--provider=keycloak-oidc",
+                "--oidc-issuer-url=${local.redpanda_console_oidc_issuer}",
+                "--client-id=${local.redpanda_console_oidc_client_id}",
+                "--redirect-url=${local.redpanda_console_oauth_redirect_uri}",
+                "--email-domain=*",
+                "--scope=openid profile email",
+                "--code-challenge-method=S256",
+                "--reverse-proxy=true",
+                "--set-xauthrequest=true",
+                "--skip-provider-button=true",
+                "--cookie-name=${local.redpanda_console_oauth2_proxy_cookie_name_value}",
+                "--cookie-secure=true",
+                "--cookie-samesite=lax",
+                "--upstream=static://202",
+                "--backend-logout-url=${local.redpanda_console_oauth_backend_logout_url}",
+                ],
+                [
+                  for group_name in local.redpanda_console_auth_effective_allowed_groups : "--allowed-group=${group_name}"
+                ],
+                [
+                  for trusted_proxy_ip in local.redpanda_console_oauth2_proxy_trusted_proxy_ips_value : "--trusted-proxy-ip=${trusted_proxy_ip}"
+                ],
+                local.redpanda_console_auth_ca_enabled ? [
+                  "--provider-ca-file=/run/secrets/redpanda-console-oauth-ca/ca.crt",
+                  "--use-system-trust-store=true",
+                ] : []
+              )
+              env = [
+                {
+                  name = "OAUTH2_PROXY_CLIENT_SECRET"
+                  valueFrom = {
+                    secretKeyRef = {
+                      name = local.redpanda_console_oauth_secret_name_value
+                      key  = "client-secret"
+                    }
+                  }
+                },
+                {
+                  name = "OAUTH2_PROXY_COOKIE_SECRET"
+                  valueFrom = {
+                    secretKeyRef = {
+                      name = local.redpanda_console_oauth_secret_name_value
+                      key  = "cookie-secret"
+                    }
+                  }
+                },
+              ]
+              ports = [
+                {
+                  name          = "http"
+                  containerPort = 4180
+                },
+              ]
+              resources = {
+                requests = {
+                  cpu    = local.redpanda_console_oauth2_proxy_cpu_request_value
+                  memory = local.redpanda_console_oauth2_proxy_mem_request_value
+                }
+                limits = {
+                  cpu    = local.redpanda_console_oauth2_proxy_cpu_limit_value
+                  memory = local.redpanda_console_oauth2_proxy_mem_limit_value
+                }
+              }
+              securityContext = {
+                allowPrivilegeEscalation = false
+                capabilities = {
+                  drop = ["ALL"]
+                }
+              }
+              readinessProbe = {
+                httpGet = {
+                  path   = "/ping"
+                  port   = "http"
+                  scheme = "HTTP"
+                }
+                periodSeconds    = 10
+                timeoutSeconds   = 1
+                successThreshold = 1
+                failureThreshold = 3
+              }
+              livenessProbe = {
+                httpGet = {
+                  path   = "/ping"
+                  port   = "http"
+                  scheme = "HTTP"
+                }
+                periodSeconds    = 30
+                timeoutSeconds   = 1
+                successThreshold = 1
+                failureThreshold = 3
+              }
+              volumeMounts = local.redpanda_console_auth_ca_enabled ? [
+                {
+                  name      = "redpanda-console-oauth-ca"
+                  mountPath = "/run/secrets/redpanda-console-oauth-ca"
+                  readOnly  = true
+                },
+              ] : []
+            },
+          ]
+          volumes = local.redpanda_console_auth_ca_enabled ? [
+            {
+              name = "redpanda-console-oauth-ca"
+              secret = {
+                secretName = local.redpanda_console_auth_ca_secret_name_value
+              }
+            },
+          ] : []
+        }
+      }
+    }
+  }
+
+  depends_on = [
+    kubernetes_secret_v1.redpanda_console_oauth,
+    kubernetes_secret_v1.redpanda_console_oauth_ca,
+  ]
+}
+
+resource "kubernetes_manifest" "console_oauth2_proxy_service" {
+  count = local.redpanda_console_auth_enabled ? 1 : 0
+
+  manifest = {
+    apiVersion = "v1"
+    kind       = "Service"
+    metadata = {
+      name      = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+      namespace = local.redpanda_namespace_value
+      labels = {
+        app = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+      }
+    }
+    spec = {
+      selector = {
+        app = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+      }
+      ports = [
+        {
+          name       = "http"
+          port       = 4180
+          targetPort = "http"
+        },
+      ]
+    }
+  }
+
+  depends_on = [
+    kubernetes_manifest.namespace,
+  ]
+}
+
 resource "null_resource" "ingress_nginx_webhook_ready" {
   provisioner "local-exec" {
     command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=300s && KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n ingress-nginx wait --for=condition=Ready pod -l app.kubernetes.io/name=ingress-nginx,app.kubernetes.io/component=controller --timeout=300s"
   }
+}
+
+resource "kubernetes_manifest" "console_oauth2_proxy_ingress" {
+  count = local.redpanda_console_auth_enabled ? 1 : 0
+
+  manifest = {
+    apiVersion = "networking.k8s.io/v1"
+    kind       = "Ingress"
+    metadata = {
+      name      = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+      namespace = local.redpanda_namespace_value
+      annotations = {
+        "nginx.ingress.kubernetes.io/ssl-redirect"      = "true"
+        "nginx.ingress.kubernetes.io/proxy-buffer-size" = "128k"
+      }
+    }
+    spec = {
+      ingressClassName = "nginx"
+      tls = [
+        {
+          hosts      = [local.redpanda_console_hostname_value]
+          secretName = local.redpanda_console_tls_secret_name_value
+        },
+      ]
+      rules = [
+        {
+          host = local.redpanda_console_hostname_value
+          http = {
+            paths = [
+              {
+                path     = "/oauth2"
+                pathType = "Prefix"
+                backend = {
+                  service = {
+                    name = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+                    port = {
+                      number = 4180
+                    }
+                  }
+                }
+              },
+            ]
+          }
+        },
+      ]
+    }
+  }
+
+  depends_on = [
+    kubernetes_manifest.console_oauth2_proxy_service,
+    kubernetes_manifest.console_certificate,
+    kubernetes_secret_v1.preissued_tls,
+    kubernetes_manifest.console_oauth2_proxy_ingress,
+    null_resource.ingress_nginx_webhook_ready,
+  ]
 }
 
 resource "kubernetes_manifest" "console_ingress" {
@@ -840,9 +1229,16 @@ resource "kubernetes_manifest" "console_ingress" {
     metadata = {
       name      = "${local.redpanda_resource_name_value}-console"
       namespace = local.redpanda_namespace_value
-      annotations = {
-        "nginx.ingress.kubernetes.io/backend-protocol" = "HTTP"
-      }
+      annotations = merge(
+        {
+          "nginx.ingress.kubernetes.io/backend-protocol" = "HTTP"
+        },
+        local.redpanda_console_auth_enabled ? {
+          "nginx.ingress.kubernetes.io/auth-url"              = "http://${local.redpanda_resource_name_value}-console-oauth2-proxy.${local.redpanda_namespace_value}.svc.cluster.local:4180/oauth2/auth"
+          "nginx.ingress.kubernetes.io/auth-signin"           = "https://$host/oauth2/start?rd=$escaped_request_uri"
+          "nginx.ingress.kubernetes.io/auth-response-headers" = "Authorization,X-Auth-Request-Access-Token,X-Auth-Request-User,X-Auth-Request-Email,X-Auth-Request-Groups"
+        } : {}
+      )
     }
     spec = {
       ingressClassName = "nginx"
@@ -899,4 +1295,12 @@ output "redpanda_broker_count" {
 
 output "redpanda_console_url" {
   value = "https://${local.redpanda_console_hostname_value}"
+}
+
+output "redpanda_console_auth_enabled" {
+  value = local.redpanda_console_auth_enabled
+}
+
+output "redpanda_console_oauth2_proxy_service_name" {
+  value = local.redpanda_console_auth_enabled ? "${local.redpanda_resource_name_value}-console-oauth2-proxy" : ""
 }

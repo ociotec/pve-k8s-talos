@@ -10,6 +10,18 @@ locals {
   redpanda_image                   = "docker.redpanda.com/redpandadata/redpanda:v26.1.6"
   redpanda_console_image           = "docker.redpanda.com/redpandadata/console:v3.7.2"
 
+  redpanda_console_auth_keycloak_realm = "company"
+  redpanda_console_auth_allowed_groups = ["k8s-admins"]
+  redpanda_console_auth_ca_secret_name = "redpanda-console-oauth-ca"
+
+  redpanda_console_oauth2_proxy_image_tag         = "v7.15.2"
+  redpanda_console_oauth2_proxy_cookie_name       = "_redpanda_console_oauth2_proxy"
+  redpanda_console_oauth2_proxy_cpu_request       = "50m"
+  redpanda_console_oauth2_proxy_cpu_limit         = "200m"
+  redpanda_console_oauth2_proxy_mem_request       = "128Mi"
+  redpanda_console_oauth2_proxy_mem_limit         = "128Mi"
+  redpanda_console_oauth2_proxy_trusted_proxy_ips = []
+
   redpanda_broker_cpu_request = "2"
   redpanda_broker_cpu_limit   = "2500m"
   redpanda_broker_mem_request = "5Gi"

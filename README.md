@@ -86,7 +86,7 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
   - Storage class, image versions, hostnames, and optional Keycloak auth settings for platform services such as Portainer and Rancher.
   - `tls_secrets` maps namespaces/secret names to entries from `available_certificates`.
 - `kafka_constants.tf`
-  - Redpanda namespace, resource names, broker label key, local data path, Console hostname/TLS secret, images, and CPU/memory sizing.
+  - Redpanda namespace, resource names, broker label key, local data path, Console hostname/TLS secret, optional Keycloak ingress authentication, images, and CPU/memory sizing.
   - Broker placement comes from `vms.auto.tfvars` labels; local PV capacity comes from the matching mounted disk in `resources.auto.tfvars`.
 
 For the Rancher/Portainer/Grafana + Keycloak authentication split of responsibilities and the shared group model, see [docs/rancher-keycloak-auth.md](docs/rancher-keycloak-auth.md).
