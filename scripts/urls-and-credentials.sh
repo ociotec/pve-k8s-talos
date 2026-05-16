@@ -376,9 +376,9 @@ print_redpanda_console() {
   local listener_protocol
   local listener_scope
   local listener_bootstrap
-  local schema_registry_urls
-  local redpanda_admin_urls
-  local redpanda_http_proxy_urls
+  local schema_registry_service_url
+  local redpanda_admin_service_url
+  local redpanda_http_proxy_service_url
 
   redpanda_console_url="$(output_raw "${cluster_kafka_workspace}" redpanda_console_url)"
   if ! has_value "${redpanda_console_url}"; then
@@ -402,12 +402,12 @@ print_redpanda_console() {
     done < <(jq -r 'to_entries[] | [.key, (.value.protocol // ""), (.value.scope // ""), (.value.bootstrap_server // "")] | @tsv' <<< "${kafka_listener_bootstrap}")
   fi
 
-  schema_registry_urls="$(output_json "${cluster_kafka_workspace}" schema_registry_urls)"
-  print_json_array_bullet "Schema Registry URLs" "${schema_registry_urls}"
-  redpanda_admin_urls="$(output_json "${cluster_kafka_workspace}" redpanda_admin_urls)"
-  print_json_array_bullet "Redpanda Admin API URLs" "${redpanda_admin_urls}"
-  redpanda_http_proxy_urls="$(output_json "${cluster_kafka_workspace}" redpanda_http_proxy_urls)"
-  print_json_array_bullet "Redpanda HTTP Proxy URLs" "${redpanda_http_proxy_urls}"
+  schema_registry_service_url="$(output_raw "${cluster_kafka_workspace}" schema_registry_service_url)"
+  print_url_bullet "Schema Registry URL" "${schema_registry_service_url}"
+  redpanda_admin_service_url="$(output_raw "${cluster_kafka_workspace}" redpanda_admin_service_url)"
+  print_url_bullet "Redpanda Admin API URL" "${redpanda_admin_service_url}"
+  redpanda_http_proxy_service_url="$(output_raw "${cluster_kafka_workspace}" redpanda_http_proxy_service_url)"
+  print_url_bullet "Redpanda HTTP Proxy URL" "${redpanda_http_proxy_service_url}"
 }
 
 print_rook_dashboard() {

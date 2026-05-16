@@ -182,12 +182,18 @@ locals {
   redpanda_admin_urls = [
     for broker_dns_name in local.broker_dns_names : "http://${broker_dns_name}:9644"
   ]
+  redpanda_admin_service_name = "${local.redpanda_resource_name_value}-admin"
+  redpanda_admin_service_url  = "http://${local.redpanda_admin_service_name}.${local.redpanda_namespace_value}.svc.cluster.local:9644"
   schema_registry_urls = [
     for broker_dns_name in local.broker_dns_names : "http://${broker_dns_name}:8081"
   ]
+  schema_registry_service_name = "${local.redpanda_resource_name_value}-schema-registry"
+  schema_registry_service_url  = "http://${local.schema_registry_service_name}.${local.redpanda_namespace_value}.svc.cluster.local:8081"
   pandaproxy_urls = [
     for broker_dns_name in local.broker_dns_names : "http://${broker_dns_name}:8082"
   ]
+  pandaproxy_service_name = "${local.redpanda_resource_name_value}-http-proxy"
+  pandaproxy_service_url  = "http://${local.pandaproxy_service_name}.${local.redpanda_namespace_value}.svc.cluster.local:8082"
   console_config = yamlencode({
     kafka = {
       brokers = local.kafka_broker_urls
@@ -462,6 +468,96 @@ resource "kubernetes_manifest" "headless_service" {
         { name = "admin", port = 9644, targetPort = 9644 },
         { name = "schema-registry", port = 8081, targetPort = 8081 },
         { name = "proxy", port = 8082, targetPort = 8082 },
+      ]
+    }
+  }
+
+  depends_on = [
+    kubernetes_manifest.namespace,
+  ]
+}
+
+resource "kubernetes_manifest" "schema_registry_service" {
+  manifest = {
+    apiVersion = "v1"
+    kind       = "Service"
+    metadata = {
+      name      = local.schema_registry_service_name
+      namespace = local.redpanda_namespace_value
+      labels = {
+        app = local.redpanda_resource_name_value
+      }
+    }
+    spec = {
+      selector = {
+        app = local.redpanda_resource_name_value
+      }
+      ports = [
+        {
+          name       = "http"
+          port       = 8081
+          targetPort = 8081
+        },
+      ]
+    }
+  }
+
+  depends_on = [
+    kubernetes_manifest.namespace,
+  ]
+}
+
+resource "kubernetes_manifest" "admin_service" {
+  manifest = {
+    apiVersion = "v1"
+    kind       = "Service"
+    metadata = {
+      name      = local.redpanda_admin_service_name
+      namespace = local.redpanda_namespace_value
+      labels = {
+        app = local.redpanda_resource_name_value
+      }
+    }
+    spec = {
+      selector = {
+        app = local.redpanda_resource_name_value
+      }
+      ports = [
+        {
+          name       = "http"
+          port       = 9644
+          targetPort = 9644
+        },
+      ]
+    }
+  }
+
+  depends_on = [
+    kubernetes_manifest.namespace,
+  ]
+}
+
+resource "kubernetes_manifest" "http_proxy_service" {
+  manifest = {
+    apiVersion = "v1"
+    kind       = "Service"
+    metadata = {
+      name      = local.pandaproxy_service_name
+      namespace = local.redpanda_namespace_value
+      labels = {
+        app = local.redpanda_resource_name_value
+      }
+    }
+    spec = {
+      selector = {
+        app = local.redpanda_resource_name_value
+      }
+      ports = [
+        {
+          name       = "http"
+          port       = 8082
+          targetPort = 8082
+        },
       ]
     }
   }
@@ -1317,12 +1413,24 @@ output "schema_registry_urls" {
   value = local.schema_registry_urls
 }
 
+output "schema_registry_service_url" {
+  value = local.schema_registry_service_url
+}
+
 output "redpanda_admin_urls" {
   value = local.redpanda_admin_urls
 }
 
+output "redpanda_admin_service_url" {
+  value = local.redpanda_admin_service_url
+}
+
 output "redpanda_http_proxy_urls" {
   value = local.pandaproxy_urls
+}
+
+output "redpanda_http_proxy_service_url" {
+  value = local.pandaproxy_service_url
 }
 
 output "redpanda_console_auth_enabled" {
