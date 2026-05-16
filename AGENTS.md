@@ -52,6 +52,7 @@ It complements `README.md` and focuses on execution behavior, change safety, and
   - `clusters/<cluster>/*_constants.tf`
 - Add concise comments for constants whose purpose, operational effect, or relationship to adjacent settings is not obvious.
 - Avoid hardcoding cluster names, hostnames, paths, or secrets in shared modules.
+- When adding images from a new upstream container registry, update the registry mirror example in `clusters/sample/constants.auto.tfvars` and the required-registry list in `README.md`.
 
 ## Certificates and TLS Conventions
 
