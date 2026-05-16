@@ -170,11 +170,23 @@ locals {
   kafka_broker_urls = [
     for broker_dns_name in local.broker_dns_names : "${broker_dns_name}:9092"
   ]
+  kafka_listener_bootstrap = {
+    internal = {
+      name              = "internal"
+      protocol          = "PLAINTEXT"
+      scope             = "cluster-internal"
+      bootstrap_servers = local.kafka_broker_urls
+      bootstrap_server  = join(",", local.kafka_broker_urls)
+    }
+  }
   redpanda_admin_urls = [
     for broker_dns_name in local.broker_dns_names : "http://${broker_dns_name}:9644"
   ]
   schema_registry_urls = [
     for broker_dns_name in local.broker_dns_names : "http://${broker_dns_name}:8081"
+  ]
+  pandaproxy_urls = [
+    for broker_dns_name in local.broker_dns_names : "http://${broker_dns_name}:8082"
   ]
   console_config = yamlencode({
     kafka = {
@@ -1295,6 +1307,22 @@ output "redpanda_broker_count" {
 
 output "redpanda_console_url" {
   value = "https://${local.redpanda_console_hostname_value}"
+}
+
+output "kafka_listener_bootstrap" {
+  value = local.kafka_listener_bootstrap
+}
+
+output "schema_registry_urls" {
+  value = local.schema_registry_urls
+}
+
+output "redpanda_admin_urls" {
+  value = local.redpanda_admin_urls
+}
+
+output "redpanda_http_proxy_urls" {
+  value = local.pandaproxy_urls
 }
 
 output "redpanda_console_auth_enabled" {

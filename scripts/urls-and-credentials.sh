@@ -81,6 +81,32 @@ output_raw() {
   esac
 }
 
+output_json() {
+  local workspace="$1"
+  local output_name="$2"
+  local output
+
+  if ! workspace_has_state "${workspace}"; then
+    return 0
+  fi
+
+  if output="$(tofu -chdir="${workspace}" output -json "${output_name}" 2>&1)"; then
+    printf "%s" "${output}"
+    return 0
+  fi
+
+  case "${output}" in
+    *"No outputs found"*|*"output variable requested could not be found"*|*"No output named"*|*'Output "'*'" not found'*)
+      return 0
+      ;;
+    *)
+      error "Failed to read OpenTofu output ${output_name} in ${workspace}. Output:" >&2
+      printf "%s\n" "${output}" >&2
+      return 1
+      ;;
+  esac
+}
+
 has_value() {
   local value="$1"
   [[ -n "${value}" && "${value}" != "null" ]]
@@ -127,6 +153,30 @@ print_secret_bullet() {
     message "  - ${label}: ${DATA_FMT_START}<hidden>${DATA_FMT_END}"
     printed_any=true
   fi
+}
+
+print_json_array_bullet() {
+  local label="$1"
+  local json="$2"
+  local first_value
+  local value
+
+  if ! has_value "${json}" || ! command -v jq >/dev/null 2>&1; then
+    return 0
+  fi
+
+  first_value="$(jq -r 'if type == "array" and length > 0 then .[0] else "" end' <<< "${json}")"
+  if ! has_value "${first_value}"; then
+    return 0
+  fi
+
+  message "  - ${label}:"
+  printed_any=true
+  while IFS= read -r value; do
+    if has_value "${value}"; then
+      message "    - ${URL_FMT_START}${value}${URL_FMT_END}"
+    fi
+  done < <(jq -r '.[]' <<< "${json}")
 }
 
 message_keycloak_realm_console_line() {
@@ -321,6 +371,14 @@ print_rancher() {
 
 print_redpanda_console() {
   local redpanda_console_url
+  local kafka_listener_bootstrap
+  local listener_name
+  local listener_protocol
+  local listener_scope
+  local listener_bootstrap
+  local schema_registry_urls
+  local redpanda_admin_urls
+  local redpanda_http_proxy_urls
 
   redpanda_console_url="$(output_raw "${cluster_kafka_workspace}" redpanda_console_url)"
   if ! has_value "${redpanda_console_url}"; then
@@ -329,6 +387,27 @@ print_redpanda_console() {
 
   print_service "Redpanda Console"
   print_url_bullet "URL" "${redpanda_console_url}"
+
+  kafka_listener_bootstrap="$(output_json "${cluster_kafka_workspace}" kafka_listener_bootstrap)"
+  if has_value "${kafka_listener_bootstrap}" && command -v jq >/dev/null 2>&1; then
+    if [[ "$(jq -r 'if type == "object" then length else 0 end' <<< "${kafka_listener_bootstrap}")" -gt 0 ]]; then
+      message "  - Kafka bootstrap:"
+      printed_any=true
+    fi
+    while IFS=$'\t' read -r listener_name listener_protocol listener_scope listener_bootstrap; do
+      if has_value "${listener_name}" && has_value "${listener_bootstrap}"; then
+        message "    - ${listener_name} (${listener_protocol}, ${listener_scope}): ${DATA_FMT_START}${listener_bootstrap}${DATA_FMT_END}"
+        printed_any=true
+      fi
+    done < <(jq -r 'to_entries[] | [.key, (.value.protocol // ""), (.value.scope // ""), (.value.bootstrap_server // "")] | @tsv' <<< "${kafka_listener_bootstrap}")
+  fi
+
+  schema_registry_urls="$(output_json "${cluster_kafka_workspace}" schema_registry_urls)"
+  print_json_array_bullet "Schema Registry URLs" "${schema_registry_urls}"
+  redpanda_admin_urls="$(output_json "${cluster_kafka_workspace}" redpanda_admin_urls)"
+  print_json_array_bullet "Redpanda Admin API URLs" "${redpanda_admin_urls}"
+  redpanda_http_proxy_urls="$(output_json "${cluster_kafka_workspace}" redpanda_http_proxy_urls)"
+  print_json_array_bullet "Redpanda HTTP Proxy URLs" "${redpanda_http_proxy_urls}"
 }
 
 print_rook_dashboard() {
