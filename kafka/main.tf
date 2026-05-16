@@ -592,6 +592,11 @@ resource "kubernetes_manifest" "statefulset" {
           labels = {
             app = local.redpanda_resource_name_value
           }
+          annotations = {
+            "prometheus.io/scrape" = "true"
+            "prometheus.io/port"   = "9644"
+            "prometheus.io/path"   = "/public_metrics"
+          }
         }
         spec = {
           terminationGracePeriodSeconds = 120
