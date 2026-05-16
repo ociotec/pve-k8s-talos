@@ -10,6 +10,7 @@ skip_ceph=false
 skip_k8s_net=false
 skip_identity=false
 skip_platform=false
+skip_kafka=false
 skip_monitoring=false
 
 while [[ $# -gt 0 ]]; do
@@ -38,6 +39,10 @@ while [[ $# -gt 0 ]]; do
       skip_platform=true
       shift
       ;;
+    --skip-kafka)
+      skip_kafka=true
+      shift
+      ;;
     --skip-monitoring)
       skip_monitoring=true
       shift
@@ -53,6 +58,7 @@ Options:
   --skip-identity     Exclude identity hostnames from generated no_proxy values.
   --skip-platform     Exclude platform hostnames from generated no_proxy values.
   --skip-portainer    Deprecated alias for --skip-platform.
+  --skip-kafka        Exclude Kafka/Redpanda hostnames from generated no_proxy values.
   --skip-monitoring   Exclude monitoring hostnames from generated no_proxy values.
   -h, --help          Show this help message.
 USAGE
@@ -931,6 +937,15 @@ if [[ -n "${proxy_url}" ]]; then
       add_no_proxy_entry "${hostname}"
     done < <(
       awk -v domain="${k8s_net_domain}" -F'"' '/portainer_hostname[[:space:]]*=/{val=$2; gsub("\\$\\{local.domain\\}", domain, val); print val}' "${platform_constants_path}"
+    )
+  fi
+
+  kafka_constants_path="${cluster_kafka_constants_path}"
+  if [[ "${skip_kafka}" != "true" && -r "${kafka_constants_path}" && -n "${k8s_net_domain}" ]]; then
+    while IFS= read -r hostname; do
+      add_no_proxy_entry "${hostname}"
+    done < <(
+      awk -v domain="${k8s_net_domain}" -F'"' '/redpanda_console_hostname[[:space:]]*=/{val=$2; gsub("\\$\\{local.domain\\}", domain, val); print val}' "${kafka_constants_path}"
     )
   fi
 

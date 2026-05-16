@@ -319,6 +319,18 @@ print_rancher() {
   print_secret_bullet "Admin password" "${rancher_bootstrap_password}"
 }
 
+print_redpanda_console() {
+  local redpanda_console_url
+
+  redpanda_console_url="$(output_raw "${cluster_kafka_workspace}" redpanda_console_url)"
+  if ! has_value "${redpanda_console_url}"; then
+    return 0
+  fi
+
+  print_service "Redpanda Console"
+  print_url_bullet "URL" "${redpanda_console_url}"
+}
+
 print_rook_dashboard() {
   local rook_dashboard_url
   local dashboard_nodeport
@@ -355,6 +367,7 @@ print_grafana
 print_prometheus
 print_portainer
 print_rancher
+print_redpanda_console
 print_rook_dashboard
 
 if [[ "${printed_any}" != "true" ]]; then

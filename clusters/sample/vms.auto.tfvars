@@ -21,24 +21,30 @@ vms = {
     k8s_labels = {}
   }
   "talos-wk-01" = {
-    node_name  = "pve01"
-    vm_id      = 1011
-    type       = "worker"
-    ip         = "192.168.1.61"
-    k8s_labels = {}
+    node_name = "pve01"
+    vm_id     = 1011
+    type      = "worker-kafka"
+    ip        = "192.168.1.61"
+    k8s_labels = {
+      "kafka-node" = "0"
+    }
   }
   "talos-wk-02" = {
-    node_name  = "pve02"
-    vm_id      = 1012
-    type       = "worker"
-    ip         = "192.168.1.62"
-    k8s_labels = {}
+    node_name = "pve02"
+    vm_id     = 1012
+    type      = "worker-kafka"
+    ip        = "192.168.1.62"
+    k8s_labels = {
+      "kafka-node" = "1"
+    }
   }
   "talos-wk-03" = {
-    node_name  = "pve03"
-    vm_id      = 1013
-    type       = "worker"
-    ip         = "192.168.1.63"
-    k8s_labels = {}
+    node_name = "pve03"
+    vm_id     = 1013
+    type      = "worker-kafka"
+    ip        = "192.168.1.63"
+    k8s_labels = {
+      "kafka-node" = "2"
+    }
   }
 }

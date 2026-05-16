@@ -30,6 +30,7 @@ Options:
   -i, --skip-identity       Skip identity services (Keycloak and its database).
   -p, --skip-platform       Skip platform services.
       --skip-portainer      Deprecated alias for --skip-platform.
+  -k, --skip-kafka          Skip Kafka/Redpanda services.
   -m, --skip-monitoring     Skip monitoring stack (Prometheus, Loki, Grafana).
       --services-only       Skip Talos VM/root apply and deploy Kubernetes services only.
                             Requires existing out/kubeconfig and out/talosconfig.
@@ -51,6 +52,7 @@ skip_ceph=false
 skip_k8s_net=false
 skip_identity=false
 skip_platform=false
+skip_kafka=false
 skip_monitoring=false
 services_only=false
 gen_talos_args=()
@@ -84,6 +86,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     -p|--skip-platform|--skip-portainer)
       skip_platform=true
+      shift
+      ;;
+    -k|--skip-kafka)
+      skip_kafka=true
       shift
       ;;
     -m|--skip-monitoring)
@@ -197,6 +203,9 @@ fi
 if [[ "${skip_platform}" == "true" ]]; then
   gen_talos_args+=(--skip-platform)
 fi
+if [[ "${skip_kafka}" == "true" ]]; then
+  gen_talos_args+=(--skip-kafka)
+fi
 if [[ "${skip_monitoring}" == "true" ]]; then
   gen_talos_args+=(--skip-monitoring)
 fi
@@ -213,6 +222,9 @@ if [[ "${skip_identity}" != "true" ]]; then
 fi
 if [[ "${skip_platform}" != "true" ]]; then
   quantity_check_paths+=("${repo_root}/platform")
+fi
+if [[ "${skip_kafka}" != "true" ]]; then
+  quantity_check_paths+=("${repo_root}/kafka")
 fi
 if [[ "${skip_monitoring}" != "true" ]]; then
   quantity_check_paths+=("${repo_root}/monitoring")
@@ -397,6 +409,26 @@ prepare_platform_workspace() {
   link_into_workspace "${repo_root}/platform/rancher.yaml" "${workspace}/rancher.yaml"
   if [[ -r "${repo_root}/platform/.terraform.lock.hcl" ]]; then
     link_into_workspace "${repo_root}/platform/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
+  fi
+}
+
+prepare_kafka_workspace() {
+  local workspace="${cluster_kafka_workspace}"
+
+  require_cluster_file "${cluster_kafka_constants_path}" "Kafka constants"
+  require_cluster_file "${cluster_k8s_net_constants_path}" "k8s-net constants"
+  mkdir -p "${workspace}" "${cluster_certs_dir}"
+  if [[ -d "${repo_root}/kafka/.terraform" ]]; then
+    link_into_workspace "${repo_root}/kafka/.terraform" "${workspace}/.terraform"
+  fi
+  link_into_workspace "${repo_root}/kafka/main.tf" "${workspace}/main.tf"
+  link_into_workspace "${cluster_kafka_constants_path}" "${workspace}/constants.tf"
+  link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/k8s_net_constants.tf"
+  link_into_workspace "${cluster_vms_path}" "${workspace}/vms.auto.tfvars"
+  link_into_workspace "${cluster_resources_path}" "${workspace}/resources.auto.tfvars"
+  link_into_workspace "${cluster_certs_dir}" "${workspace}/certs"
+  if [[ -r "${repo_root}/kafka/.terraform.lock.hcl" ]]; then
+    link_into_workspace "${repo_root}/kafka/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
   fi
 }
 
@@ -1420,6 +1452,29 @@ else
     message "Rancher URL: ${URL_FMT_START}${rancher_url}${URL_FMT_END}"
     message "Rancher bootstrap password: ${DATA_FMT_START}${rancher_bootstrap_password}${DATA_FMT_END}"
   fi
+fi
+
+if [[ "${skip_kafka}" == "true" ]]; then
+  message "Skipping Kafka/Redpanda services."
+else
+  prepare_kafka_workspace
+  message "Deploying Kafka/Redpanda services..."
+  run_tofu_init "${cluster_kafka_workspace}"
+  run tofu -chdir="${cluster_kafka_workspace}" apply -auto-approve
+  kafka_namespace="$(tofu -chdir="${cluster_kafka_workspace}" output -raw redpanda_namespace)"
+  redpanda_resource_name="$(tofu -chdir="${cluster_kafka_workspace}" output -raw redpanda_resource_name)"
+  redpanda_broker_count="$(tofu -chdir="${cluster_kafka_workspace}" output -raw redpanda_broker_count)"
+  kafka_pvcs=()
+  for ((i = 0; i < redpanda_broker_count; i++)); do
+    kafka_pvcs+=("datadir-${redpanda_resource_name}-${i}")
+  done
+  message "Waiting for Kafka/Redpanda PVCs, workloads, and endpoints to become ready..."
+  wait_for_pvcs_bound "${kafka_namespace}" "600" "${kafka_pvcs[@]}"
+  wait_for_rollout_ready "${kafka_namespace}" "statefulset/${redpanda_resource_name}" "900s"
+  wait_for_deployments_ready "${kafka_namespace}" "600s" "${redpanda_resource_name}-console"
+  wait_for_service_endpoints "${kafka_namespace}" "600" "${redpanda_resource_name}" "${redpanda_resource_name}-console"
+  redpanda_console_url="$(tofu -chdir="${cluster_kafka_workspace}" output -raw redpanda_console_url)"
+  message "Redpanda Console URL: ${URL_FMT_START}${redpanda_console_url}${URL_FMT_END}"
 fi
 
 ceph_mode_value="$(ceph_mode_from_constants "${cluster_ceph_constants_path}")"

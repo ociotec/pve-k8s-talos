@@ -85,6 +85,9 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
 - `platform_constants.tf`
   - Storage class, image versions, hostnames, and optional Keycloak auth settings for platform services such as Portainer and Rancher.
   - `tls_secrets` maps namespaces/secret names to entries from `available_certificates`.
+- `kafka_constants.tf`
+  - Redpanda namespace, resource names, broker label key, local data path, Console hostname/TLS secret, images, and CPU/memory sizing.
+  - Broker placement comes from `vms.auto.tfvars` labels; local PV capacity comes from the matching mounted disk in `resources.auto.tfvars`.
 
 For the Rancher/Portainer/Grafana + Keycloak authentication split of responsibilities and the shared group model, see [docs/rancher-keycloak-auth.md](docs/rancher-keycloak-auth.md).
 - `ceph_constants.tf`
@@ -107,7 +110,7 @@ Whenever you change `vms.auto.tfvars`, `constants.auto.tfvars`, or `patches/mach
 If you deploy with skip flags and want generated assets to match, pass the same flags here too, for example:
 
 ```bash
-../../scripts/gen-talos-assets.sh --cluster <cluster> --skip-ceph --skip-identity --skip-platform --skip-monitoring
+../../scripts/gen-talos-assets.sh --cluster <cluster> --skip-ceph --skip-identity --skip-platform --skip-kafka --skip-monitoring
 ```
 
 For low-level generation behavior and contributor rules, see [AGENTS.md](AGENTS.md).
@@ -162,6 +165,7 @@ To configure container registry mirrors for Talos, define `talos.registry` in `c
 This repository currently pulls images from these upstream registries:
 
 - `docker.io` / `registry-1.docker.io`
+- `docker.redpanda.com`
 - `gcr.io`
 - `ghcr.io`
 - `quay.io`
@@ -176,6 +180,7 @@ If your registry manager exposes a single group endpoint that aggregates all req
   "registry" = {
     "mirrors" = {
       "docker.io"            = "https://registry.example.com/repository/docker-public/v2"
+      "docker.redpanda.com"  = "https://registry.example.com/repository/docker-public/v2"
       "registry-1.docker.io" = "https://registry.example.com/repository/docker-public/v2"
       "gcr.io"               = "https://registry.example.com/repository/docker-public/v2"
       "ghcr.io"              = "https://registry.example.com/repository/docker-public/v2"
@@ -548,6 +553,7 @@ Run with `-h` or `--help` to see help documentation. Common options:
 --skip-k8s-net    Skip MetalLB, ingress-nginx, and cert-manager.
 --skip-identity   Skip Keycloak and its PostgreSQL database.
 --skip-platform   Skip platform services.
+--skip-kafka      Skip Kafka/Redpanda services.
 --skip-monitoring Skip Prometheus/Loki/Grafana stack.
 --services-only   Skip Talos VM/root apply and deploy Kubernetes services only.
 ```
@@ -567,7 +573,7 @@ cd clusters/<cluster>
 ../../scripts/urls-and-credentials.sh
 ```
 
-The script reports services that have local OpenTofu state under `out/*`, including Keycloak, Grafana, Prometheus, the Prometheus API endpoint credentials, Portainer, Rancher, and the Rook Ceph dashboard when installed. For Keycloak, it also prints each configured realm admin console URL, account URL, and whether enabled LDAP federations exist for that realm.
+The script reports services that have local OpenTofu state under `out/*`, including Keycloak, Grafana, Prometheus, the Prometheus API endpoint credentials, Portainer, Rancher, Redpanda Console, and the Rook Ceph dashboard when installed. For Keycloak, it also prints each configured realm admin console URL, account URL, and whether enabled LDAP federations exist for that realm.
 
 To show URLs and usernames without printing passwords:
 

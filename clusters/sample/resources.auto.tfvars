@@ -23,7 +23,7 @@ resources = {
     vcpus      = 4
     memory     = 8192
     k8s_node   = "worker"
-    k8s_labels = { "kafka" = "yes" }
+    k8s_labels = {}
     disks = [
       { size = 32 }, # First disk is used as the root disk
       { size = 128 },

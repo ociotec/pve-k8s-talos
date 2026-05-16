@@ -59,6 +59,7 @@ constants = {
     # "registry" = {
     #   "mirrors" = {
     #     "docker.io"            = "https://registry.example.com/repository/docker-public/v2"
+    #     "docker.redpanda.com"  = "https://registry.example.com/repository/docker-public/v2"
     #     "registry-1.docker.io" = "https://registry.example.com/repository/docker-public/v2"
     #     "gcr.io"               = "https://registry.example.com/repository/docker-public/v2"
     #     "ghcr.io"              = "https://registry.example.com/repository/docker-public/v2"
