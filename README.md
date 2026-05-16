@@ -103,6 +103,10 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
     preempt lower-priority application pods on the same shared nodes when a
     broker must be scheduled. Redpanda Console and its oauth2-proxy use
     `infra-observability`.
+- `benchmark_constants.tf`
+  - Optional scalable benchmark workloads in the dedicated `benchmark` namespace.
+  - CPU and memory benchmarks are Deployments; disk benchmarks are StatefulSets with one PVC per replica.
+  - All workloads default to `0` replicas and encode their unit size in the workload name, for example `benchmark-cpu-2vcpus`, `benchmark-memory-4gb`, and `benchmark-disk-rbd-replica-10mbs`.
 
 For the Rancher/Portainer/Grafana + Keycloak authentication split of responsibilities and the shared group model, see [docs/rancher-keycloak-auth.md](docs/rancher-keycloak-auth.md).
 - `ceph_constants.tf`
@@ -125,7 +129,7 @@ Whenever you change `vms.auto.tfvars`, `constants.auto.tfvars`, or `patches/mach
 If you deploy with skip flags and want generated assets to match, pass the same flags here too, for example:
 
 ```bash
-../../scripts/gen-talos-assets.sh --cluster <cluster> --skip-ceph --skip-identity --skip-platform --skip-kafka --skip-monitoring
+../../scripts/gen-talos-assets.sh --cluster <cluster> --skip-ceph --skip-identity --skip-platform --skip-kafka --skip-monitoring --skip-benchmark
 ```
 
 For low-level generation behavior and contributor rules, see [AGENTS.md](AGENTS.md).
@@ -407,7 +411,7 @@ tofu -chdir=k8s-net init
 tofu -chdir=k8s-net apply -auto-approve
 ```
 
-`deploy.sh` applies the stack in this order: `k8s-net -> ceph -> monitoring`.
+`deploy.sh` applies the stack in this order: `k8s-net -> ceph -> identity -> monitoring -> platform -> kafka -> benchmark`.
 
 For implementation details on generated workspaces under `clusters/<cluster>/out/*` and validation expectations per workspace, see [AGENTS.md](AGENTS.md).
 
@@ -540,6 +544,25 @@ tofu -chdir=monitoring apply -auto-approve
 kubectl -n monitoring rollout restart deploy/grafana
 ```
 
+### Benchmark
+
+The benchmark module creates the `benchmark` namespace and deploys CPU, memory, and CSI disk load generators at `0` replicas by default. Scale workloads manually when you want pressure:
+
+```bash
+kubectl -n benchmark scale deployment/benchmark-cpu-2vcpus --replicas=4
+kubectl -n benchmark scale deployment/benchmark-memory-4gb --replicas=4
+kubectl -n benchmark scale statefulset/benchmark-disk-rbd-replica-10mbs --replicas=2
+```
+
+Scale back to zero to stop load:
+
+```bash
+kubectl -n benchmark scale deployment/benchmark-cpu-2vcpus deployment/benchmark-memory-4gb --replicas=0
+kubectl -n benchmark scale statefulset/benchmark-disk-rbd-replica-10mbs --replicas=0
+```
+
+Kubernetes supports CPU and memory requests/limits for the benchmark containers. PVC capacity is requested with `resources.requests.storage`, but Kubernetes does not provide a native PVC throughput request/limit; disk benchmark throughput is enforced inside the fio container with `--rate`, and the selected rate is included in the StatefulSet name.
+
 ### Destroy the infrastructre
 
 If you want to programmatically destroy the plan:
@@ -570,6 +593,7 @@ Run with `-h` or `--help` to see help documentation. Common options:
 --skip-platform   Skip platform services.
 --skip-kafka      Skip Kafka/Redpanda services.
 --skip-monitoring Skip Prometheus/Loki/Grafana stack.
+--skip-benchmark  Skip benchmark workloads.
 --services-only   Skip Talos VM/root apply and deploy Kubernetes services only.
 ```
 

@@ -32,6 +32,7 @@ Options:
       --skip-portainer      Deprecated alias for --skip-platform.
   -k, --skip-kafka          Skip Kafka/Redpanda services.
   -m, --skip-monitoring     Skip monitoring stack (Prometheus, Loki, Grafana).
+  -b, --skip-benchmark      Skip benchmark workloads.
       --services-only       Skip Talos VM/root apply and deploy Kubernetes services only.
                             Requires existing out/kubeconfig and out/talosconfig.
   -h, --help                Show this help message.
@@ -54,6 +55,7 @@ skip_identity=false
 skip_platform=false
 skip_kafka=false
 skip_monitoring=false
+skip_benchmark=false
 services_only=false
 gen_talos_args=()
 
@@ -94,6 +96,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     -m|--skip-monitoring)
       skip_monitoring=true
+      shift
+      ;;
+    -b|--skip-benchmark)
+      skip_benchmark=true
       shift
       ;;
     --services-only)
@@ -209,6 +215,9 @@ fi
 if [[ "${skip_monitoring}" == "true" ]]; then
   gen_talos_args+=(--skip-monitoring)
 fi
+if [[ "${skip_benchmark}" == "true" ]]; then
+  gen_talos_args+=(--skip-benchmark)
+fi
 
 quantity_check_paths=()
 if [[ "${skip_ceph}" != "true" ]]; then
@@ -228,6 +237,9 @@ if [[ "${skip_kafka}" != "true" ]]; then
 fi
 if [[ "${skip_monitoring}" != "true" ]]; then
   quantity_check_paths+=("${repo_root}/monitoring")
+fi
+if [[ "${skip_benchmark}" != "true" ]]; then
+  quantity_check_paths+=("${repo_root}/benchmark")
 fi
 check_integer_cpu_millicores "${quantity_check_paths[@]}"
 check_integer_gibibyte_mebibytes "${quantity_check_paths[@]}"
@@ -429,6 +441,23 @@ prepare_kafka_workspace() {
   link_into_workspace "${cluster_certs_dir}" "${workspace}/certs"
   if [[ -r "${repo_root}/kafka/.terraform.lock.hcl" ]]; then
     link_into_workspace "${repo_root}/kafka/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
+  fi
+}
+
+prepare_benchmark_workspace() {
+  local workspace="${cluster_benchmark_workspace}"
+
+  require_cluster_file "${cluster_benchmark_constants_path}" "benchmark constants"
+  require_cluster_file "${cluster_ceph_constants_path}" "ceph constants"
+  mkdir -p "${workspace}"
+  if [[ -d "${repo_root}/benchmark/.terraform" ]]; then
+    link_into_workspace "${repo_root}/benchmark/.terraform" "${workspace}/.terraform"
+  fi
+  link_into_workspace "${repo_root}/benchmark/main.tf" "${workspace}/main.tf"
+  link_into_workspace "${cluster_benchmark_constants_path}" "${workspace}/constants.tf"
+  link_into_workspace "${cluster_ceph_constants_path}" "${workspace}/ceph_constants.tf"
+  if [[ -r "${repo_root}/benchmark/.terraform.lock.hcl" ]]; then
+    link_into_workspace "${repo_root}/benchmark/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
   fi
 }
 
@@ -1480,6 +1509,25 @@ else
   fi
   redpanda_console_url="$(tofu -chdir="${cluster_kafka_workspace}" output -raw redpanda_console_url)"
   message "Redpanda Console URL: ${URL_FMT_START}${redpanda_console_url}${URL_FMT_END}"
+fi
+
+if [[ "${skip_benchmark}" == "true" ]]; then
+  message "Skipping benchmark workloads."
+else
+  prepare_benchmark_workspace
+  message "Deploying benchmark workloads at zero replicas..."
+  run_tofu_init "${cluster_benchmark_workspace}"
+  run tofu -chdir="${cluster_benchmark_workspace}" apply -auto-approve
+  benchmark_namespace="$(tofu -chdir="${cluster_benchmark_workspace}" output -raw benchmark_namespace)"
+  benchmark_cpu_workload="$(tofu -chdir="${cluster_benchmark_workspace}" output -raw benchmark_cpu_workload)"
+  benchmark_memory_workload="$(tofu -chdir="${cluster_benchmark_workspace}" output -raw benchmark_memory_workload)"
+  benchmark_disk_workloads="$(tofu -chdir="${cluster_benchmark_workspace}" output -raw benchmark_disk_workload_summary)"
+  message "Benchmark namespace: ${DATA_FMT_START}${benchmark_namespace}${DATA_FMT_END}"
+  message "CPU benchmark: kubectl -n ${benchmark_namespace} scale deployment/${benchmark_cpu_workload} --replicas=<n>"
+  message "Memory benchmark: kubectl -n ${benchmark_namespace} scale deployment/${benchmark_memory_workload} --replicas=<n>"
+  if [[ -n "${benchmark_disk_workloads}" ]]; then
+    message "Disk benchmarks: ${DATA_FMT_START}${benchmark_disk_workloads}${DATA_FMT_END}"
+  fi
 fi
 
 ceph_mode_value="$(ceph_mode_from_constants "${cluster_ceph_constants_path}")"

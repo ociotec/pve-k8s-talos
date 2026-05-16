@@ -12,6 +12,7 @@ skip_identity=false
 skip_platform=false
 skip_kafka=false
 skip_monitoring=false
+skip_benchmark=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -47,6 +48,10 @@ while [[ $# -gt 0 ]]; do
       skip_monitoring=true
       shift
       ;;
+    --skip-benchmark)
+      skip_benchmark=true
+      shift
+      ;;
     -h|--help)
       cat <<'USAGE'
 Usage: gen-talos-assets.sh --cluster <name> [options]
@@ -60,6 +65,7 @@ Options:
   --skip-portainer    Deprecated alias for --skip-platform.
   --skip-kafka        Exclude Kafka/Redpanda hostnames from generated no_proxy values.
   --skip-monitoring   Exclude monitoring hostnames from generated no_proxy values.
+  --skip-benchmark    Accepted for deploy.sh skip-flag consistency. Benchmark does not affect Talos assets.
   -h, --help          Show this help message.
 USAGE
       exit 0
