@@ -189,7 +189,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(irate(ceph_pool_wr_bytes{}[5m]))",
+          "expr": "sum(irate(ceph_pool_wr_bytes[5m]) * on (pool_id) group_left(name) ceph_pool_metadata{name=~\"${pool:regex}\"})",
           "format": "time_series",
           "instant": true,
           "interval": "$interval",
@@ -268,7 +268,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(irate(ceph_pool_rd_bytes{}[5m]))",
+          "expr": "sum(irate(ceph_pool_rd_bytes[5m]) * on (pool_id) group_left(name) ceph_pool_metadata{name=~\"${pool:regex}\"})",
           "format": "time_series",
           "instant": true,
           "interval": "$interval",
@@ -504,7 +504,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(ceph_pool_objects{})",
+          "expr": "sum(ceph_pool_objects{} * on (pool_id) group_left(name) ceph_pool_metadata{name=~\"${pool:regex}\"})",
           "format": "time_series",
           "instant": true,
           "interval": "$interval",
@@ -579,7 +579,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(ceph_pool_wr_bytes{})",
+          "expr": "sum(ceph_pool_wr_bytes{} * on (pool_id) group_left(name) ceph_pool_metadata{name=~\"${pool:regex}\"})",
           "format": "time_series",
           "instant": false,
           "interval": "$interval",
@@ -654,7 +654,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(ceph_pool_rd_bytes{})",
+          "expr": "sum(ceph_pool_rd_bytes{} * on (pool_id) group_left(name) ceph_pool_metadata{name=~\"${pool:regex}\"})",
           "format": "time_series",
           "instant": false,
           "interval": "$interval",
@@ -795,7 +795,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(irate(ceph_pool_wr{}[5m]))",
+          "expr": "sum(irate(ceph_pool_wr[5m]) * on (pool_id) group_left(name) ceph_pool_metadata{name=~\"${pool:regex}\"})",
           "format": "time_series",
           "instant": true,
           "interval": "$interval",
@@ -874,7 +874,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(irate(ceph_pool_rd{}[5m]))",
+          "expr": "sum(irate(ceph_pool_rd[5m]) * on (pool_id) group_left(name) ceph_pool_metadata{name=~\"${pool:regex}\"})",
           "format": "time_series",
           "instant": true,
           "interval": "$interval",
@@ -1033,7 +1033,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(ceph_pool_objects)",
+          "expr": "sum(ceph_pool_objects * on (pool_id) group_left(name) ceph_pool_metadata{name=~\"${pool:regex}\"})",
           "format": "time_series",
           "instant": false,
           "interval": "$interval",
@@ -1933,6 +1933,232 @@
         "x": 0,
         "y": 11
       },
+      "id": 61,
+      "panels": [],
+      "title": "POOLS R/W",
+      "type": "row"
+    },
+    {
+      "datasource": "${DS_PROMETHEUS}",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "axisSoftMin": 0,
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "binBps"
+        }
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "id": 62,
+      "options": {
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
+        },
+        "legend": {
+          "calcs": [
+            "min",
+            "max",
+            "mean",
+            "last"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "sortBy": "Mean",
+          "sortDesc": true,
+          "width": 600
+        },
+        "tooltip": {
+          "hideZeros": true,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "13.0.1",
+      "targets": [
+        {
+          "datasource": "${DS_PROMETHEUS}",
+          "editorMode": "code",
+          "expr": "sum by(name) (\r\n  sum by(pool_id) (\r\n    rate(ceph_pool_wr_bytes[$__rate_interval])\r\n  )\r\n  * on(pool_id) group_left(name)\r\n  ceph_pool_metadata{name=~\"${pool:regex}\"}\r\n)",
+          "instant": false,
+          "legendFormat": "{{name}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Writes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "${DS_PROMETHEUS}",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "axisSoftMin": 0,
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "binBps"
+        }
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 12
+      },
+      "id": 63,
+      "options": {
+        "annotations": {
+          "clustering": -1,
+          "multiLane": false
+        },
+        "legend": {
+          "calcs": [
+            "min",
+            "max",
+            "mean",
+            "last"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "sortBy": "Mean",
+          "sortDesc": true,
+          "width": 600
+        },
+        "tooltip": {
+          "hideZeros": true,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "13.0.1",
+      "targets": [
+        {
+          "datasource": "${DS_PROMETHEUS}",
+          "editorMode": "code",
+          "expr": "sum by(name) (\r\n  sum by(pool_id) (\r\n    rate(ceph_pool_rd_bytes[$__rate_interval])\r\n  )\r\n  * on(pool_id) group_left(name)\r\n  ceph_pool_metadata{name=~\"${pool:regex}\"}\r\n)",
+          "instant": false,
+          "legendFormat": "{{name}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Reads",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
       "id": 28,
       "panels": [],
       "title": "CLUSTER STATS",
@@ -2131,7 +2357,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 12
+        "y": 33
       },
       "id": 29,
       "interval": "$interval",
@@ -2328,7 +2554,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 12
+        "y": 33
       },
       "id": 30,
       "interval": "$interval",
@@ -2354,7 +2580,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(irate(ceph_pool_wr{}[5m]))",
+          "expr": "sum(irate(ceph_pool_wr[5m]) * on (pool_id) group_left(name) ceph_pool_metadata{name=~\"${pool:regex}\"})",
           "format": "time_series",
           "interval": "$interval",
           "intervalFactor": 1,
@@ -2364,7 +2590,7 @@
         },
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(irate(ceph_pool_rd{}[5m]))",
+          "expr": "sum(irate(ceph_pool_rd[5m]) * on (pool_id) group_left(name) ceph_pool_metadata{name=~\"${pool:regex}\"})",
           "format": "time_series",
           "interval": "$interval",
           "intervalFactor": 1,
@@ -2439,7 +2665,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 12
+        "y": 33
       },
       "id": 31,
       "interval": "$interval",
@@ -2465,7 +2691,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(irate(ceph_pool_wr_bytes{}[5m]))",
+          "expr": "sum(irate(ceph_pool_wr_bytes[5m]) * on (pool_id) group_left(name) ceph_pool_metadata{name=~\"${pool:regex}\"})",
           "format": "time_series",
           "interval": "$interval",
           "intervalFactor": 1,
@@ -2475,7 +2701,7 @@
         },
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(irate(ceph_pool_rd_bytes{}[5m]))",
+          "expr": "sum(irate(ceph_pool_rd_bytes[5m]) * on (pool_id) group_left(name) ceph_pool_metadata{name=~\"${pool:regex}\"})",
           "format": "time_series",
           "interval": "$interval",
           "intervalFactor": 1,
@@ -2550,7 +2776,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 20
+        "y": 41
       },
       "id": 32,
       "options": {
@@ -2570,7 +2796,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "(ceph_pool_bytes_used{}) *on (pool_id) group_left(name)(ceph_pool_metadata{})",
+          "expr": "(ceph_pool_bytes_used{}) * on (pool_id) group_left(name) ceph_pool_metadata{name=~\"${pool:regex}\"}",
           "format": "time_series",
           "intervalFactor": 1,
           "legendFormat": "{{name}}",
@@ -2640,7 +2866,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 20
+        "y": 41
       },
       "id": 33,
       "options": {
@@ -2660,7 +2886,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "(ceph_pool_avail_raw{}) *on (pool_id) group_left(name)(ceph_pool_metadata{})",
+          "expr": "(ceph_pool_avail_raw{}) * on (pool_id) group_left(name) ceph_pool_metadata{name=~\"${pool:regex}\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -2670,7 +2896,7 @@
         },
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "(ceph_pool_stored_raw{}) *on (pool_id) group_left(name)(ceph_pool_metadata{})",
+          "expr": "(ceph_pool_stored_raw{}) * on (pool_id) group_left(name) ceph_pool_metadata{name=~\"${pool:regex}\"}",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -2745,7 +2971,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 20
+        "y": 41
       },
       "id": 34,
       "options": {
@@ -2765,7 +2991,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "(ceph_pool_objects{}) *on (pool_id) group_left(name)(ceph_pool_metadata{})",
+          "expr": "(ceph_pool_objects{}) * on (pool_id) group_left(name) ceph_pool_metadata{name=~\"${pool:regex}\"}",
           "format": "time_series",
           "intervalFactor": 1,
           "legendFormat": "{{name}}",
@@ -2838,7 +3064,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 28
+        "y": 49
       },
       "id": 35,
       "options": {
@@ -2858,7 +3084,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "(ceph_pool_quota_bytes{}) *on (pool_id) group_left(name)(ceph_pool_metadata{})",
+          "expr": "(ceph_pool_quota_bytes{}) * on (pool_id) group_left(name) ceph_pool_metadata{name=~\"${pool:regex}\"}",
           "format": "time_series",
           "intervalFactor": 1,
           "legendFormat": "{{name}}",
@@ -2931,7 +3157,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 28
+        "y": 49
       },
       "id": 36,
       "options": {
@@ -2951,7 +3177,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "(ceph_pool_quota_objects{}) *on (pool_id) group_left(name)(ceph_pool_metadata{})",
+          "expr": "(ceph_pool_quota_objects{}) * on (pool_id) group_left(name) ceph_pool_metadata{name=~\"${pool:regex}\"}",
           "format": "time_series",
           "intervalFactor": 1,
           "legendFormat": "{{name}}",
@@ -3024,7 +3250,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 28
+        "y": 49
       },
       "id": 37,
       "options": {
@@ -3061,7 +3287,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 35
+        "y": 56
       },
       "id": 38,
       "panels": [
@@ -3349,7 +3575,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 36
+        "y": 57
       },
       "id": 42,
       "panels": [
@@ -3819,7 +4045,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 37
+        "y": 58
       },
       "id": 48,
       "panels": [],
@@ -3905,7 +4131,7 @@
         "h": 12,
         "w": 6,
         "x": 0,
-        "y": 38
+        "y": 59
       },
       "id": 49,
       "options": {
@@ -3925,7 +4151,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(ceph_pool_objects)",
+          "expr": "sum(ceph_pool_objects * on (pool_id) group_left(name) ceph_pool_metadata{name=~\"${pool:regex}\"})",
           "format": "time_series",
           "interval": "$interval",
           "intervalFactor": 1,
@@ -4018,7 +4244,7 @@
         "h": 12,
         "w": 8,
         "x": 6,
-        "y": 38
+        "y": 59
       },
       "id": 50,
       "options": {
@@ -4336,7 +4562,7 @@
         "h": 6,
         "w": 10,
         "x": 14,
-        "y": 38
+        "y": 59
       },
       "id": 51,
       "options": {
@@ -4458,7 +4684,7 @@
         "h": 6,
         "w": 10,
         "x": 14,
-        "y": 44
+        "y": 65
       },
       "id": 52,
       "options": {
@@ -4478,7 +4704,7 @@
       "targets": [
         {
           "datasource": "${DS_PROMETHEUS}",
-          "expr": "sum(ceph_pool_recovering_objects_per_sec{})",
+          "expr": "sum(ceph_pool_recovering_objects_per_sec{} * on (pool_id) group_left(name) ceph_pool_metadata{name=~\"${pool:regex}\"})",
           "format": "time_series",
           "interval": "$interval",
           "intervalFactor": 1,
@@ -4496,7 +4722,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 50
+        "y": 71
       },
       "id": 53,
       "panels": [],
@@ -4524,7 +4750,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 51
+        "y": 72
       },
       "id": 54,
       "options": {
@@ -4612,7 +4838,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 51
+        "y": 72
       },
       "id": 55,
       "options": {
@@ -4699,7 +4925,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 59
+        "y": 80
       },
       "id": 56,
       "options": {
@@ -4787,7 +5013,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 59
+        "y": 80
       },
       "id": 57,
       "options": {
@@ -4917,7 +5143,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 67
+        "y": 88
       },
       "id": 58,
       "options": {
@@ -5018,7 +5244,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 67
+        "y": 88
       },
       "id": 59,
       "options": {
@@ -5071,7 +5297,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 74
+        "y": 95
       },
       "id": 60,
       "panels": [
@@ -5446,6 +5672,33 @@
         "refresh": 1,
         "regex": "",
         "type": "datasource"
+      },
+      {
+        "allValue": ".*",
+        "allowCustomValue": false,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": "${DS_PROMETHEUS}",
+        "definition": "label_values(ceph_pool_metadata,name)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Pool",
+        "multi": true,
+        "name": "pool",
+        "options": [],
+        "query": {
+          "qryType": 1,
+          "query": "label_values(ceph_pool_metadata,name)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "regexApplyTo": "value",
+        "skipUrlSync": false,
+        "sort": 0,
+        "type": "query"
       },
       {
         "auto": true,
