@@ -49,7 +49,7 @@ locals {
   prometheus_oauth2_proxy_cookie_name_value       = try(local.prometheus_oauth2_proxy_cookie_name, "_prometheus_oauth2_proxy")
   prometheus_oauth2_proxy_cpu_request_value       = try(local.prometheus_oauth2_proxy_cpu_request, "50m")
   prometheus_oauth2_proxy_cpu_limit_value         = try(local.prometheus_oauth2_proxy_cpu_limit, "200m")
-  prometheus_oauth2_proxy_mem_request_value       = try(local.prometheus_oauth2_proxy_mem_request, "64Mi")
+  prometheus_oauth2_proxy_mem_request_value       = try(local.prometheus_oauth2_proxy_mem_request, "256Mi")
   prometheus_oauth2_proxy_mem_limit_value         = try(local.prometheus_oauth2_proxy_mem_limit, "256Mi")
   prometheus_auth_ca_content                      = local.prometheus_auth_enabled ? try(file(local.root_ca_crt), "") : ""
   prometheus_auth_ca_enabled                      = trimspace(local.prometheus_auth_ca_content) != ""

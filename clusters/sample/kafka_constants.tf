@@ -40,6 +40,6 @@ locals {
 
   redpanda_console_cpu_request = "100m"
   redpanda_console_cpu_limit   = "500m"
-  redpanda_console_mem_request = "128Mi"
+  redpanda_console_mem_request = "256Mi"
   redpanda_console_mem_limit   = "256Mi"
 }

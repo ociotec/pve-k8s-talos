@@ -64,7 +64,7 @@ locals {
   prometheus_oauth2_proxy_cookie_name       = "_prometheus_oauth2_proxy"
   prometheus_oauth2_proxy_cpu_request       = "50m"
   prometheus_oauth2_proxy_cpu_limit         = "200m"
-  prometheus_oauth2_proxy_mem_request       = "64Mi"
+  prometheus_oauth2_proxy_mem_request       = "256Mi"
   prometheus_oauth2_proxy_mem_limit         = "256Mi"
   prometheus_api_basic_auth_secret_name     = "prometheus-api-basic-auth"
   prometheus_api_basic_auth_password_length = 32
@@ -84,26 +84,26 @@ locals {
 
   grafana_cpu_request = "100m"
   grafana_cpu_limit   = "500m"
-  grafana_mem_request = "256Mi"
-  grafana_mem_limit   = "1Gi"
+  grafana_mem_request = "768Mi"
+  grafana_mem_limit   = "768Mi"
 
   loki_cpu_request = "200m"
   loki_cpu_limit   = "1"
-  loki_mem_request = "512Mi"
+  loki_mem_request = "2Gi"
   loki_mem_limit   = "2Gi"
 
   promtail_cpu_request = "100m"
   promtail_cpu_limit   = "300m"
-  promtail_mem_request = "128Mi"
+  promtail_mem_request = "256Mi"
   promtail_mem_limit   = "256Mi"
 
   kube_state_metrics_cpu_request = "100m"
   kube_state_metrics_cpu_limit   = "300m"
-  kube_state_metrics_mem_request = "128Mi"
+  kube_state_metrics_mem_request = "256Mi"
   kube_state_metrics_mem_limit   = "256Mi"
   node_exporter_cpu_request      = "50m"
   node_exporter_cpu_limit        = "200m"
-  node_exporter_mem_request      = "64Mi"
+  node_exporter_mem_request      = "128Mi"
   node_exporter_mem_limit        = "128Mi"
 
   tls_secrets = [

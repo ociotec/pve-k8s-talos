@@ -369,6 +369,32 @@ locals {
         }
       })
     }
+    "cattle-turtles-system/rancher-turtles-controller-manager" = {
+      namespace = "cattle-turtles-system"
+      resource  = "deployment"
+      name      = "rancher-turtles-controller-manager"
+      patch = jsonencode({
+        spec = {
+          template = {
+            spec = {
+              containers = [{
+                name = "manager"
+                resources = {
+                  requests = {
+                    cpu    = "10m"
+                    memory = "256Mi"
+                  }
+                  limits = {
+                    cpu    = "500m"
+                    memory = "256Mi"
+                  }
+                }
+              }]
+            }
+          }
+        }
+      })
+    }
     "cattle-fleet-local-system/fleet-agent" = {
       namespace = "cattle-fleet-local-system"
       resource  = "deployment"

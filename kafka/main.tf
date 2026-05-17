@@ -111,7 +111,7 @@ locals {
   redpanda_config_renderer_mem_limit_value                = try(local.redpanda_config_renderer_mem_limit, "64Mi")
   redpanda_console_cpu_request_value                      = try(local.redpanda_console_cpu_request, "100m")
   redpanda_console_cpu_limit_value                        = try(local.redpanda_console_cpu_limit, "500m")
-  redpanda_console_mem_request_value                      = try(local.redpanda_console_mem_request, "256Mi")
+  redpanda_console_mem_request_value                      = try(local.redpanda_console_mem_request, "512Mi")
   redpanda_console_mem_limit_value                        = try(local.redpanda_console_mem_limit, "512Mi")
   redpanda_console_priority_class_name_value              = "infra-observability"
   redpanda_console_oauth2_proxy_priority_class_name_value = local.redpanda_console_priority_class_name_value
