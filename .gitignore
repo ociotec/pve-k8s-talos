@@ -47,3 +47,4 @@ monitoring/constants.tf
 !/clusters/sample/
 !/clusters/sample/**
 /docs/plans/**
+/docs/s3-storage-evaluation.pdf
