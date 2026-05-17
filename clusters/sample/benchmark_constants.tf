@@ -12,6 +12,9 @@ locals {
   benchmark_memory_gb       = 4
   benchmark_memory_cpu      = "250m"
   benchmark_memory_replicas = 0
+  # stress-ng allocates this percentage of the pod memory limit, leaving room
+  # for process overhead so the benchmark does not self-OOM.
+  benchmark_memory_stress_percent = 85
 
   # StatefulSet names include this rate, for example benchmark-disk-rbd-replica-10mbs.
   # Kubernetes does not expose a native PVC throughput request/limit; fio enforces

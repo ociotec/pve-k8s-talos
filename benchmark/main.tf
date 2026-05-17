@@ -29,12 +29,13 @@ locals {
   benchmark_cpu_worker_count   = max(1, floor(local.benchmark_cpu_vcpus_value))
   benchmark_cpu_workload_name  = format("benchmark-cpu-%dvcpus", local.benchmark_cpu_vcpus_value)
 
-  benchmark_memory_gb_value       = try(local.benchmark_memory_gb, 4)
-  benchmark_memory_cpu_value      = try(local.benchmark_memory_cpu, "250m")
-  benchmark_memory_replicas_value = try(local.benchmark_memory_replicas, 0)
-  benchmark_memory_bytes_value    = local.benchmark_memory_gb_value * 1024 * 1024 * 1024
-  benchmark_memory_stress_bytes   = floor(local.benchmark_memory_bytes_value * 9 / 10)
-  benchmark_memory_workload_name  = format("benchmark-memory-%dgb", local.benchmark_memory_gb_value)
+  benchmark_memory_gb_value             = try(local.benchmark_memory_gb, 4)
+  benchmark_memory_cpu_value            = try(local.benchmark_memory_cpu, "250m")
+  benchmark_memory_replicas_value       = try(local.benchmark_memory_replicas, 0)
+  benchmark_memory_stress_percent_value = try(local.benchmark_memory_stress_percent, 85)
+  benchmark_memory_bytes_value          = local.benchmark_memory_gb_value * 1024 * 1024 * 1024
+  benchmark_memory_stress_bytes         = floor(local.benchmark_memory_bytes_value * local.benchmark_memory_stress_percent_value / 100)
+  benchmark_memory_workload_name        = format("benchmark-memory-%dgb", local.benchmark_memory_gb_value)
 
   benchmark_disk_rate_mbs_value        = try(local.benchmark_disk_rate_mbs, 10)
   benchmark_disk_rate_value            = format("%dM", local.benchmark_disk_rate_mbs_value)
@@ -64,6 +65,13 @@ check "benchmark_memory_integer" {
   assert {
     condition     = local.benchmark_memory_gb_value == floor(local.benchmark_memory_gb_value)
     error_message = "benchmark_memory_gb must be an integer so it can be represented in the workload name."
+  }
+}
+
+check "benchmark_memory_stress_percent_range" {
+  assert {
+    condition     = local.benchmark_memory_stress_percent_value > 0 && local.benchmark_memory_stress_percent_value <= 100
+    error_message = "benchmark_memory_stress_percent must be greater than 0 and less than or equal to 100."
   }
 }
 
