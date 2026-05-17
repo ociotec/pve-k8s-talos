@@ -1275,7 +1275,7 @@ fi
 export TALOSCONFIG="${cluster_talosconfig_path}"
 active_kubeconfig_path="${cluster_kubeconfig_path}"
 bootstrap_kubeconfig_path=""
-if [[ -n "${controlplane_vip}" ]]; then
+if [[ "${services_only}" != "true" && -n "${controlplane_vip}" ]]; then
   primary_controlplane_ip="$(first_controlplane_ip)"
   if [[ -z "${primary_controlplane_ip}" ]]; then
     error "Failed to determine the first controlplane IP from vms.auto.tfvars." >&2
@@ -1288,25 +1288,29 @@ if [[ -n "${controlplane_vip}" ]]; then
   active_kubeconfig_path="${bootstrap_kubeconfig_path}"
 fi
 export KUBECONFIG="${active_kubeconfig_path}"
-worker_ip="$(first_worker_ip)"
-if [[ -z "${worker_ip}" ]]; then
-  error "Failed to determine the first worker name/IP from vms.auto.tfvars." >&2
-  exit 1
+if [[ "${services_only}" == "true" ]]; then
+  message "Services-only requested; skipping Talos disk, version, and kubelet settings preflight checks."
+else
+  worker_ip="$(first_worker_ip)"
+  if [[ -z "${worker_ip}" ]]; then
+    error "Failed to determine the first worker name/IP from vms.auto.tfvars." >&2
+    exit 1
+  fi
+  prefix_value="$(disk_by_id_prefix "${cluster_constants_path}")"
+  validate_disk_by_id_prefix "${worker_ip}" "${prefix_value}"
+  if [[ -n "${controlplane_vip}" ]]; then
+    wait_for_k8s_api_ready "${controlplane_vip}" "120"
+    set_kubeconfig_server "${cluster_kubeconfig_path}" "${controlplane_vip}"
+    active_kubeconfig_path="${cluster_kubeconfig_path}"
+    export KUBECONFIG="${active_kubeconfig_path}"
+    rm -f "${bootstrap_kubeconfig_path}"
+    bootstrap_kubeconfig_path=""
+  fi
+  wait_for_kubernetes_version_convergence "${cluster_constants_path}"
+  reboot_nodes_with_pending_kubelet_max_pods "${cluster_constants_path}"
+  message "k8s cluster is up and running. Current nodes:"
+  "${script_dir}/render-k8s-nodes.sh" --kubeconfig "${active_kubeconfig_path}"
 fi
-prefix_value="$(disk_by_id_prefix "${cluster_constants_path}")"
-validate_disk_by_id_prefix "${worker_ip}" "${prefix_value}"
-if [[ -n "${controlplane_vip}" ]]; then
-  wait_for_k8s_api_ready "${controlplane_vip}" "120"
-  set_kubeconfig_server "${cluster_kubeconfig_path}" "${controlplane_vip}"
-  active_kubeconfig_path="${cluster_kubeconfig_path}"
-  export KUBECONFIG="${active_kubeconfig_path}"
-  rm -f "${bootstrap_kubeconfig_path}"
-  bootstrap_kubeconfig_path=""
-fi
-wait_for_kubernetes_version_convergence "${cluster_constants_path}"
-reboot_nodes_with_pending_kubelet_max_pods "${cluster_constants_path}"
-message "k8s cluster is up and running. Current nodes:"
-"${script_dir}/render-k8s-nodes.sh" --kubeconfig "${active_kubeconfig_path}"
 
 if [[ "${skip_k8s_net}" == "true" ]]; then
   message "Skipping k8s networking and ingress (k8s-net) steps."

@@ -93,18 +93,106 @@ locals {
     local.redpanda_console_oauth2_proxy_trusted_proxy_ips,
     []
   )))
-  redpanda_console_auth_ca_secret_name_value              = try(local.redpanda_console_auth_ca_secret_name, "redpanda-console-oauth-ca")
-  redpanda_console_auth_ca_content                        = local.redpanda_console_auth_enabled ? try(file(local.root_ca_crt), "") : ""
-  redpanda_console_auth_ca_enabled                        = trimspace(local.redpanda_console_auth_ca_content) != ""
-  redpanda_broker_cpu_request_value                       = try(local.redpanda_broker_cpu_request, "2")
-  redpanda_broker_cpu_limit_value                         = try(local.redpanda_broker_cpu_limit, "2500m")
-  redpanda_broker_mem_request_value                       = try(local.redpanda_broker_mem_request, "5Gi")
-  redpanda_broker_mem_limit_value                         = try(local.redpanda_broker_mem_limit, "5Gi")
-  redpanda_broker_priority_class_name_value               = "infra-critical"
-  redpanda_broker_pdb_min_available_value                 = 2
-  redpanda_enable_smp_memory_flags_value                  = try(local.redpanda_enable_smp_memory_flags, true)
-  redpanda_smp_value                                      = try(local.redpanda_smp, 2)
-  redpanda_memory_value                                   = try(local.redpanda_memory, "4Gi")
+  redpanda_console_auth_ca_secret_name_value = try(local.redpanda_console_auth_ca_secret_name, "redpanda-console-oauth-ca")
+  redpanda_console_auth_ca_content           = local.redpanda_console_auth_enabled ? try(file(local.root_ca_crt), "") : ""
+  redpanda_console_auth_ca_enabled           = trimspace(local.redpanda_console_auth_ca_content) != ""
+  redpanda_broker_cpu_request_value          = try(local.redpanda_broker_cpu_request, "2")
+  redpanda_broker_cpu_limit_value            = try(local.redpanda_broker_cpu_limit, "2500m")
+  redpanda_broker_mem_request_value          = try(local.redpanda_broker_mem_request, "5Gi")
+  redpanda_broker_mem_limit_value            = try(local.redpanda_broker_mem_limit, "5Gi")
+  redpanda_broker_priority_class_name_value  = "infra-critical"
+  redpanda_broker_pdb_min_available_value    = 2
+  redpanda_enable_smp_memory_flags_value     = try(local.redpanda_enable_smp_memory_flags, true)
+  redpanda_smp_value                         = try(local.redpanda_smp, 2)
+  redpanda_memory_value                      = try(local.redpanda_memory, "4Gi")
+  redpanda_cluster_config_raw = merge(
+    {
+      core_balancing_continuous    = false
+      partition_autobalancing_mode = "node_add"
+    },
+    try(local.redpanda_cluster_config, {})
+  )
+  redpanda_cluster_config_percent_like_keys = toset([
+    for key, _ in local.redpanda_cluster_config_raw : key
+    if length(regexall("(^|_)(percent|percentage)($|_)", key)) > 0
+  ])
+  redpanda_cluster_config_time_ms_keys = toset([
+    for key, _ in local.redpanda_cluster_config_raw : key
+    if length(regexall("_ms$", key)) > 0
+  ])
+  redpanda_cluster_config_time_sec_keys = toset([
+    for key, _ in local.redpanda_cluster_config_raw : key
+    if length(regexall("_(sec|seconds)$", key)) > 0
+  ])
+  redpanda_cluster_config_byte_like_key_exceptions = toset([
+    "abort_index_segment_size",
+  ])
+  redpanda_cluster_config_explicit_byte_like_keys = toset([
+    "topic_memory_per_partition",
+  ])
+  redpanda_cluster_config_byte_like_keys = toset([
+    for key, _ in local.redpanda_cluster_config_raw : key
+    if(
+      !contains(local.redpanda_cluster_config_percent_like_keys, key) &&
+      !contains(local.redpanda_cluster_config_byte_like_key_exceptions, key) &&
+      (
+        length(regexall("(^|_)bytes($|_)", key)) > 0 ||
+        length(regexall("_size", key)) > 0 ||
+        contains(local.redpanda_cluster_config_explicit_byte_like_keys, key)
+      )
+    )
+  ])
+  redpanda_cluster_config_percent_values = {
+    for key, value in local.redpanda_cluster_config_raw : key => tonumber(regex("^\\s*([0-9]+(?:\\.[0-9]+)?)%\\s*$", tostring(value))[0])
+    if contains(local.redpanda_cluster_config_percent_like_keys, key) && can(regex("^\\s*([0-9]+(?:\\.[0-9]+)?)%\\s*$", tostring(value)))
+  }
+  redpanda_cluster_config_ms_values = {
+    for key, value in local.redpanda_cluster_config_raw : key => tonumber(regex("^\\s*([0-9]+)\\s*([smhd])\\s*$", lower(tostring(value)))[0]) * lookup({
+      s = 1000
+      m = 60000
+      h = 3600000
+      d = 86400000
+    }, regex("^\\s*([0-9]+)\\s*([smhd])\\s*$", lower(tostring(value)))[1])
+    if contains(local.redpanda_cluster_config_time_ms_keys, key) && can(regex("^\\s*([0-9]+)\\s*([smhd])\\s*$", lower(tostring(value))))
+  }
+  redpanda_cluster_config_sec_values = {
+    for key, value in local.redpanda_cluster_config_raw : key => tonumber(regex("^\\s*([0-9]+)\\s*([smhd])\\s*$", lower(tostring(value)))[0]) * lookup({
+      s = 1
+      m = 60
+      h = 3600
+      d = 86400
+    }, regex("^\\s*([0-9]+)\\s*([smhd])\\s*$", lower(tostring(value)))[1])
+    if contains(local.redpanda_cluster_config_time_sec_keys, key) && can(regex("^\\s*([0-9]+)\\s*([smhd])\\s*$", lower(tostring(value))))
+  }
+  redpanda_cluster_config_byte_values = {
+    for key, value in local.redpanda_cluster_config_raw : key => tonumber(regex("^\\s*([0-9]+)\\s*([kmg])\\s*$", lower(tostring(value)))[0]) * lookup({
+      k = 1024
+      m = 1048576
+      g = 1073741824
+    }, regex("^\\s*([0-9]+)\\s*([kmg])\\s*$", lower(tostring(value)))[1])
+    if contains(local.redpanda_cluster_config_byte_like_keys, key) && can(regex("^\\s*([0-9]+)\\s*([kmg])\\s*$", lower(tostring(value))))
+  }
+  redpanda_cluster_config_normalized = {
+    for key, value in local.redpanda_cluster_config_raw : key => try(
+      local.redpanda_cluster_config_percent_values[key],
+      local.redpanda_cluster_config_ms_values[key],
+      local.redpanda_cluster_config_sec_values[key],
+      local.redpanda_cluster_config_byte_values[key],
+      value
+    )
+  }
+  redpanda_cluster_config_rpk_values = {
+    for key, value in local.redpanda_cluster_config_normalized : key => value == null ? "null" : try(tostring(value), jsonencode(value))
+  }
+  redpanda_cluster_config_set_commands = join("\n", [
+    for key in sort(keys(local.redpanda_cluster_config_rpk_values)) : format(
+      "kubectl -n %s exec %s-0 -- rpk cluster config set --no-confirm -- %s '%s'",
+      local.redpanda_namespace_value,
+      local.redpanda_resource_name_value,
+      key,
+      replace(local.redpanda_cluster_config_rpk_values[key], "'", "'\"'\"'")
+    )
+  ])
   redpanda_config_renderer_cpu_request_value              = try(local.redpanda_config_renderer_cpu_request, "50m")
   redpanda_config_renderer_cpu_limit_value                = try(local.redpanda_config_renderer_cpu_limit, "200m")
   redpanda_config_renderer_mem_request_value              = try(local.redpanda_config_renderer_mem_request, "64Mi")
@@ -160,12 +248,8 @@ locals {
   broker_seed_servers_yaml = join("\n", [
     for broker_dns_name in local.broker_dns_names : format("    - host:\n        address: %s\n        port: 33145", broker_dns_name)
   ])
-  broker_bootstrap_config = {
-    cluster_id                   = local.redpanda_cluster_id_value
-    core_balancing_continuous    = "false"
-    partition_autobalancing_mode = "node_add"
-  }
-  broker_bootstrap_yaml = yamlencode(local.broker_bootstrap_config)
+  broker_bootstrap_config = merge({ cluster_id = local.redpanda_cluster_id_value }, local.redpanda_cluster_config_normalized)
+  broker_bootstrap_yaml   = yamlencode(local.broker_bootstrap_config)
   broker_start_flags = local.redpanda_enable_smp_memory_flags_value ? [
     format("--smp=%s", tostring(local.redpanda_smp_value)),
     format("--memory=%s", local.redpanda_memory_value),
@@ -861,11 +945,10 @@ resource "null_resource" "community_feature_config" {
   count = 1
 
   triggers = {
-    namespace                    = local.redpanda_namespace_value
-    resource_name                = local.redpanda_resource_name_value
-    core_balancing_continuous    = "false"
-    partition_autobalancing_mode = "node_add"
-    kubeconfig_path              = abspath("${path.module}/${var.kubeconfig_path}")
+    namespace       = local.redpanda_namespace_value
+    resource_name   = local.redpanda_resource_name_value
+    cluster_config  = jsonencode(local.redpanda_cluster_config_normalized)
+    kubeconfig_path = abspath("${path.module}/${var.kubeconfig_path}")
   }
 
   provisioner "local-exec" {
@@ -874,8 +957,7 @@ resource "null_resource" "community_feature_config" {
       set -euo pipefail
       export KUBECONFIG="${self.triggers.kubeconfig_path}"
       kubectl -n "${self.triggers.namespace}" rollout status statefulset/"${self.triggers.resource_name}" --timeout=900s
-      kubectl -n "${self.triggers.namespace}" exec "${self.triggers.resource_name}-0" -- rpk cluster config set partition_autobalancing_mode "${self.triggers.partition_autobalancing_mode}"
-      kubectl -n "${self.triggers.namespace}" exec "${self.triggers.resource_name}-0" -- rpk cluster config set core_balancing_continuous "${self.triggers.core_balancing_continuous}"
+      ${local.redpanda_cluster_config_set_commands}
     EOT
   }
 
