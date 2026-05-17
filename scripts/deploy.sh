@@ -317,6 +317,79 @@ run_tofu_init() {
   return 1
 }
 
+kubernetes_resource_version() {
+  local namespace="$1"
+  local resource_type="$2"
+  local resource_name="$3"
+  local resource_version
+
+  resource_version="$(
+    kubectl -n "${namespace}" get "${resource_type}" "${resource_name}" \
+      -o jsonpath='{.metadata.resourceVersion}' 2>/dev/null || true
+  )"
+  printf "%s" "${resource_version}"
+}
+
+kubernetes_configmap_key_sha256() {
+  local namespace="$1"
+  local configmap_name="$2"
+  local key="$3"
+  local content
+
+  content="$(
+    kubectl -n "${namespace}" get configmap "${configmap_name}" \
+      -o "go-template={{ index .data \"${key}\" }}" 2>/dev/null || true
+  )"
+  if [[ -z "${content}" ]]; then
+    printf ""
+    return 0
+  fi
+
+  printf "%s" "${content}" | sha256sum | awk '{ print $1 }'
+}
+
+kubernetes_resource_changed() {
+  local before="$1"
+  local after="$2"
+
+  [[ -n "${before}" && -n "${after}" && "${before}" != "${after}" ]]
+}
+
+wait_for_prometheus_config_hash() {
+  local expected_hash="$1"
+  local timeout_seconds="$2"
+  local start
+  local pod
+  local mounted_hash
+
+  start="$(date +%s)"
+  while true; do
+    pod="$(
+      kubectl -n monitoring get pods -l app=prometheus \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true
+    )"
+    if [[ -n "${pod}" ]]; then
+      mounted_hash="$(
+        kubectl -n monitoring exec "${pod}" -- sha256sum /etc/prometheus/prometheus.yml 2>/dev/null \
+          | awk '{ print $1 }' || true
+      )"
+      if [[ "${mounted_hash}" == "${expected_hash}" ]]; then
+        return 0
+      fi
+    fi
+
+    if (( $(date +%s) - start >= timeout_seconds )); then
+      error "Timed out waiting for Prometheus to observe the updated ConfigMap." >&2
+      return 1
+    fi
+    sleep 5
+  done
+}
+
+reload_prometheus_config() {
+  kubectl -n monitoring exec deploy/prometheus -- sh -ec 'kill -HUP 1' 1>/dev/null
+}
+
 prepare_k8s_net_workspace() {
   local workspace="${cluster_k8s_net_workspace}"
 
@@ -1398,26 +1471,43 @@ else
   prepare_monitoring_workspace
   message "Deploying monitoring stack..."
   run_tofu_init "${cluster_monitoring_workspace}"
+  monitoring_prometheus_config_hash_before=""
+  monitoring_grafana_datasources_rv_before=""
+  monitoring_grafana_dashboard_provider_rv_before=""
   if kubectl get namespace monitoring >/dev/null 2>&1; then
-    monitoring_existing_restart_deployments=()
-    for deployment in grafana grafana-postgres loki prometheus kube-state-metrics prometheus-oauth2-proxy; do
-      if kubectl -n monitoring get deploy "${deployment}" >/dev/null 2>&1; then
-        monitoring_existing_restart_deployments+=("${deployment}")
-      fi
-    done
-    if [[ "${#monitoring_existing_restart_deployments[@]}" -gt 0 ]]; then
-      for deployment in "${monitoring_existing_restart_deployments[@]}"; do
-        kubectl -n monitoring patch deploy "${deployment}" --type=json \
-          -p='[{"op":"remove","path":"/spec/template/metadata/annotations/kubectl.kubernetes.io~1restartedAt"}]' \
-          1>/dev/null 2>&1 || true
-      done
-    fi
+    monitoring_prometheus_config_hash_before="$(
+      kubernetes_configmap_key_sha256 "monitoring" "prometheus-config" "prometheus.yml"
+    )"
+    monitoring_grafana_datasources_rv_before="$(
+      kubernetes_resource_version "monitoring" "configmap" "grafana-datasources"
+    )"
+    monitoring_grafana_dashboard_provider_rv_before="$(
+      kubernetes_resource_version "monitoring" "configmap" "grafana-dashboard-provider"
+    )"
   fi
   run tofu -chdir="${cluster_monitoring_workspace}" apply -auto-approve
-  message "Restarting Prometheus to reload scrape configuration..."
-  kubectl -n monitoring rollout restart deploy/prometheus 1>/dev/null
-  message "Restarting Grafana to reload provisioned dashboards..."
-  kubectl -n monitoring rollout restart deploy/grafana 1>/dev/null
+  monitoring_prometheus_config_hash_after="$(
+    kubernetes_configmap_key_sha256 "monitoring" "prometheus-config" "prometheus.yml"
+  )"
+  monitoring_grafana_datasources_rv_after="$(
+    kubernetes_resource_version "monitoring" "configmap" "grafana-datasources"
+  )"
+  monitoring_grafana_dashboard_provider_rv_after="$(
+    kubernetes_resource_version "monitoring" "configmap" "grafana-dashboard-provider"
+  )"
+  monitoring_prometheus_config_changed=false
+  monitoring_grafana_restart_needed=false
+  if kubernetes_resource_changed "${monitoring_prometheus_config_hash_before}" "${monitoring_prometheus_config_hash_after}"; then
+    monitoring_prometheus_config_changed=true
+  fi
+  if kubernetes_resource_changed "${monitoring_grafana_datasources_rv_before}" "${monitoring_grafana_datasources_rv_after}" \
+    || kubernetes_resource_changed "${monitoring_grafana_dashboard_provider_rv_before}" "${monitoring_grafana_dashboard_provider_rv_after}"; then
+    monitoring_grafana_restart_needed=true
+  fi
+  if [[ "${monitoring_grafana_restart_needed}" == "true" ]]; then
+    message "Restarting Grafana to reload datasource or dashboard provisioning configuration..."
+    kubectl -n monitoring rollout restart deploy/grafana 1>/dev/null
+  fi
   message "Waiting for monitoring PVCs, workloads, and endpoints to become ready..."
   monitoring_deployments=(grafana-postgres grafana loki prometheus kube-state-metrics)
   monitoring_daemonsets=(node-exporter promtail)
@@ -1443,6 +1533,11 @@ else
   )"
   if [[ -n "${grafana_dashboard_sync_job}" ]]; then
     wait_for_job_complete "monitoring" "${grafana_dashboard_sync_job}" "600"
+  fi
+  if [[ "${monitoring_prometheus_config_changed}" == "true" ]]; then
+    message "Reloading Prometheus scrape configuration..."
+    wait_for_prometheus_config_hash "${monitoring_prometheus_config_hash_after}" "120"
+    reload_prometheus_config
   fi
   grafana_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw grafana_url)"
   prometheus_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw prometheus_url)"
