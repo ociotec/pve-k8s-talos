@@ -171,6 +171,10 @@ resource "kubernetes_manifest" "cpu_deployment" {
     }
   }
 
+  field_manager {
+    force_conflicts = true
+  }
+
   depends_on = [
     kubernetes_manifest.namespace,
     kubernetes_manifest.priority_class,
@@ -234,6 +238,10 @@ resource "kubernetes_manifest" "memory_deployment" {
         }
       }
     }
+  }
+
+  field_manager {
+    force_conflicts = true
   }
 
   depends_on = [
@@ -371,6 +379,10 @@ resource "kubernetes_manifest" "disk_statefulset" {
   computed_fields = [
     "spec.volumeClaimTemplates[0].metadata.creationTimestamp",
   ]
+
+  field_manager {
+    force_conflicts = true
+  }
 
   depends_on = [
     kubernetes_manifest.namespace,
