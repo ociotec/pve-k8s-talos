@@ -38,7 +38,7 @@ spec:
               port: metrics
               scheme: HTTP
             periodSeconds: 10
-            timeoutSeconds: 5
+            timeoutSeconds: 8
             successThreshold: 1
             failureThreshold: 3
           livenessProbe:
@@ -47,7 +47,7 @@ spec:
               port: metrics
               scheme: HTTP
             periodSeconds: 30
-            timeoutSeconds: 5
+            timeoutSeconds: 8
             successThreshold: 1
             failureThreshold: 3
           resources:

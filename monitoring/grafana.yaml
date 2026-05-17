@@ -67,7 +67,7 @@ spec:
                 - -p
                 - "5432"
             periodSeconds: 5
-            timeoutSeconds: 1
+            timeoutSeconds: 2
             successThreshold: 1
             failureThreshold: 30
           readinessProbe:
@@ -79,7 +79,7 @@ spec:
                 - -p
                 - "5432"
             periodSeconds: 10
-            timeoutSeconds: 1
+            timeoutSeconds: 2
             successThreshold: 1
             failureThreshold: 3
           livenessProbe:
@@ -91,7 +91,7 @@ spec:
                 - -p
                 - "5432"
             periodSeconds: 30
-            timeoutSeconds: 1
+            timeoutSeconds: 2
             successThreshold: 1
             failureThreshold: 3
           env:
@@ -131,7 +131,7 @@ spec:
               port: metrics
               scheme: HTTP
             periodSeconds: 10
-            timeoutSeconds: 1
+            timeoutSeconds: 2
             successThreshold: 1
             failureThreshold: 3
           livenessProbe:
@@ -140,7 +140,7 @@ spec:
               port: metrics
               scheme: HTTP
             periodSeconds: 30
-            timeoutSeconds: 1
+            timeoutSeconds: 2
             successThreshold: 1
             failureThreshold: 3
           env:
@@ -278,7 +278,7 @@ spec:
               port: monitoring
               scheme: HTTP
             periodSeconds: 5
-            timeoutSeconds: 1
+            timeoutSeconds: 2
             successThreshold: 1
             failureThreshold: 60
           readinessProbe:
@@ -287,7 +287,7 @@ spec:
               port: monitoring
               scheme: HTTP
             periodSeconds: 10
-            timeoutSeconds: 1
+            timeoutSeconds: 2
             successThreshold: 1
             failureThreshold: 3
           livenessProbe:
@@ -296,7 +296,7 @@ spec:
               port: monitoring
               scheme: HTTP
             periodSeconds: 30
-            timeoutSeconds: 1
+            timeoutSeconds: 2
             successThreshold: 1
             failureThreshold: 3
           resources:
