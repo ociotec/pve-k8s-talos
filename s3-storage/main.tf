@@ -165,6 +165,11 @@ locals {
   compression_level = 2
   rpc_bind_addr = "[::]:3901"
 
+  [kubernetes_discovery]
+  namespace = "${local.s3_namespace_value}"
+  service_name = "${local.garage_name_value}"
+  skip_crd = true
+
   [s3_api]
   api_bind_addr = "[::]:3900"
   s3_region = "${local.garage_s3_region_value}"
@@ -379,6 +384,65 @@ resource "kubernetes_manifest" "namespace" {
   }
 }
 
+resource "kubernetes_manifest" "garage_node_crd" {
+  manifest = {
+    apiVersion = "apiextensions.k8s.io/v1"
+    kind       = "CustomResourceDefinition"
+    metadata = {
+      name = "garagenodes.deuxfleurs.fr"
+    }
+    spec = {
+      conversion = {
+        strategy = "None"
+      }
+      group = "deuxfleurs.fr"
+      names = {
+        kind     = "GarageNode"
+        listKind = "GarageNodeList"
+        plural   = "garagenodes"
+        singular = "garagenode"
+      }
+      scope = "Namespaced"
+      versions = [
+        {
+          name = "v1"
+          schema = {
+            openAPIV3Schema = {
+              description = "Auto-generated derived type for Node via `CustomResource`"
+              properties = {
+                spec = {
+                  properties = {
+                    address = {
+                      format = "ip"
+                      type   = "string"
+                    }
+                    hostname = {
+                      type = "string"
+                    }
+                    port = {
+                      format  = "uint16"
+                      minimum = 0
+                      type    = "integer"
+                    }
+                  }
+                  required = ["address", "hostname", "port"]
+                  type     = "object"
+                }
+              }
+              required = ["spec"]
+              title    = "GarageNode"
+              type     = "object"
+            }
+          }
+          served       = true
+          storage      = true
+          subresources = {}
+        },
+      ]
+    }
+  }
+}
+
 resource "kubernetes_secret_v1" "garage_secrets" {
   metadata {
     name      = "garage-secrets"
@@ -493,11 +557,62 @@ resource "kubernetes_manifest" "service_account" {
       name      = local.garage_name_value
       namespace = local.s3_namespace_value
     }
-    automountServiceAccountToken = false
+    automountServiceAccountToken = true
   }
 
   depends_on = [
     kubernetes_manifest.namespace,
+  ]
+}
+
+resource "kubernetes_manifest" "garage_discovery_role" {
+  manifest = {
+    apiVersion = "rbac.authorization.k8s.io/v1"
+    kind       = "Role"
+    metadata = {
+      name      = "${local.garage_name_value}-discovery"
+      namespace = local.s3_namespace_value
+    }
+    rules = [
+      {
+        apiGroups = ["deuxfleurs.fr"]
+        resources = ["garagenodes"]
+        verbs     = ["get", "list", "watch", "create", "update", "patch", "delete"]
+      },
+    ]
+  }
+
+  depends_on = [
+    kubernetes_manifest.namespace,
+    kubernetes_manifest.garage_node_crd,
+  ]
+}
+
+resource "kubernetes_manifest" "garage_discovery_role_binding" {
+  manifest = {
+    apiVersion = "rbac.authorization.k8s.io/v1"
+    kind       = "RoleBinding"
+    metadata = {
+      name      = "${local.garage_name_value}-discovery"
+      namespace = local.s3_namespace_value
+    }
+    subjects = [
+      {
+        kind      = "ServiceAccount"
+        name      = local.garage_name_value
+        namespace = local.s3_namespace_value
+      },
+    ]
+    roleRef = {
+      apiGroup = "rbac.authorization.k8s.io"
+      kind     = "Role"
+      name     = "${local.garage_name_value}-discovery"
+    }
+  }
+
+  depends_on = [
+    kubernetes_manifest.garage_discovery_role,
+    kubernetes_manifest.service_account,
   ]
 }
 
@@ -609,14 +724,15 @@ resource "kubernetes_manifest" "statefulset" {
             app = local.garage_name_value
           }
           annotations = {
-            "prometheus.io/scrape" = "true"
-            "prometheus.io/port"   = "3903"
-            "prometheus.io/path"   = "/metrics"
+            "checksum/garage-config" = sha256(local.garage_config_toml)
+            "prometheus.io/scrape"   = "true"
+            "prometheus.io/port"     = "3903"
+            "prometheus.io/path"     = "/metrics"
           }
         }
         spec = {
           serviceAccountName            = local.garage_name_value
-          automountServiceAccountToken  = false
+          automountServiceAccountToken  = true
           terminationGracePeriodSeconds = 60
           priorityClassName             = "infra-critical"
           securityContext = {
@@ -779,6 +895,8 @@ resource "kubernetes_manifest" "statefulset" {
     kubernetes_manifest.service_account,
     kubernetes_manifest.config,
     kubernetes_secret_v1.garage_secrets,
+    kubernetes_manifest.garage_node_crd,
+    kubernetes_manifest.garage_discovery_role_binding,
     kubernetes_manifest.storage_class,
     kubernetes_manifest.pv,
     kubernetes_manifest.headless_service,
