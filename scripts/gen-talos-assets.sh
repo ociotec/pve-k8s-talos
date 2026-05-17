@@ -9,6 +9,7 @@ cluster_arg=""
 skip_ceph=false
 skip_k8s_net=false
 skip_identity=false
+skip_s3_storage=false
 skip_platform=false
 skip_kafka=false
 skip_monitoring=false
@@ -36,6 +37,10 @@ while [[ $# -gt 0 ]]; do
       skip_identity=true
       shift
       ;;
+    --skip-s3-storage)
+      skip_s3_storage=true
+      shift
+      ;;
     --skip-platform|--skip-portainer)
       skip_platform=true
       shift
@@ -61,6 +66,7 @@ Options:
   --skip-ceph         Exclude Rook Ceph hostnames from generated no_proxy values.
   --skip-k8s-net      Exclude k8s-net ingress IP/hostnames from generated no_proxy values.
   --skip-identity     Exclude identity hostnames from generated no_proxy values.
+  --skip-s3-storage   Exclude S3 storage hostnames from generated no_proxy values.
   --skip-platform     Exclude platform hostnames from generated no_proxy values.
   --skip-portainer    Deprecated alias for --skip-platform.
   --skip-kafka        Exclude Kafka/Redpanda hostnames from generated no_proxy values.
@@ -946,6 +952,15 @@ if [[ -n "${proxy_url}" ]]; then
     )
   fi
 
+  s3_storage_constants_path="${cluster_s3_storage_constants_path}"
+  if [[ "${skip_s3_storage}" != "true" && -r "${s3_storage_constants_path}" && -n "${k8s_net_domain}" ]]; then
+    while IFS= read -r hostname; do
+      add_no_proxy_entry "${hostname}"
+    done < <(
+      awk -v domain="${k8s_net_domain}" -F'"' '/garage_(s3|console)_hostname[[:space:]]*=/{val=$2; gsub("\\$\\{local.domain\\}", domain, val); print val}' "${s3_storage_constants_path}"
+    )
+  fi
+
   kafka_constants_path="${cluster_kafka_constants_path}"
   if [[ "${skip_kafka}" != "true" && -r "${kafka_constants_path}" && -n "${k8s_net_domain}" ]]; then
     while IFS= read -r hostname; do
@@ -1362,7 +1377,14 @@ done < <(
       sub(/^[^"]*"/, "", current)
       sub(/".*/, "", current)
       in_block = 1
+      block_depth = 1
       next
+    }
+    in_block {
+      raw = $0
+      gsub(/#.*/, "", raw)
+      opened = gsub(/{/, "{", raw)
+      closed = gsub(/}/, "}", raw)
     }
     in_block && match($0, /disks[[:space:]]*=/) { in_disks = 1 }
     in_block && in_disks {
@@ -1394,9 +1416,11 @@ done < <(
           print current "|" size "|" mount
         }
       }
-      next
     }
-    in_block && /}/ { in_block = 0 }
+    in_block {
+      block_depth += opened - closed
+      if (block_depth <= 0) { in_block = 0 }
+    }
   ' "${resources_path}"
 )
 

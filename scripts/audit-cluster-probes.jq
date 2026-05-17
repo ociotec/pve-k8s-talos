@@ -1,6 +1,7 @@
 def section_for($ns):
   if $ns == "identity" then "identity"
   elif $ns == "monitoring" then "monitoring"
+  elif $ns == "s3" then "s3-storage"
   elif $ns == "rook-ceph" then "rook"
   elif ($ns | test("^(cert-manager|metallb-system|ingress-nginx|kube-system)$")) then "k8s-net"
   elif ($ns | test("^(cattle-system|portainer)$")) then "platform"

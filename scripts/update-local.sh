@@ -225,6 +225,7 @@ if [[ "${update_hosts}" == "true" ]]; then
 
   monitoring_constants="${cluster_monitoring_constants_path}"
   identity_constants="${cluster_identity_constants_path}"
+  s3_storage_constants="${cluster_s3_storage_constants_path}"
   platform_constants="${cluster_platform_constants_path}"
   k8s_net_hostnames="$(awk -v domain="${domain}" -F'"' '/_hostname[[:space:]]*=/{val=$2; gsub("\\$\\{local.domain\\}", domain, val); print val}' "${constants_path}")"
   monitoring_hostnames=""
@@ -235,14 +236,18 @@ if [[ "${update_hosts}" == "true" ]]; then
   if [[ -r "${identity_constants}" ]]; then
     identity_hostnames="$(awk -v domain="${domain}" -F'"' '/_hostname[[:space:]]*=/{val=$2; gsub("\\$\\{local.domain\\}", domain, val); print val}' "${identity_constants}")"
   fi
+  s3_storage_hostnames=""
+  if [[ -r "${s3_storage_constants}" ]]; then
+    s3_storage_hostnames="$(awk -v domain="${domain}" -F'"' '/garage_(s3|console)_hostname[[:space:]]*=/{val=$2; gsub("\\$\\{local.domain\\}", domain, val); print val}' "${s3_storage_constants}")"
+  fi
   platform_hostnames=""
   if [[ -r "${platform_constants}" ]]; then
     platform_hostnames="$(awk -v domain="${domain}" -F'"' '/_hostname[[:space:]]*=/{val=$2; gsub("\\$\\{local.domain\\}", domain, val); print val}' "${platform_constants}")"
   fi
 
-  hostnames="$(printf "%s\n%s\n%s\n%s\n" "${k8s_net_hostnames}" "${monitoring_hostnames}" "${identity_hostnames}" "${platform_hostnames}" | awk 'NF' | sort -u)"
+  hostnames="$(printf "%s\n%s\n%s\n%s\n%s\n" "${k8s_net_hostnames}" "${monitoring_hostnames}" "${identity_hostnames}" "${s3_storage_hostnames}" "${platform_hostnames}" | awk 'NF' | sort -u)"
   if [[ -z "${hostnames}" ]]; then
-    error "No hostnames found in ${constants_path}, ${monitoring_constants}, ${identity_constants}, or ${platform_constants}."
+    error "No hostnames found in ${constants_path}, ${monitoring_constants}, ${identity_constants}, ${s3_storage_constants}, or ${platform_constants}."
     exit 1
   fi
 

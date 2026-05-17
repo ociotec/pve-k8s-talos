@@ -84,10 +84,10 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
     `infra-observability` (`700000000`). These sit below Kubernetes
     `system-*` and Rancher priorities, and above normal application pods.
   - Repository workloads use these priorities directly in shared manifests:
-    Keycloak and Redpanda brokers use `infra-critical`; cert-manager,
+    Garage, Keycloak, and Redpanda brokers use `infra-critical`; cert-manager,
     MetalLB, ingress-nginx, and the Rook operator use `infra-high`;
-    Grafana, Prometheus, Loki, exporters, Portainer, Redpanda Console, and
-    operational tool pods use `infra-observability`.
+    Grafana, Prometheus, Loki, exporters, Portainer, S3 Console,
+    Redpanda Console, and operational tool pods use `infra-observability`.
 - `identity_constants.tf`
   - Keycloak hostname, TLS secret, PostgreSQL sizing/image, bootstrap admin settings, realm groups, and optional OIDC clients for consumers such as Rancher, Portainer, and Grafana.
 - `monitoring_constants.tf`
@@ -95,6 +95,10 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
 - `platform_constants.tf`
   - Storage class, image versions, hostnames, and optional Keycloak auth settings for platform services such as Portainer and Rancher.
   - `tls_secrets` maps namespaces/secret names to entries from `available_certificates`.
+- `s3_storage_constants.tf`
+  - Garage S3 endpoint/console hostnames, local data label/path, local StorageClass name, images, Keycloak console auth, and CPU/memory sizing.
+  - Garage uses local worker disks selected by the effective Kubernetes node label `s3 = "true"` from `resources.auto.tfvars` / `vms.auto.tfvars`.
+  - The internal Kubernetes endpoint is `http://api.s3.svc.cluster.local:3900`; the external endpoint is `https://s3.<domain>`.
 - `kafka_constants.tf`
   - Redpanda namespace, resource names, broker label key, local data path, Console hostname/TLS secret, optional Keycloak ingress authentication, images, and CPU/memory sizing.
   - Broker placement comes from `vms.auto.tfvars` labels; local PV capacity comes from the matching mounted disk in `resources.auto.tfvars`.
@@ -129,7 +133,7 @@ Whenever you change `vms.auto.tfvars`, `constants.auto.tfvars`, or `patches/mach
 If you deploy with skip flags and want generated assets to match, pass the same flags here too, for example:
 
 ```bash
-../../scripts/gen-talos-assets.sh --cluster <cluster> --skip-ceph --skip-identity --skip-platform --skip-kafka --skip-monitoring --skip-benchmark
+../../scripts/gen-talos-assets.sh --cluster <cluster> --skip-ceph --skip-identity --skip-s3-storage --skip-platform --skip-kafka --skip-monitoring --skip-benchmark
 ```
 
 For low-level generation behavior and contributor rules, see [AGENTS.md](AGENTS.md).
@@ -164,6 +168,7 @@ The asset generator renders that value into Talos `machine.env.http_proxy` and `
 - Kubernetes internal names such as `kubernetes.default.svc` and `.svc.cluster.local`
 - ingress hostnames and ingress IP from `k8s_net_constants.tf` when present
 - monitoring ingress hostnames from `monitoring_constants.tf` when present
+- S3 storage ingress hostnames from `s3_storage_constants.tf` when present
 - platform ingress hostnames from `platform_constants.tf` when present
 - any extra entries from `network.no_proxy_extra`
 
@@ -411,7 +416,7 @@ tofu -chdir=k8s-net init
 tofu -chdir=k8s-net apply -auto-approve
 ```
 
-`deploy.sh` applies the stack in this order: `k8s-net -> ceph -> identity -> monitoring -> platform -> kafka -> benchmark`.
+`deploy.sh` applies the stack in this order: `k8s-net -> ceph -> identity -> s3-storage -> monitoring -> platform -> kafka -> benchmark`.
 
 For implementation details on generated workspaces under `clusters/<cluster>/out/*` and validation expectations per workspace, see [AGENTS.md](AGENTS.md).
 
@@ -541,7 +546,7 @@ Grafana dashboards are provisioned from `monitoring/grafana/dashboards/*.json`. 
 
 ```bash
 cd clusters/<cluster>
-../../scripts/deploy.sh --services-only --skip-ceph --skip-k8s-net --skip-identity --skip-platform --skip-kafka --skip-benchmark
+../../scripts/deploy.sh --services-only --skip-ceph --skip-k8s-net --skip-identity --skip-s3-storage --skip-platform --skip-kafka --skip-benchmark
 ```
 
 ### Benchmark
@@ -590,6 +595,7 @@ Run with `-h` or `--help` to see help documentation. Common options:
 --skip-ceph       Skip Rook Ceph operator/cluster/dashboard/CSI.
 --skip-k8s-net    Skip MetalLB, ingress-nginx, and cert-manager.
 --skip-identity   Skip Keycloak and its PostgreSQL database.
+--skip-s3-storage Skip Garage S3 storage services.
 --skip-platform   Skip platform services.
 --skip-kafka      Skip Kafka/Redpanda services.
 --skip-monitoring Skip Prometheus/Loki/Grafana stack.

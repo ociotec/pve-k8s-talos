@@ -28,6 +28,7 @@ Options:
   -c, --skip-ceph           Skip all Rook Ceph steps (operator, cluster, dashboard, CSI).
   -n, --skip-k8s-net        Skip k8s networking and ingress (k8s-net) steps (ingress, MetalLB, cert-manager).
   -i, --skip-identity       Skip identity services (Keycloak and its database).
+  -s, --skip-s3-storage     Skip S3-compatible storage services (Garage).
   -p, --skip-platform       Skip platform services.
       --skip-portainer      Deprecated alias for --skip-platform.
   -k, --skip-kafka          Skip Kafka/Redpanda services.
@@ -52,6 +53,7 @@ verbose=false
 skip_ceph=false
 skip_k8s_net=false
 skip_identity=false
+skip_s3_storage=false
 skip_platform=false
 skip_kafka=false
 skip_monitoring=false
@@ -84,6 +86,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     -i|--skip-identity)
       skip_identity=true
+      shift
+      ;;
+    -s|--skip-s3-storage)
+      skip_s3_storage=true
       shift
       ;;
     -p|--skip-platform|--skip-portainer)
@@ -206,6 +212,9 @@ fi
 if [[ "${skip_identity}" == "true" ]]; then
   gen_talos_args+=(--skip-identity)
 fi
+if [[ "${skip_s3_storage}" == "true" ]]; then
+  gen_talos_args+=(--skip-s3-storage)
+fi
 if [[ "${skip_platform}" == "true" ]]; then
   gen_talos_args+=(--skip-platform)
 fi
@@ -228,6 +237,9 @@ if [[ "${skip_k8s_net}" != "true" ]]; then
 fi
 if [[ "${skip_identity}" != "true" ]]; then
   quantity_check_paths+=("${repo_root}/identity")
+fi
+if [[ "${skip_s3_storage}" != "true" ]]; then
+  quantity_check_paths+=("${repo_root}/s3-storage")
 fi
 if [[ "${skip_platform}" != "true" ]]; then
   quantity_check_paths+=("${repo_root}/platform")
@@ -494,6 +506,26 @@ prepare_platform_workspace() {
   link_into_workspace "${repo_root}/platform/rancher.yaml" "${workspace}/rancher.yaml"
   if [[ -r "${repo_root}/platform/.terraform.lock.hcl" ]]; then
     link_into_workspace "${repo_root}/platform/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
+  fi
+}
+
+prepare_s3_storage_workspace() {
+  local workspace="${cluster_s3_storage_workspace}"
+
+  require_cluster_file "${cluster_s3_storage_constants_path}" "S3 storage constants"
+  require_cluster_file "${cluster_k8s_net_constants_path}" "k8s-net constants"
+  mkdir -p "${workspace}" "${cluster_certs_dir}"
+  if [[ -d "${repo_root}/s3-storage/.terraform" ]]; then
+    link_into_workspace "${repo_root}/s3-storage/.terraform" "${workspace}/.terraform"
+  fi
+  link_into_workspace "${repo_root}/s3-storage/main.tf" "${workspace}/main.tf"
+  link_into_workspace "${cluster_s3_storage_constants_path}" "${workspace}/constants.tf"
+  link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/k8s_net_constants.tf"
+  link_into_workspace "${cluster_vms_path}" "${workspace}/vms.auto.tfvars"
+  link_into_workspace "${cluster_resources_path}" "${workspace}/resources.auto.tfvars"
+  link_into_workspace "${cluster_certs_dir}" "${workspace}/certs"
+  if [[ -r "${repo_root}/s3-storage/.terraform.lock.hcl" ]]; then
+    link_into_workspace "${repo_root}/s3-storage/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
   fi
 }
 
@@ -1463,6 +1495,43 @@ else
       message_keycloak_realm_console_line "${keycloak_realm_console_line}"
     done <<< "${keycloak_realm_console_summary}"
   fi
+fi
+
+if [[ "${skip_s3_storage}" == "true" ]]; then
+  message "Skipping S3-compatible storage services."
+else
+  prepare_s3_storage_workspace
+  message "Deploying S3-compatible storage services (Garage)..."
+  run_tofu_init "${cluster_s3_storage_workspace}"
+  run tofu -chdir="${cluster_s3_storage_workspace}" apply -auto-approve \
+    -var="cluster_name=${cluster_name}"
+  s3_namespace="$(tofu -chdir="${cluster_s3_storage_workspace}" output -raw s3_namespace)"
+  garage_name="$(tofu -chdir="${cluster_s3_storage_workspace}" output -raw garage_name)"
+  garage_replicas="$(tofu -chdir="${cluster_s3_storage_workspace}" output -raw garage_replicas)"
+  garage_console_auth_enabled="$(tofu -chdir="${cluster_s3_storage_workspace}" output -raw garage_console_auth_enabled 2>/dev/null || printf "false")"
+  s3_pvcs=()
+  for ((i = 0; i < garage_replicas; i++)); do
+    s3_pvcs+=("data-${garage_name}-${i}")
+  done
+  message "Waiting for S3 PVCs, workloads, and endpoints to become ready..."
+  wait_for_pvcs_bound "${s3_namespace}" "600" "${s3_pvcs[@]}"
+  wait_for_rollout_ready "${s3_namespace}" "statefulset/${garage_name}" "900s"
+  wait_for_deployments_ready "${s3_namespace}" "600s" "console"
+  wait_for_service_endpoints "${s3_namespace}" "600" "api" "admin" "console"
+  if [[ "${garage_console_auth_enabled}" == "true" ]]; then
+    wait_for_deployments_ready "${s3_namespace}" "600s" "console-oauth2-proxy"
+    wait_for_service_endpoints "${s3_namespace}" "600" "console-oauth2-proxy"
+  fi
+  garage_s3_endpoint_url="$(tofu -chdir="${cluster_s3_storage_workspace}" output -raw garage_s3_endpoint_url)"
+  garage_internal_s3_endpoint_url="$(tofu -chdir="${cluster_s3_storage_workspace}" output -raw garage_internal_s3_endpoint_url)"
+  garage_console_url="$(tofu -chdir="${cluster_s3_storage_workspace}" output -raw garage_console_url)"
+  garage_s3_region="$(tofu -chdir="${cluster_s3_storage_workspace}" output -raw garage_s3_region)"
+  garage_admin_token="$(tofu -chdir="${cluster_s3_storage_workspace}" output -raw garage_admin_token)"
+  message "S3 endpoint URL: ${URL_FMT_START}${garage_s3_endpoint_url}${URL_FMT_END}"
+  message "S3 internal endpoint URL: ${URL_FMT_START}${garage_internal_s3_endpoint_url}${URL_FMT_END}"
+  message "S3 region: ${DATA_FMT_START}${garage_s3_region}${DATA_FMT_END}"
+  message "S3 Console URL: ${URL_FMT_START}${garage_console_url}${URL_FMT_END}"
+  message "Garage admin token: ${DATA_FMT_START}${garage_admin_token}${DATA_FMT_END}"
 fi
 
 if [[ "${skip_monitoring}" == "true" ]]; then

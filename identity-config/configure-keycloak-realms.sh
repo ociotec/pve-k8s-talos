@@ -470,6 +470,19 @@ upsert_client_mapper() {
   api POST "realms/$(urlencode "${realm}")/clients/${client_id_value}/protocol-mappers/models" "${payload}" >/dev/null
 }
 
+delete_client_mapper_if_present() {
+  local realm="$1"
+  local client_identifier="$2"
+  local mapper_name="$3"
+  local client_id_value
+  local existing_id
+  client_id_value="$(client_uuid "${realm}" "${client_identifier}")"
+  existing_id="$(client_protocol_mapper_id "${realm}" "${client_id_value}" "${mapper_name}")"
+  if [[ -n "${existing_id}" ]]; then
+    api DELETE "realms/$(urlencode "${realm}")/clients/${client_id_value}/protocol-mappers/models/${existing_id}" >/dev/null
+  fi
+}
+
 component_payload() {
   local source_json="$1"
   local parent_id="$2"
@@ -803,6 +816,9 @@ configure_realm() {
       mapper_file="${TMPDIR}/mapper-input.json"
       printf '%s\n' "${mapper}" > "${mapper_file}"
       upsert_client_mapper "${realm}" "$(jq -r '.client_id' "${client_file}")" "${mapper_file}"
+    done
+    jq -r '.removed_mappers[]?' "${client_file}" | while IFS= read -r mapper_name; do
+      delete_client_mapper_if_present "${realm}" "$(jq -r '.client_id' "${client_file}")" "${mapper_name}"
     done
   done
 

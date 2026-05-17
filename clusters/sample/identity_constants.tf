@@ -39,6 +39,7 @@ locals {
   grafana_url            = "https://grafana.${local.domain}"
   prometheus_url         = "https://prometheus.${local.domain}"
   redpanda_console_url   = "https://redpanda-console.${local.domain}"
+  garage_console_url     = "https://s3-console.${local.domain}"
 
   tls_secrets = [
     {
@@ -301,6 +302,38 @@ locals {
               config = {
                 "access.token.claim"        = "true"
                 "included.client.audience"  = "redpanda-console"
+                "id.token.claim"            = "true"
+                "introspection.token.claim" = "false"
+              }
+            },
+          ]
+        },
+        {
+          client_id                    = "garage-console"
+          name                         = "Garage Console"
+          description                  = "OIDC client for Garage Console ingress oauth2-proxy"
+          access_type                  = "confidential"
+          client_secret_length         = 32
+          login_allowed_groups         = ["k8s-admins"]
+          valid_redirect_uris          = ["${local.garage_console_url}/oauth2/callback"]
+          post_logout_redirect_uris    = ["${local.garage_console_url}/", "${local.garage_console_url}/*"]
+          web_origins                  = [local.garage_console_url]
+          base_url                     = local.garage_console_url
+          admin_url                    = local.garage_console_url
+          standard_flow_enabled        = true
+          direct_access_grants_enabled = false
+          service_accounts_enabled     = false
+          full_scope_allowed           = false
+          default_scopes               = ["profile", "email", "roles"]
+          optional_scopes              = ["offline_access"]
+          removed_mappers              = ["groups"]
+          mappers = [
+            {
+              name            = "client-audience"
+              protocol_mapper = "oidc-audience-mapper"
+              config = {
+                "access.token.claim"        = "true"
+                "included.client.audience"  = "garage-console"
                 "id.token.claim"            = "true"
                 "introspection.token.claim" = "false"
               }

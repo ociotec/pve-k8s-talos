@@ -20,14 +20,17 @@ resources = {
     ]
   }
   "worker-kafka" = {
-    vcpus      = 4
-    memory     = 8192
-    k8s_node   = "worker"
-    k8s_labels = {}
+    vcpus    = 4
+    memory   = 8192
+    k8s_node = "worker"
+    k8s_labels = {
+      "s3" = "true"
+    }
     disks = [
       { size = 32 }, # First disk is used as the root disk
       { size = 128 },
       { size = 64, mount = "/var/lib/kafka" },
+      { size = 64, mount = "/var/lib/s3" },
     ]
   }
 }

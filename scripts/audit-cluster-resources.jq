@@ -67,6 +67,7 @@ def workload_containers:
 
 def project_section($ns; $workload):
   if $ns == "rook-ceph" then "rook"
+  elif $ns == "s3" then "s3-storage"
   elif $ns == "monitoring" then "monitoring"
   elif $ns == "identity" then "identity"
   elif $ns == "portainer" then "platform"

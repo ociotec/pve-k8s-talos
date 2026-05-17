@@ -28,7 +28,7 @@ It complements `README.md` and focuses on execution behavior, change safety, and
   - `vms.auto.tfvars`
   - `resources.auto.tfvars`
   - `patches/machine.template.yaml`
-- Keep skip flags consistent between generation and deployment (`--skip-ceph`, `--skip-k8s-net`, `--skip-identity`, `--skip-platform`, `--skip-kafka`, `--skip-monitoring`, `--skip-benchmark`).
+- Keep skip flags consistent between generation and deployment (`--skip-ceph`, `--skip-k8s-net`, `--skip-identity`, `--skip-s3-storage`, `--skip-platform`, `--skip-kafka`, `--skip-monitoring`, `--skip-benchmark`).
 
 ## OpenTofu and Provider Rules
 

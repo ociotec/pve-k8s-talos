@@ -410,6 +410,30 @@ print_redpanda_console() {
   print_url_bullet "Redpanda HTTP Proxy URL" "${redpanda_http_proxy_service_url}"
 }
 
+print_s3_storage() {
+  local garage_s3_endpoint_url
+  local garage_internal_s3_endpoint_url
+  local garage_console_url
+  local garage_s3_region
+  local garage_admin_token
+
+  garage_s3_endpoint_url="$(output_raw "${cluster_s3_storage_workspace}" garage_s3_endpoint_url)"
+  if ! has_value "${garage_s3_endpoint_url}"; then
+    return 0
+  fi
+
+  print_service "S3 Storage"
+  print_url_bullet "Endpoint URL" "${garage_s3_endpoint_url}"
+  garage_internal_s3_endpoint_url="$(output_raw "${cluster_s3_storage_workspace}" garage_internal_s3_endpoint_url)"
+  garage_console_url="$(output_raw "${cluster_s3_storage_workspace}" garage_console_url)"
+  garage_s3_region="$(output_raw "${cluster_s3_storage_workspace}" garage_s3_region)"
+  garage_admin_token="$(output_raw "${cluster_s3_storage_workspace}" garage_admin_token)"
+  print_url_bullet "Internal endpoint URL" "${garage_internal_s3_endpoint_url}"
+  print_url_bullet "Console URL" "${garage_console_url}"
+  print_data_bullet "Region" "${garage_s3_region}"
+  print_secret_bullet "Garage admin token" "${garage_admin_token}"
+}
+
 print_rook_dashboard() {
   local rook_dashboard_url
   local dashboard_nodeport
@@ -446,6 +470,7 @@ print_grafana
 print_prometheus
 print_portainer
 print_rancher
+print_s3_storage
 print_redpanda_console
 print_rook_dashboard
 

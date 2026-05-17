@@ -201,6 +201,7 @@ locals {
               }
             ]
           )
+          removed_mappers = distinct(try(client.removed_mappers, []))
         }
       ]
     }

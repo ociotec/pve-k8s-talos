@@ -21,7 +21,7 @@ Options:
   --top <n>             Number of table rows to show. Defaults to 25.
   --all                 Show all rows.
   --section <name>      Limit output to a section. Can be repeated.
-                        Known sections: identity, k8s-net, monitoring, platform, rook, other.
+                        Known sections: identity, k8s-net, monitoring, platform, rook, s3-storage, other.
   --format <format>     Output format: markdown or json. Defaults to markdown.
   --include-ok          Include containers with no finding. Defaults to false.
   --skip-prometheus     Only audit declared requests/limits; usage columns are n/a.
