@@ -667,8 +667,8 @@ fi
 template="$(cat "${template_path}")"
 
 # Basic template sanity check.
-if [[ "${template}" != *'${ip}'* || "${template}" != *'${cidr}'* || "${template}" != *'${vip_section}'* || "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${kubelet_extra_args_section}'* || "${template}" != *'${machine_registries_section}'* || "${template}" != *'${k8s_node_labels_section}'* || "${template}" != *'${proxy_env_section}'* || "${template}" != *'${cert_files_section}'* || "${template}" != *'${talos_discovery_service_disabled}'* ]]; then
-  echo "Error: template is missing required placeholders (\${ip}, \${cidr}, \${vip_section}, \${machine_disks_section}, \${kubelet_extra_mounts_section}, \${kubelet_extra_args_section}, \${machine_registries_section}, \${k8s_node_labels_section}, \${proxy_env_section}, \${cert_files_section}, \${talos_discovery_service_disabled})." >&2
+if [[ "${template}" != *'${ip}'* || "${template}" != *'${cidr}'* || "${template}" != *'${vip_section}'* || "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${kubelet_extra_args_section}'* || "${template}" != *'${machine_registries_section}'* || "${template}" != *'${k8s_node_labels_section}'* || "${template}" != *'${proxy_env_section}'* || "${template}" != *'${cert_files_section}'* || "${template}" != *'${grub_use_uki_cmdline_section}'* || "${template}" != *'${talos_discovery_service_disabled}'* ]]; then
+  echo "Error: template is missing required placeholders (\${ip}, \${cidr}, \${vip_section}, \${machine_disks_section}, \${kubelet_extra_mounts_section}, \${kubelet_extra_args_section}, \${machine_registries_section}, \${k8s_node_labels_section}, \${proxy_env_section}, \${cert_files_section}, \${grub_use_uki_cmdline_section}, \${talos_discovery_service_disabled})." >&2
   echo "Fix: restore patches/machine.template.yaml or add the missing placeholders." >&2
   exit 1
 fi
@@ -1060,12 +1060,14 @@ if [[ "${proxy_uses_hostname}" == "true" ]]; then
 fi
 
 if [[ ${#kernel_args[@]} -gt 0 ]]; then
+  grub_use_uki_cmdline_section=$'    grubUseUKICmdline: false'
   extra_kernel_args_section=$'\n'
   for kernel_arg in "${kernel_args[@]}"; do
     extra_kernel_args_section+=$'      - "'"$(yaml_escape "${kernel_arg}")"$'"\n'
   done
   extra_kernel_args_section="${extra_kernel_args_section%$'\n'}"
 else
+  grub_use_uki_cmdline_section=""
   extra_kernel_args_section=" []"
 fi
 
@@ -1509,6 +1511,7 @@ for name in "${!vm_ips[@]}"; do
   rendered="${rendered//'${gateway}'/${gateway}}"
   rendered="${rendered//'${dns_servers_section}'/${dns_servers_section}}"
   rendered="${rendered//'${ntp_servers_section}'/${ntp_servers_section}}"
+  rendered="${rendered//'${grub_use_uki_cmdline_section}'/${grub_use_uki_cmdline_section}}"
   rendered="${rendered//'${extra_kernel_args_section}'/${extra_kernel_args_section}}"
   rendered="${rendered//'${machine_disks_section}'/${machine_disks_section}}"
   rendered="${rendered//'${kubelet_extra_mounts_section}'/${kubelet_extra_mounts_section}}"

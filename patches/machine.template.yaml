@@ -4,6 +4,7 @@ machine:
   env: ${proxy_env_section}
   files: ${cert_files_section}
   install:
+${grub_use_uki_cmdline_section}
     extraKernelArgs: ${extra_kernel_args_section}
   network:
     interfaces:
