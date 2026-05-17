@@ -596,6 +596,7 @@ spec:
               ensure_folder "infrastructure-kafka" "Kafka" "infrastructure"
               ensure_folder "infrastructure-platform" "Platform" "infrastructure"
               ensure_folder "infrastructure-rook-ceph" "Rook Ceph" "infrastructure"
+              ensure_folder "infrastructure-s3-storage" "S3 storage" "infrastructure"
 
               cleanup_legacy_dashboard "grafana" "CoreDNS internal metrics"
 
@@ -607,6 +608,7 @@ spec:
               sync_dir /var/lib/grafana/dashboards/infrastructure/kafka infrastructure-kafka
               sync_dir /var/lib/grafana/dashboards/infrastructure/platform infrastructure-platform
               sync_dir /var/lib/grafana/dashboards/infrastructure/rook-ceph infrastructure-rook-ceph
+              sync_dir /var/lib/grafana/dashboards/infrastructure/s3-storage infrastructure-s3-storage
           env:
             - name: GRAFANA_ADMIN_USER
               valueFrom:
