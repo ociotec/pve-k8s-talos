@@ -361,7 +361,9 @@ resource "kubernetes_manifest" "metallb_native" {
   lifecycle {
     ignore_changes = [
       manifest.metadata.annotations,
+      manifest.metadata.annotations["deprecated.daemonset.template.generation"],
       object.metadata.annotations,
+      object.metadata.annotations["deprecated.daemonset.template.generation"],
     ]
   }
   field_manager {
