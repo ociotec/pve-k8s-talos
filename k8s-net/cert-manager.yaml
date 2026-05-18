@@ -12362,6 +12362,7 @@ metadata:
     app.kubernetes.io/name: cainjector
     app.kubernetes.io/instance: cert-manager
     app.kubernetes.io/component: "cainjector"
+    app.kubernetes.io/part-of: cert-manager
     app.kubernetes.io/version: "v1.20.2"
 ---
 # Source: cert-manager/templates/serviceaccount.yaml
@@ -13164,6 +13165,7 @@ metadata:
     app.kubernetes.io/name: cainjector
     app.kubernetes.io/instance: cert-manager
     app.kubernetes.io/component: "cainjector"
+    app.kubernetes.io/part-of: cert-manager
     app.kubernetes.io/version: "v1.20.2"
 spec:
   type: ClusterIP
@@ -13239,6 +13241,7 @@ metadata:
     app.kubernetes.io/name: cainjector
     app.kubernetes.io/instance: cert-manager
     app.kubernetes.io/component: "cainjector"
+    app.kubernetes.io/part-of: cert-manager
     app.kubernetes.io/version: "v1.20.2"
 spec:
   replicas: 1
@@ -13254,6 +13257,7 @@ spec:
         app.kubernetes.io/name: cainjector
         app.kubernetes.io/instance: cert-manager
         app.kubernetes.io/component: "cainjector"
+        app.kubernetes.io/part-of: cert-manager
         app.kubernetes.io/version: "v1.20.2"
       annotations:
         prometheus.io/path: "/metrics"
@@ -13310,6 +13314,7 @@ metadata:
     app.kubernetes.io/name: cert-manager
     app.kubernetes.io/instance: cert-manager
     app.kubernetes.io/component: "controller"
+    app.kubernetes.io/part-of: cert-manager
     app.kubernetes.io/version: "v1.20.2"
 spec:
   replicas: 1
@@ -13325,6 +13330,7 @@ spec:
         app.kubernetes.io/name: cert-manager
         app.kubernetes.io/instance: cert-manager
         app.kubernetes.io/component: "controller"
+        app.kubernetes.io/part-of: cert-manager
         app.kubernetes.io/version: "v1.20.2"
       annotations:
         prometheus.io/path: "/metrics"
@@ -13400,6 +13406,7 @@ metadata:
     app.kubernetes.io/name: webhook
     app.kubernetes.io/instance: cert-manager
     app.kubernetes.io/component: "webhook"
+    app.kubernetes.io/part-of: cert-manager
     app.kubernetes.io/version: "v1.20.2"
 spec:
   replicas: 1
@@ -13415,6 +13422,7 @@ spec:
         app.kubernetes.io/name: webhook
         app.kubernetes.io/instance: cert-manager
         app.kubernetes.io/component: "webhook"
+        app.kubernetes.io/part-of: cert-manager
         app.kubernetes.io/version: "v1.20.2"
       annotations:
         prometheus.io/path: "/metrics"

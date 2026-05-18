@@ -1,0 +1,1750 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "datasource",
+          "uid": "grafana"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "target": {
+          "limit": 100,
+          "matchAny": false,
+          "tags": [],
+          "type": "dashboard"
+        },
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Current-state infrastructure overview across VMs, Kubernetes, storage, and infrastructure services.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "description": "CPU usage per control-plane VM from node-exporter.",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "max": 100,
+          "min": 0,
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "N/A"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "suffix:% CPU"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 2,
+      "maxDataPoints": 120,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "((\n  100 * (1 - avg by(nodename) (\n  rate(node_cpu_seconds_total{job=\"node-exporter\",mode=\"idle\"}[5m])\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n))\n)\nor on(nodename)\n(\n  100 * (max by(nodename) (label_replace(kube_node_info, \"nodename\", \"$1\", \"node\", \"(.*)\")) unless on(nodename) (max by(nodename) (label_replace(up{job=\"node-exporter\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\")) and on(nodename) max by(nodename) (label_replace(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\"))))\n))\n  * on(nodename) group_left() max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"}, \"nodename\", \"$1\", \"node\", \"(.*)\"))",
+          "legendFormat": "{{nodename}}",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "description": "Memory usage per control-plane VM from node-exporter.",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "max": 100,
+          "min": 0,
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "N/A"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "suffix:% RAM"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 3,
+      "maxDataPoints": 120,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "((\n  100 * (1 - (sum by(nodename) (\n  node_memory_MemAvailable_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n) / clamp_min(sum by(nodename) (\n  node_memory_MemTotal_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n), 1)))\n)\nor on(nodename)\n(\n  100 * (max by(nodename) (label_replace(kube_node_info, \"nodename\", \"$1\", \"node\", \"(.*)\")) unless on(nodename) (max by(nodename) (label_replace(up{job=\"node-exporter\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\")) and on(nodename) max by(nodename) (label_replace(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\"))))\n))\n  * on(nodename) group_left() max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"}, \"nodename\", \"$1\", \"node\", \"(.*)\"))",
+          "legendFormat": "{{nodename}}",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "description": "CPU usage per worker VM from node-exporter.",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "max": 100,
+          "min": 0,
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "N/A"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "suffix:% CPU"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 12,
+        "x": 0,
+        "y": 3
+      },
+      "id": 4,
+      "maxDataPoints": 120,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "((\n  100 * (1 - avg by(nodename) (\n  rate(node_cpu_seconds_total{job=\"node-exporter\",mode=\"idle\"}[5m])\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n))\n)\nor on(nodename)\n(\n  100 * (max by(nodename) (label_replace(kube_node_info, \"nodename\", \"$1\", \"node\", \"(.*)\")) unless on(nodename) (max by(nodename) (label_replace(up{job=\"node-exporter\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\")) and on(nodename) max by(nodename) (label_replace(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\"))))\n))\n  unless on(nodename) max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"}, \"nodename\", \"$1\", \"node\", \"(.*)\"))",
+          "legendFormat": "{{nodename}}",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "description": "Memory usage per worker VM from node-exporter.",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "max": 100,
+          "min": 0,
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "N/A"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "suffix:% RAM"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 12,
+        "x": 12,
+        "y": 3
+      },
+      "id": 5,
+      "maxDataPoints": 120,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "((\n  100 * (1 - (sum by(nodename) (\n  node_memory_MemAvailable_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n) / clamp_min(sum by(nodename) (\n  node_memory_MemTotal_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n), 1)))\n)\nor on(nodename)\n(\n  100 * (max by(nodename) (label_replace(kube_node_info, \"nodename\", \"$1\", \"node\", \"(.*)\")) unless on(nodename) (max by(nodename) (label_replace(up{job=\"node-exporter\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\")) and on(nodename) max by(nodename) (label_replace(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\"))))\n))\n  unless on(nodename) max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"}, \"nodename\", \"$1\", \"node\", \"(.*)\"))",
+          "legendFormat": "{{nodename}}",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 80
+              },
+              {
+                "color": "green",
+                "value": 99
+              }
+            ]
+          },
+          "unit": "suffix:% ready"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 4,
+        "x": 0,
+        "y": 6
+      },
+      "id": 11,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * sum(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1) / clamp_min(count(kube_node_info), 1)",
+          "instant": true,
+          "legendFormat": "Ready nodes",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "suffix:% CPU"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 5,
+        "x": 4,
+        "y": 6
+      },
+      "id": 12,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * sum(rate(container_cpu_usage_seconds_total{container!=\"\",container!=\"POD\"}[5m])) / clamp_min(sum(kube_node_status_allocatable{resource=\"cpu\"}), 0.001)",
+          "legendFormat": "CPU allocatable",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "suffix:% RAM"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 5,
+        "x": 9,
+        "y": 6
+      },
+      "id": 13,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * sum((container_memory_working_set_bytes{container!=\"\",container!=\"POD\"}) or (container_memory_usage_bytes{container!=\"\",container!=\"POD\"})) / clamp_min(sum(kube_node_status_allocatable{resource=\"memory\"}), 1)",
+          "legendFormat": "Memory allocatable",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "text": "OK"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 5,
+        "x": 14,
+        "y": 6
+      },
+      "id": 14,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "count(kube_pod_status_phase{namespace=~\"${infra_namespaces:raw}\",phase=~\"Failed|Unknown|Pending\"} == 1) or on() vector(0)",
+          "instant": true,
+          "legendFormat": "Problem pods",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "-1": {
+                  "text": "N/A"
+                }
+              }
+            }
+          ],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 5,
+        "x": 19,
+        "y": 6
+      },
+      "id": 15,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "(sum(increase(kube_event_count{type=\"Warning\",namespace=~\"${infra_namespaces:raw}\"}[30m])) or on() (absent(kube_event_count) * -1) or on() vector(0))",
+          "instant": true,
+          "legendFormat": "Warning events",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat",
+      "description": "Kubernetes Warning events over the last 30 minutes when kube_event_count is exposed; shows N/A when event metrics are not available."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0,
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "text": "HEALTHY"
+                },
+                "1": {
+                  "text": "WARNING"
+                },
+                "2": {
+                  "text": "ERROR"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "N/A"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 4,
+        "x": 0,
+        "y": 9
+      },
+      "id": 21,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "ceph_health_status{}",
+          "instant": true,
+          "legendFormat": "Health",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 80
+              },
+              {
+                "color": "green",
+                "value": 100
+              }
+            ]
+          },
+          "unit": "suffix:%"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 4,
+        "x": 4,
+        "y": 9
+      },
+      "id": 26,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * sum((ceph_osd_up{} == 1) and on(ceph_daemon,cluster,namespace) (ceph_osd_in{} == 1)) / clamp_min(count(ceph_osd_up{}), 1)",
+          "instant": true,
+          "legendFormat": "OSDs In&Up",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat",
+      "description": "Percentage of Ceph OSDs that are both in and up."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 100
+              }
+            ]
+          },
+          "unit": "suffix:%"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 4,
+        "x": 8,
+        "y": 9
+      },
+      "id": 27,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * ((count(ceph_mgr_status{}) > bool 0) * (sum(ceph_mgr_status{}) == bool 1))",
+          "instant": true,
+          "legendFormat": "Managers",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat",
+      "description": "Ceph manager state. Green only when exactly one manager is active."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 100
+              }
+            ]
+          },
+          "unit": "suffix:%"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 4,
+        "x": 12,
+        "y": 9
+      },
+      "id": 28,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * sum(ceph_mon_quorum_status{}) / clamp_min(count(ceph_mon_quorum_status{}), 1)",
+          "instant": true,
+          "legendFormat": "Monitors",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat",
+      "description": "Ceph monitor quorum coverage. Green only when all monitors are in quorum."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 100
+              }
+            ]
+          },
+          "unit": "suffix:%"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 4,
+        "x": 16,
+        "y": 9
+      },
+      "id": 29,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * count(count by(fs_id) (ceph_mds_metadata{fs_id!=\"-1\"})) / clamp_min(count(ceph_fs_metadata{}), 1)",
+          "instant": true,
+          "legendFormat": "MDS",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat",
+      "description": "CephFS filesystems with an active MDS. Green only when every filesystem has an active MDS."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 80
+              },
+              {
+                "color": "green",
+                "value": 100
+              }
+            ]
+          },
+          "unit": "suffix:%"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 4,
+        "x": 20,
+        "y": 9
+      },
+      "id": 30,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * sum(ceph_pg_clean{}) / clamp_min(sum(ceph_pg_total{}), 1)",
+          "instant": true,
+          "legendFormat": "PGs clean",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat",
+      "description": "Ceph placement groups that are clean."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "suffix:% used"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 4,
+        "x": 0,
+        "y": 12
+      },
+      "id": 22,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * sum(ceph_cluster_total_used_bytes{}) / clamp_min(sum(ceph_cluster_total_bytes{}), 1)",
+          "legendFormat": "Used",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "suffix: MB/s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 5,
+        "x": 4,
+        "y": 12
+      },
+      "id": 24,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(irate(ceph_pool_rd_bytes[5m])) / 1000000",
+          "legendFormat": "Read MB/s",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "suffix: MB/s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 5,
+        "x": 9,
+        "y": 12
+      },
+      "id": 25,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(irate(ceph_pool_wr_bytes[5m])) / 1000000",
+          "legendFormat": "Write MB/s",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "suffix: IOPS"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 5,
+        "x": 14,
+        "y": 12
+      },
+      "id": 32,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(irate(ceph_pool_rd[5m]))",
+          "legendFormat": "Read IOPS",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat",
+      "description": "Ceph pool read operations per second across all pools."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "suffix: IOPS"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 5,
+        "x": 19,
+        "y": 12
+      },
+      "id": 33,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(irate(ceph_pool_wr[5m]))",
+          "legendFormat": "Write IOPS",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat",
+      "description": "Ceph pool write operations per second across all pools."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "max": 100,
+          "min": 0,
+          "mappings": [
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "N/A"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "suffix:% PVC"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 15
+      },
+      "id": 23,
+      "maxDataPoints": 120,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "(\n  label_replace(\n    100 * sum by(namespace) (kubelet_volume_stats_used_bytes{namespace=~\"${infra_namespaces:raw}\",namespace=~\"s3|kafka\"})\n      / clamp_min(sum by(namespace) (kubelet_volume_stats_capacity_bytes{namespace=~\"${infra_namespaces:raw}\",namespace=~\"s3|kafka\"}), 1),\n    \"workload\", \"$1 total\", \"namespace\", \"(.*)\"\n  )\n)\nor\n(\n  label_replace(\n    100 * sum by(namespace,persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace=~\"${infra_namespaces:raw}\",namespace!~\"s3|kafka\",persistentvolumeclaim=~\".+-postgres-data\"})\n      / clamp_min(sum by(namespace,persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{namespace=~\"${infra_namespaces:raw}\",namespace!~\"s3|kafka\",persistentvolumeclaim=~\".+-postgres-data\"}), 1),\n    \"workload\", \"$1 postgres\", \"persistentvolumeclaim\", \"(.+)-postgres-data\"\n  )\n)\nor\n(\n  label_replace(\n    100 * sum by(namespace,persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace=~\"${infra_namespaces:raw}\",namespace!~\"s3|kafka\",persistentvolumeclaim!~\".+-postgres-data\",persistentvolumeclaim=~\".+-data\"})\n      / clamp_min(sum by(namespace,persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{namespace=~\"${infra_namespaces:raw}\",namespace!~\"s3|kafka\",persistentvolumeclaim!~\".+-postgres-data\",persistentvolumeclaim=~\".+-data\"}), 1),\n    \"workload\", \"$1\", \"persistentvolumeclaim\", \"(.+)-data\"\n  )\n)\nor\n(\n  label_replace(\n    100 * sum by(namespace,persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace=~\"${infra_namespaces:raw}\",namespace!~\"s3|kafka\",persistentvolumeclaim!~\".+-data\"})\n      / clamp_min(sum by(namespace,persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{namespace=~\"${infra_namespaces:raw}\",namespace!~\"s3|kafka\",persistentvolumeclaim!~\".+-data\"}), 1),\n    \"workload\", \"$1\", \"persistentvolumeclaim\", \"(.+)\"\n  )\n)",
+          "legendFormat": "{{workload}}",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat",
+      "description": "PVC usage in the selected infrastructure sections."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 100
+              }
+            ]
+          },
+          "unit": "suffix:% ready"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 0,
+        "y": 19
+      },
+      "id": 31,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * (\n(sum(\n  kube_deployment_status_replicas_available{namespace=~\"${infra_namespaces:raw}\"}\n    * on(namespace,deployment) group_left(label_app_kubernetes_io_part_of)\n      kube_deployment_labels{namespace=~\"${infra_namespaces:raw}\",label_app_kubernetes_io_part_of=~\"${component:regex}\"}\n) or vector(0))\n+\n(sum(\n  kube_statefulset_status_replicas_ready{namespace=~\"${infra_namespaces:raw}\"}\n    * on(namespace,statefulset) group_left(label_app_kubernetes_io_part_of)\n      kube_statefulset_labels{namespace=~\"${infra_namespaces:raw}\",label_app_kubernetes_io_part_of=~\"${component:regex}\"}\n) or vector(0))\n+\n(sum(\n  kube_daemonset_status_number_available{namespace=~\"${infra_namespaces:raw}\"}\n    * on(namespace,daemonset) group_left(label_app_kubernetes_io_part_of)\n      kube_daemonset_labels{namespace=~\"${infra_namespaces:raw}\",label_app_kubernetes_io_part_of=~\"${component:regex}\"}\n) or vector(0))\n)\n/\nclamp_min((\n(sum(\n  kube_deployment_spec_replicas{namespace=~\"${infra_namespaces:raw}\"}\n    * on(namespace,deployment) group_left(label_app_kubernetes_io_part_of)\n      kube_deployment_labels{namespace=~\"${infra_namespaces:raw}\",label_app_kubernetes_io_part_of=~\"${component:regex}\"}\n) or vector(0))\n+\n(sum(\n  kube_statefulset_replicas{namespace=~\"${infra_namespaces:raw}\"}\n    * on(namespace,statefulset) group_left(label_app_kubernetes_io_part_of)\n      kube_statefulset_labels{namespace=~\"${infra_namespaces:raw}\",label_app_kubernetes_io_part_of=~\"${component:regex}\"}\n) or vector(0))\n+\n(sum(\n  kube_daemonset_status_desired_number_scheduled{namespace=~\"${infra_namespaces:raw}\"}\n    * on(namespace,daemonset) group_left(label_app_kubernetes_io_part_of)\n      kube_daemonset_labels{namespace=~\"${infra_namespaces:raw}\",label_app_kubernetes_io_part_of=~\"${component:regex}\"}\n) or vector(0))\n), 1)",
+          "legendFormat": "${component}",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat",
+      "description": "Deployment, StatefulSet, and DaemonSet readiness grouped by app.kubernetes.io/part-of.",
+      "repeat": "component",
+      "repeatDirection": "h",
+      "maxPerRow": 10
+    }
+  ],
+  "preload": false,
+  "refresh": "30s",
+  "schemaVersion": 42,
+  "tags": [
+    "infrastructure",
+    "overview",
+    "current-state"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": "kube-system|cert-manager|metallb-system|ingress-nginx|monitoring|identity|rook-ceph|cattle-system|cattle-capi-system|cattle-fleet-system|cattle-fleet-local-system|cattle-provisioning-capi-system|fleet-default|portainer|kafka|s3",
+          "value": "kube-system|cert-manager|metallb-system|ingress-nginx|monitoring|identity|rook-ceph|cattle-system|cattle-capi-system|cattle-fleet-system|cattle-fleet-local-system|cattle-provisioning-capi-system|fleet-default|portainer|kafka|s3"
+        },
+        "hide": 2,
+        "label": "Infrastructure namespaces",
+        "name": "infra_namespaces",
+        "options": [
+          {
+            "selected": true,
+            "text": "kube-system|cert-manager|metallb-system|ingress-nginx|monitoring|identity|rook-ceph|cattle-system|cattle-capi-system|cattle-fleet-system|cattle-fleet-local-system|cattle-provisioning-capi-system|fleet-default|portainer|kafka|s3",
+            "value": "kube-system|cert-manager|metallb-system|ingress-nginx|monitoring|identity|rook-ceph|cattle-system|cattle-capi-system|cattle-fleet-system|cattle-fleet-local-system|cattle-provisioning-capi-system|fleet-default|portainer|kafka|s3"
+          }
+        ],
+        "query": "kube-system|cert-manager|metallb-system|ingress-nginx|monitoring|identity|rook-ceph|cattle-system|cattle-capi-system|cattle-fleet-system|cattle-fleet-local-system|cattle-provisioning-capi-system|fleet-default|portainer|kafka|s3",
+        "skipUrlSync": true,
+        "type": "constant"
+      },
+      {
+        "name": "component",
+        "current": {
+          "selected": true,
+          "text": [
+            "cert-manager",
+            "garage",
+            "grafana",
+            "ingress-nginx",
+            "keycloak",
+            "kube-state-metrics",
+            "loki",
+            "metallb",
+            "metrics-server",
+            "node-exporter",
+            "portainer",
+            "prometheus",
+            "rancher",
+            "redpanda",
+            "rook-ceph"
+          ],
+          "value": [
+            "cert-manager",
+            "garage",
+            "grafana",
+            "ingress-nginx",
+            "keycloak",
+            "kube-state-metrics",
+            "loki",
+            "metallb",
+            "metrics-server",
+            "node-exporter",
+            "portainer",
+            "prometheus",
+            "rancher",
+            "redpanda",
+            "rook-ceph"
+          ]
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "Prometheus"
+        },
+        "definition": "label_values({__name__=~\"kube_(deployment|statefulset|daemonset)_labels\",namespace=~\"${infra_namespaces:raw}\",label_app_kubernetes_io_part_of!=\"\"}, label_app_kubernetes_io_part_of)",
+        "hide": 2,
+        "includeAll": true,
+        "label": "Component",
+        "multi": true,
+        "query": {
+          "query": "label_values({__name__=~\"kube_(deployment|statefulset|daemonset)_labels\",namespace=~\"${infra_namespaces:raw}\",label_app_kubernetes_io_part_of!=\"\"}, label_app_kubernetes_io_part_of)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": true,
+        "sort": 1,
+        "type": "query",
+        "options": [
+          {
+            "selected": true,
+            "text": "cert-manager",
+            "value": "cert-manager"
+          },
+          {
+            "selected": true,
+            "text": "garage",
+            "value": "garage"
+          },
+          {
+            "selected": true,
+            "text": "grafana",
+            "value": "grafana"
+          },
+          {
+            "selected": true,
+            "text": "ingress-nginx",
+            "value": "ingress-nginx"
+          },
+          {
+            "selected": true,
+            "text": "keycloak",
+            "value": "keycloak"
+          },
+          {
+            "selected": true,
+            "text": "kube-state-metrics",
+            "value": "kube-state-metrics"
+          },
+          {
+            "selected": true,
+            "text": "loki",
+            "value": "loki"
+          },
+          {
+            "selected": true,
+            "text": "metallb",
+            "value": "metallb"
+          },
+          {
+            "selected": true,
+            "text": "metrics-server",
+            "value": "metrics-server"
+          },
+          {
+            "selected": true,
+            "text": "node-exporter",
+            "value": "node-exporter"
+          },
+          {
+            "selected": true,
+            "text": "portainer",
+            "value": "portainer"
+          },
+          {
+            "selected": true,
+            "text": "prometheus",
+            "value": "prometheus"
+          },
+          {
+            "selected": true,
+            "text": "rancher",
+            "value": "rancher"
+          },
+          {
+            "selected": true,
+            "text": "redpanda",
+            "value": "redpanda"
+          },
+          {
+            "selected": true,
+            "text": "rook-ceph",
+            "value": "rook-ceph"
+          }
+        ]
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m",
+      "15m",
+      "30m",
+      "1h"
+    ]
+  },
+  "timezone": "browser",
+  "title": "Infrastructure: overview",
+  "uid": "infrastructure-overview",
+  "version": 1,
+  "weekStart": ""
+}

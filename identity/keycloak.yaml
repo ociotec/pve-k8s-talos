@@ -21,6 +21,8 @@ kind: Deployment
 metadata:
   name: keycloak-postgres
   namespace: ${identity_namespace}
+  labels:
+    app.kubernetes.io/part-of: keycloak
 spec:
   replicas: 1
   strategy:
@@ -32,6 +34,7 @@ spec:
     metadata:
       labels:
         app: keycloak-postgres
+        app.kubernetes.io/part-of: keycloak
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9187"
@@ -118,6 +121,8 @@ kind: Deployment
 metadata:
   name: keycloak
   namespace: ${identity_namespace}
+  labels:
+    app.kubernetes.io/part-of: keycloak
 spec:
   replicas: 1
   selector:
@@ -127,6 +132,7 @@ spec:
     metadata:
       labels:
         app: keycloak
+        app.kubernetes.io/part-of: keycloak
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9000"

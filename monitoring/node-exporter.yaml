@@ -3,6 +3,8 @@ kind: DaemonSet
 metadata:
   name: node-exporter
   namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: node-exporter
 spec:
   selector:
     matchLabels:
@@ -11,6 +13,7 @@ spec:
     metadata:
       labels:
         app: node-exporter
+        app.kubernetes.io/part-of: node-exporter
     spec:
       priorityClassName: infra-observability
       hostNetwork: true

@@ -87,6 +87,8 @@ kind: DaemonSet
 metadata:
   name: promtail
   namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: loki
 spec:
   selector:
     matchLabels:
@@ -95,6 +97,7 @@ spec:
     metadata:
       labels:
         app: promtail
+        app.kubernetes.io/part-of: loki
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "3101"

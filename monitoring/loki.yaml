@@ -66,6 +66,8 @@ kind: Deployment
 metadata:
   name: loki
   namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: loki
 spec:
   replicas: 1
   strategy:
@@ -77,6 +79,7 @@ spec:
     metadata:
       labels:
         app: loki
+        app.kubernetes.io/part-of: loki
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "3100"

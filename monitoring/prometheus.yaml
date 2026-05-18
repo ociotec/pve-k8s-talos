@@ -448,6 +448,8 @@ kind: Deployment
 metadata:
   name: prometheus
   namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: prometheus
 spec:
   replicas: 1
   strategy:
@@ -459,6 +461,7 @@ spec:
     metadata:
       labels:
         app: prometheus
+        app.kubernetes.io/part-of: prometheus
     spec:
       priorityClassName: infra-observability
       terminationGracePeriodSeconds: 120

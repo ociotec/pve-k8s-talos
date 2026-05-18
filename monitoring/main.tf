@@ -204,11 +204,45 @@ locals {
     for filename in local.grafana_dashboard_files :
     filename => replace(filename, "/", "__")
   }
-  grafana_dashboard_volume_items = [
-    for filename in local.grafana_dashboard_files : {
-      key  = local.grafana_dashboard_configmap_keys[filename]
-      path = filename
+  grafana_dashboard_directories = sort(distinct([
+    for filename in local.grafana_dashboard_files : dirname(filename)
+  ]))
+  grafana_dashboard_configmaps = {
+    for directory in local.grafana_dashboard_directories :
+    replace(directory, "/", "-") => {
+      name = "grafana-dashboards-${replace(directory, "/", "-")}"
+      dir  = directory
+      files = {
+        for filename in local.grafana_dashboard_files :
+        filename => local.grafana_dashboard_configmap_keys[filename]
+        if dirname(filename) == directory
+      }
     }
+  }
+  grafana_dashboard_root_group      = "infrastructure"
+  grafana_dashboard_root_mount_path = "/var/lib/grafana/dashboards/infrastructure-root"
+  grafana_dashboard_root_source = {
+    name = local.grafana_dashboard_configmaps[local.grafana_dashboard_root_group].name
+    items = [
+      for filename, key in local.grafana_dashboard_configmaps[local.grafana_dashboard_root_group].files : {
+        key  = key
+        path = basename(filename)
+      }
+    ]
+  }
+  grafana_dashboard_group_sources = [
+    for group, configmap in local.grafana_dashboard_configmaps : {
+      volume_name    = "dashboards-${group}"
+      configmap_name = configmap.name
+      mount_path     = "/var/lib/grafana/dashboards/${configmap.dir}"
+      items = [
+        for filename, key in configmap.files : {
+          key  = key
+          path = basename(filename)
+        }
+      ]
+    }
+    if group != local.grafana_dashboard_root_group
   ]
   grafana_dashboard_sync_hash = substr(sha256(join("", concat(
     [file("${path.module}/grafana.yaml")],
@@ -327,7 +361,9 @@ locals {
       grafana_oidc_api_url                      = local.grafana_oidc_api_url
       grafana_oidc_jwk_set_url                  = local.grafana_oidc_jwk_set_url
       grafana_oauth_signout_redirect_url        = local.grafana_oauth_signout_redirect_url
-      grafana_dashboard_volume_items            = local.grafana_dashboard_volume_items
+      grafana_dashboard_root_source             = local.grafana_dashboard_root_source
+      grafana_dashboard_root_mount_path         = local.grafana_dashboard_root_mount_path
+      grafana_dashboard_group_sources           = local.grafana_dashboard_group_sources
       grafana_dashboard_sync_hash               = local.grafana_dashboard_sync_hash
       grafana_dashboard_provisioning_enabled    = local.grafana_dashboard_provisioning_enabled_value
       grafana_dashboard_provisioning_pvc_create = local.grafana_dashboard_provisioning_pvc_create_value
@@ -436,17 +472,20 @@ locals {
           })
         }
       },
-      {
+    ],
+    [
+      for group, configmap in local.grafana_dashboard_configmaps : {
         apiVersion = "v1"
         kind       = "ConfigMap"
         metadata = {
-          name      = "grafana-dashboards"
+          name      = configmap.name
           namespace = "monitoring"
         }
-        data = { for filename in local.grafana_dashboard_files :
-          local.grafana_dashboard_configmap_keys[filename] => file("${path.module}/grafana/dashboards/${filename}")
+        data = {
+          for filename, key in configmap.files :
+          key => file("${path.module}/grafana/dashboards/${filename}")
         }
-      },
+      }
     ],
     local.kube_state_metrics_manifests,
     local.node_exporter_manifests,
@@ -731,6 +770,12 @@ resource "kubernetes_manifest" "monitoring_other" {
     format("%s/%s/%s", try(m.metadata.namespace, "cluster"), m.kind, m.metadata.name) => m
   }
   manifest = each.value
+
+  field_manager {
+    name            = "opentofu"
+    force_conflicts = true
+  }
+
   computed_fields = concat([
     "metadata.annotations",
     "metadata.annotations[\"deprecated.daemonset.template.generation\"]",

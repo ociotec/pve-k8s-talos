@@ -610,7 +610,7 @@ metadata:
     app.kubernetes.io/name: rook-ceph
     app.kubernetes.io/instance: rook-ceph
     app.kubernetes.io/component: rook-ceph-operator
-    app.kubernetes.io/part-of: rook-ceph-operator
+    app.kubernetes.io/part-of: rook-ceph
 spec:
   selector:
     matchLabels:
@@ -622,6 +622,7 @@ spec:
     metadata:
       labels:
         app: rook-ceph-operator
+        app.kubernetes.io/part-of: rook-ceph
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8080"

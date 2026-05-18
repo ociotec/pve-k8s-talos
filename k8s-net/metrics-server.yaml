@@ -3,6 +3,7 @@ kind: ServiceAccount
 metadata:
   labels:
     k8s-app: metrics-server
+    app.kubernetes.io/part-of: metrics-server
   name: metrics-server
   namespace: kube-system
 ---
@@ -100,6 +101,7 @@ kind: Service
 metadata:
   labels:
     k8s-app: metrics-server
+    app.kubernetes.io/part-of: metrics-server
   name: metrics-server
   namespace: kube-system
 spec:
@@ -117,6 +119,7 @@ kind: Deployment
 metadata:
   labels:
     k8s-app: metrics-server
+    app.kubernetes.io/part-of: metrics-server
   name: metrics-server
   namespace: kube-system
 spec:
@@ -130,6 +133,7 @@ spec:
     metadata:
       labels:
         k8s-app: metrics-server
+        app.kubernetes.io/part-of: metrics-server
     spec:
       containers:
       - args:

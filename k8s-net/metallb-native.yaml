@@ -1970,6 +1970,7 @@ kind: Deployment
 metadata:
   labels:
     app: metallb
+    app.kubernetes.io/part-of: metallb
     component: controller
   name: controller
   namespace: metallb-system
@@ -1986,6 +1987,7 @@ spec:
         prometheus.io/scrape: "true"
       labels:
         app: metallb
+        app.kubernetes.io/part-of: metallb
         component: controller
     spec:
       priorityClassName: infra-high
@@ -2061,6 +2063,7 @@ kind: DaemonSet
 metadata:
   labels:
     app: metallb
+    app.kubernetes.io/part-of: metallb
     component: speaker
   name: speaker
   namespace: metallb-system
@@ -2076,6 +2079,7 @@ spec:
         prometheus.io/scrape: "true"
       labels:
         app: metallb
+        app.kubernetes.io/part-of: metallb
         component: speaker
     spec:
       priorityClassName: infra-high

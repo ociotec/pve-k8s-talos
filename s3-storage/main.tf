@@ -470,7 +470,8 @@ resource "kubernetes_manifest" "config" {
       name      = "garage-config"
       namespace = local.s3_namespace_value
       labels = {
-        app = local.garage_name_value
+        app                         = local.garage_name_value
+        "app.kubernetes.io/part-of" = "garage"
       }
     }
     data = {
@@ -624,7 +625,8 @@ resource "kubernetes_manifest" "headless_service" {
       name      = local.garage_name_value
       namespace = local.s3_namespace_value
       labels = {
-        app = local.garage_name_value
+        app                         = local.garage_name_value
+        "app.kubernetes.io/part-of" = "garage"
       }
     }
     spec = {
@@ -706,7 +708,8 @@ resource "kubernetes_manifest" "statefulset" {
       name      = local.garage_name_value
       namespace = local.s3_namespace_value
       labels = {
-        app = local.garage_name_value
+        app                         = local.garage_name_value
+        "app.kubernetes.io/part-of" = "garage"
       }
     }
     spec = {
@@ -721,7 +724,8 @@ resource "kubernetes_manifest" "statefulset" {
       template = {
         metadata = {
           labels = {
-            app = local.garage_name_value
+            app                         = local.garage_name_value
+            "app.kubernetes.io/part-of" = "garage"
           }
           annotations = {
             "checksum/garage-config" = sha256(local.garage_config_toml)
@@ -1127,7 +1131,8 @@ resource "kubernetes_manifest" "console_deployment" {
       name      = local.console_service_name
       namespace = local.s3_namespace_value
       labels = {
-        app = local.console_service_name
+        app                         = local.console_service_name
+        "app.kubernetes.io/part-of" = "garage"
       }
     }
     spec = {
@@ -1140,7 +1145,8 @@ resource "kubernetes_manifest" "console_deployment" {
       template = {
         metadata = {
           labels = {
-            app = local.console_service_name
+            app                         = local.console_service_name
+            "app.kubernetes.io/part-of" = "garage"
           }
         }
         spec = {
@@ -1274,7 +1280,8 @@ resource "kubernetes_manifest" "console_oauth2_proxy_deployment" {
       name      = "console-oauth2-proxy"
       namespace = local.s3_namespace_value
       labels = {
-        app = "console-oauth2-proxy"
+        app                         = "console-oauth2-proxy"
+        "app.kubernetes.io/part-of" = "garage"
       }
     }
     spec = {
@@ -1287,7 +1294,8 @@ resource "kubernetes_manifest" "console_oauth2_proxy_deployment" {
       template = {
         metadata = {
           labels = {
-            app = "console-oauth2-proxy"
+            app                         = "console-oauth2-proxy"
+            "app.kubernetes.io/part-of" = "garage"
           }
         }
         spec = {

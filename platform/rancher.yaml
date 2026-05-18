@@ -20,6 +20,7 @@ metadata:
   name: rancher
   labels:
     app: rancher
+    app.kubernetes.io/part-of: rancher
     chart: rancher-2.14.1
     heritage: Helm
     release: rancher
@@ -67,6 +68,7 @@ metadata:
     chart: rancher-2.14.1
     heritage: Helm
     release: rancher
+    app.kubernetes.io/part-of: rancher
 spec:
   ports:
   - port: 80
@@ -90,6 +92,7 @@ metadata:
     chart: rancher-2.14.1
     heritage: Helm
     release: rancher
+    app.kubernetes.io/part-of: rancher
 spec:
   type: ClusterIP
   ports:
@@ -111,6 +114,7 @@ metadata:
     chart: rancher-2.14.1
     heritage: Helm
     release: rancher
+    app.kubernetes.io/part-of: rancher
 spec:
   replicas: ${rancher_replicas}
   selector:
@@ -125,6 +129,7 @@ spec:
     metadata:
       labels:
         app: rancher
+        app.kubernetes.io/part-of: rancher
         release: rancher
     spec:
       priorityClassName: rancher-critical

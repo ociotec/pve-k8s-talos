@@ -123,6 +123,8 @@ kind: Deployment
 metadata:
   name: kube-state-metrics
   namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: kube-state-metrics
 spec:
   replicas: 1
   selector:
@@ -132,6 +134,7 @@ spec:
     metadata:
       labels:
         app: kube-state-metrics
+        app.kubernetes.io/part-of: kube-state-metrics
     spec:
       priorityClassName: infra-observability
       serviceAccountName: kube-state-metrics
@@ -139,7 +142,7 @@ spec:
         - name: kube-state-metrics
           image: registry.k8s.io/kube-state-metrics/kube-state-metrics:${kube_state_metrics_image_tag}
           args:
-            - --metric-labels-allowlist=pods=[app.kubernetes.io/component,component,app.kubernetes.io/name,app]
+            - --metric-labels-allowlist=pods=[app.kubernetes.io/component,component,app.kubernetes.io/name,app.kubernetes.io/part-of,app],deployments=[app.kubernetes.io/part-of,app.kubernetes.io/name,app],statefulsets=[app.kubernetes.io/part-of,app.kubernetes.io/name,app],daemonsets=[app.kubernetes.io/part-of,app.kubernetes.io/name,app]
           ports:
             - name: metrics
               containerPort: 8080

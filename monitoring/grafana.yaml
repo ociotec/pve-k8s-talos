@@ -35,6 +35,8 @@ kind: Deployment
 metadata:
   name: grafana-postgres
   namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: grafana
 spec:
   replicas: 1
   strategy:
@@ -46,6 +48,7 @@ spec:
     metadata:
       labels:
         app: grafana-postgres
+        app.kubernetes.io/part-of: grafana
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9187"
@@ -216,6 +219,8 @@ kind: Deployment
 metadata:
   name: grafana
   namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: grafana
 spec:
   replicas: 1
   strategy:
@@ -227,6 +232,7 @@ spec:
     metadata:
       labels:
         app: grafana
+        app.kubernetes.io/part-of: grafana
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "3000"
@@ -413,6 +419,11 @@ spec:
               mountPath: /var/lib/grafana/dashboards-provisioning
               readOnly: true
 %{ endif ~}
+%{ for source in grafana_dashboard_group_sources ~}
+            - name: ${source.volume_name}
+              mountPath: ${source.mount_path}
+              readOnly: true
+%{ endfor ~}
       volumes:
         - name: data
           persistentVolumeClaim:
@@ -425,9 +436,9 @@ spec:
             name: grafana-dashboard-provider
         - name: dashboards
           configMap:
-            name: grafana-dashboards
+            name: ${grafana_dashboard_root_source.name}
             items:
-%{ for item in grafana_dashboard_volume_items ~}
+%{ for item in grafana_dashboard_root_source.items ~}
               - key: ${item.key}
                 path: ${item.path}
 %{ endfor ~}
@@ -442,6 +453,16 @@ spec:
             claimName: ${grafana_dashboard_provisioning_pvc_name}
             readOnly: true
 %{ endif ~}
+%{ for source in grafana_dashboard_group_sources ~}
+        - name: ${source.volume_name}
+          configMap:
+            name: ${source.configmap_name}
+            items:
+%{ for item in source.items ~}
+              - key: ${item.key}
+                path: ${item.path}
+%{ endfor ~}
+%{ endfor ~}
 ---
 apiVersion: v1
 kind: Service
@@ -600,6 +621,7 @@ spec:
 
               cleanup_legacy_dashboard "grafana" "CoreDNS internal metrics"
 
+              sync_dir ${grafana_dashboard_root_mount_path} infrastructure
               sync_dir /var/lib/grafana/dashboards/infrastructure/k8s infrastructure-k8s
               sync_dir /var/lib/grafana/dashboards/infrastructure/k8s-net infrastructure-k8s-net
               sync_dir /var/lib/grafana/dashboards/infrastructure/nodes infrastructure-nodes
@@ -629,16 +651,31 @@ spec:
               memory: 128Mi
           volumeMounts:
             - name: dashboards
-              mountPath: /var/lib/grafana/dashboards
+              mountPath: ${grafana_dashboard_root_mount_path}
               readOnly: true
+%{ for source in grafana_dashboard_group_sources ~}
+            - name: ${source.volume_name}
+              mountPath: ${source.mount_path}
+              readOnly: true
+%{ endfor ~}
       volumes:
         - name: dashboards
           configMap:
-            name: grafana-dashboards
+            name: ${grafana_dashboard_root_source.name}
             items:
-%{ for item in grafana_dashboard_volume_items ~}
+%{ for item in grafana_dashboard_root_source.items ~}
               - key: ${item.key}
                 path: ${item.path}
+%{ endfor ~}
+%{ for source in grafana_dashboard_group_sources ~}
+        - name: ${source.volume_name}
+          configMap:
+            name: ${source.configmap_name}
+            items:
+%{ for item in source.items ~}
+              - key: ${item.key}
+                path: ${item.path}
+%{ endfor ~}
 %{ endfor ~}
 ---
 apiVersion: cert-manager.io/v1

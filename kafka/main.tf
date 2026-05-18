@@ -555,7 +555,8 @@ resource "kubernetes_manifest" "headless_service" {
       name      = local.redpanda_resource_name_value
       namespace = local.redpanda_namespace_value
       labels = {
-        app = local.redpanda_resource_name_value
+        app                         = local.redpanda_resource_name_value
+        "app.kubernetes.io/part-of" = "redpanda"
       }
     }
     spec = {
@@ -677,7 +678,8 @@ resource "kubernetes_manifest" "statefulset" {
       name      = local.redpanda_resource_name_value
       namespace = local.redpanda_namespace_value
       labels = {
-        app = local.redpanda_resource_name_value
+        app                         = local.redpanda_resource_name_value
+        "app.kubernetes.io/part-of" = "redpanda"
       }
     }
     spec = {
@@ -692,7 +694,8 @@ resource "kubernetes_manifest" "statefulset" {
       template = {
         metadata = {
           labels = {
-            app = local.redpanda_resource_name_value
+            app                         = local.redpanda_resource_name_value
+            "app.kubernetes.io/part-of" = "redpanda"
           }
           annotations = {
             "prometheus.io/scrape" = "true"
@@ -974,7 +977,8 @@ resource "kubernetes_manifest" "console_config" {
       name      = "${local.redpanda_resource_name_value}-console-config"
       namespace = local.redpanda_namespace_value
       labels = {
-        app = "${local.redpanda_resource_name_value}-console"
+        app                         = "${local.redpanda_resource_name_value}-console"
+        "app.kubernetes.io/part-of" = "redpanda"
       }
     }
     data = {
@@ -995,7 +999,8 @@ resource "kubernetes_manifest" "console_service" {
       name      = "${local.redpanda_resource_name_value}-console"
       namespace = local.redpanda_namespace_value
       labels = {
-        app = "${local.redpanda_resource_name_value}-console"
+        app                         = "${local.redpanda_resource_name_value}-console"
+        "app.kubernetes.io/part-of" = "redpanda"
       }
     }
     spec = {
@@ -1025,7 +1030,8 @@ resource "kubernetes_manifest" "console_deployment" {
       name      = "${local.redpanda_resource_name_value}-console"
       namespace = local.redpanda_namespace_value
       labels = {
-        app = "${local.redpanda_resource_name_value}-console"
+        app                         = "${local.redpanda_resource_name_value}-console"
+        "app.kubernetes.io/part-of" = "redpanda"
       }
     }
     spec = {
@@ -1038,7 +1044,8 @@ resource "kubernetes_manifest" "console_deployment" {
       template = {
         metadata = {
           labels = {
-            app = "${local.redpanda_resource_name_value}-console"
+            app                         = "${local.redpanda_resource_name_value}-console"
+            "app.kubernetes.io/part-of" = "redpanda"
           }
         }
         spec = {
@@ -1231,7 +1238,8 @@ resource "kubernetes_manifest" "console_oauth2_proxy_deployment" {
       name      = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
       namespace = local.redpanda_namespace_value
       labels = {
-        app = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+        app                         = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+        "app.kubernetes.io/part-of" = "redpanda"
       }
     }
     spec = {
@@ -1244,7 +1252,8 @@ resource "kubernetes_manifest" "console_oauth2_proxy_deployment" {
       template = {
         metadata = {
           labels = {
-            app = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+            app                         = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+            "app.kubernetes.io/part-of" = "redpanda"
           }
         }
         spec = {

@@ -348,8 +348,18 @@ locals {
       resource  = "deployment"
       name      = "capi-controller-manager"
       patch = jsonencode({
+        metadata = {
+          labels = {
+            "app.kubernetes.io/part-of" = "rancher"
+          }
+        }
         spec = {
           template = {
+            metadata = {
+              labels = {
+                "app.kubernetes.io/part-of" = "rancher"
+              }
+            }
             spec = {
               containers = [{
                 name = "manager"
@@ -374,8 +384,18 @@ locals {
       resource  = "deployment"
       name      = "rancher-turtles-controller-manager"
       patch = jsonencode({
+        metadata = {
+          labels = {
+            "app.kubernetes.io/part-of" = "rancher"
+          }
+        }
         spec = {
           template = {
+            metadata = {
+              labels = {
+                "app.kubernetes.io/part-of" = "rancher"
+              }
+            }
             spec = {
               containers = [{
                 name = "manager"
@@ -400,8 +420,18 @@ locals {
       resource  = "deployment"
       name      = "fleet-agent"
       patch = jsonencode({
+        metadata = {
+          labels = {
+            "app.kubernetes.io/part-of" = "rancher"
+          }
+        }
         spec = {
           template = {
+            metadata = {
+              labels = {
+                "app.kubernetes.io/part-of" = "rancher"
+              }
+            }
             spec = {
               containers = [{
                 name = "fleet-agent"
@@ -426,10 +456,20 @@ locals {
       resource  = "cronjob"
       name      = "fleet-cleanup-gitrepo-jobs"
       patch = jsonencode({
+        metadata = {
+          labels = {
+            "app.kubernetes.io/part-of" = "rancher"
+          }
+        }
         spec = {
           jobTemplate = {
             spec = {
               template = {
+                metadata = {
+                  labels = {
+                    "app.kubernetes.io/part-of" = "rancher"
+                  }
+                }
                 spec = {
                   containers = [{
                     name = "cleanup"
@@ -456,8 +496,18 @@ locals {
       resource  = "deployment"
       name      = "fleet-controller"
       patch = jsonencode({
+        metadata = {
+          labels = {
+            "app.kubernetes.io/part-of" = "rancher"
+          }
+        }
         spec = {
           template = {
+            metadata = {
+              labels = {
+                "app.kubernetes.io/part-of" = "rancher"
+              }
+            }
             spec = {
               containers = [
                 {
@@ -510,8 +560,18 @@ locals {
       resource  = "deployment"
       name      = "gitjob"
       patch = jsonencode({
+        metadata = {
+          labels = {
+            "app.kubernetes.io/part-of" = "rancher"
+          }
+        }
         spec = {
           template = {
+            metadata = {
+              labels = {
+                "app.kubernetes.io/part-of" = "rancher"
+              }
+            }
             spec = {
               containers = [{
                 name = "gitjob"
@@ -536,8 +596,18 @@ locals {
       resource  = "deployment"
       name      = "helmops"
       patch = jsonencode({
+        metadata = {
+          labels = {
+            "app.kubernetes.io/part-of" = "rancher"
+          }
+        }
         spec = {
           template = {
+            metadata = {
+              labels = {
+                "app.kubernetes.io/part-of" = "rancher"
+              }
+            }
             spec = {
               containers = [{
                 name = "helmops"
@@ -562,8 +632,18 @@ locals {
       resource  = "deployment"
       name      = "rancher-webhook"
       patch = jsonencode({
+        metadata = {
+          labels = {
+            "app.kubernetes.io/part-of" = "rancher"
+          }
+        }
         spec = {
           template = {
+            metadata = {
+              labels = {
+                "app.kubernetes.io/part-of" = "rancher"
+              }
+            }
             spec = {
               containers = [{
                 name = "rancher-webhook"
@@ -588,10 +668,20 @@ locals {
       resource  = "cronjob"
       name      = "rke2-machineconfig-cleanup-cronjob"
       patch = jsonencode({
+        metadata = {
+          labels = {
+            "app.kubernetes.io/part-of" = "rancher"
+          }
+        }
         spec = {
           jobTemplate = {
             spec = {
               template = {
+                metadata = {
+                  labels = {
+                    "app.kubernetes.io/part-of" = "rancher"
+                  }
+                }
                 spec = {
                   containers = [{
                     name = "rke2-machineconfig-cleanup-pod"
