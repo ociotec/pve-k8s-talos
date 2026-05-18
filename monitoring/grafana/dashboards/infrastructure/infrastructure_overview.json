@@ -1560,7 +1560,7 @@
     }
   ],
   "preload": false,
-  "refresh": "30s",
+  "refresh": "5s",
   "schemaVersion": 42,
   "tags": [
     "infrastructure",
@@ -1727,7 +1727,7 @@
     ]
   },
   "time": {
-    "from": "now-6h",
+    "from": "now-1h",
     "to": "now"
   },
   "timepicker": {
