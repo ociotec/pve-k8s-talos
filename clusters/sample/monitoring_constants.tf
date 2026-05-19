@@ -86,6 +86,8 @@ locals {
   grafana_cpu_limit   = "2"
   grafana_mem_request = "1Gi"
   grafana_mem_limit   = "1Gi"
+  grafana_go_mem_limit_percent = 90
+  grafana_go_gc_percent        = 50
 
   loki_cpu_request = "200m"
   loki_cpu_limit   = "1"

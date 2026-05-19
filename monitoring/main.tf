@@ -99,6 +99,12 @@ locals {
     local.grafana_dashboard_provisioning_pvc_folders_from_files_structure,
     true
   )
+  grafana_go_mem_limit_percent_value = try(local.grafana_go_mem_limit_percent, 90)
+  grafana_mem_limit_mib = can(regex("^[0-9]+Gi$", local.grafana_mem_limit)) ? tonumber(trimsuffix(local.grafana_mem_limit, "Gi")) * 1024 : (
+    can(regex("^[0-9]+Mi$", local.grafana_mem_limit)) ? tonumber(trimsuffix(local.grafana_mem_limit, "Mi")) : null
+  )
+  grafana_go_mem_limit_mib = floor(local.grafana_mem_limit_mib * local.grafana_go_mem_limit_percent_value / 100)
+  grafana_go_mem_limit     = format("%dMiB", local.grafana_go_mem_limit_mib)
   monitoring_keycloak_auth_enabled = local.grafana_auth_enabled || local.prometheus_auth_enabled
   identity_realm_groups = local.monitoring_keycloak_auth_enabled ? try(
     data.terraform_remote_state.identity[0].outputs.keycloak_realm_groups,
@@ -344,6 +350,8 @@ locals {
       grafana_cpu_limit                         = local.grafana_cpu_limit
       grafana_mem_request                       = local.grafana_mem_request
       grafana_mem_limit                         = local.grafana_mem_limit
+      grafana_go_mem_limit                      = local.grafana_go_mem_limit
+      grafana_go_gc_percent                     = tostring(try(local.grafana_go_gc_percent, 50))
       grafana_tls_secret_name                   = local.grafana_tls_secret_name
       grafana_auth_enabled                      = local.grafana_auth_enabled
       grafana_auth_ca_enabled                   = local.grafana_auth_ca_enabled
@@ -576,6 +584,20 @@ check "grafana_dashboard_provisioning_pvc_required" {
       length(local.grafana_dashboard_provisioning_pvc_access_modes_value) > 0
     )
     error_message = "Dashboard provisioning PVC requires grafana_dashboard_provisioning_pvc_name, grafana_dashboard_provisioning_pvc_storage_class, grafana_dashboard_provisioning_pvc_size, and at least one access mode."
+  }
+}
+
+check "grafana_go_memory_limit_supported" {
+  assert {
+    condition     = local.grafana_mem_limit_mib != null
+    error_message = format("grafana_mem_limit must use a supported whole-number memory unit for GOMEMLIMIT derivation: Mi or Gi. Got %q.", local.grafana_mem_limit)
+  }
+}
+
+check "grafana_go_mem_limit_percent_valid" {
+  assert {
+    condition     = local.grafana_go_mem_limit_percent_value > 0 && local.grafana_go_mem_limit_percent_value < 100
+    error_message = format("grafana_go_mem_limit_percent must be greater than 0 and less than 100. Got %s.", tostring(local.grafana_go_mem_limit_percent_value))
   }
 }
 
