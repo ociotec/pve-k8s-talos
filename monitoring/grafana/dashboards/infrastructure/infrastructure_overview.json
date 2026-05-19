@@ -1336,10 +1336,6 @@
                 "value": 0
               },
               {
-                "color": "yellow",
-                "value": 80
-              },
-              {
                 "color": "green",
                 "value": 100
               }
@@ -1351,8 +1347,8 @@
       },
       "gridPos": {
         "h": 3,
-        "w": 3,
-        "x": 3,
+        "w": 2,
+        "x": 8,
         "y": 9
       },
       "id": 26,
@@ -1376,15 +1372,15 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "100 * sum((ceph_osd_up{} == 1) and on(ceph_daemon,cluster,namespace) (ceph_osd_in{} == 1)) / clamp_min(count(ceph_osd_up{}), 1)",
+          "expr": "100 * sum(ceph_mon_quorum_status{}) / clamp_min(count(ceph_mon_quorum_status{}), 1)",
           "instant": true,
-          "legendFormat": "Ceph OSDs In&Up",
+          "legendFormat": "Ceph monitors",
           "refId": "A"
         }
       ],
       "title": "",
       "type": "stat",
-      "description": "Ceph OSD availability, percentage of OSDs that are both in and up. Thresholds: red < 80%; yellow >= 80% and < 100%; green = 100%."
+      "description": "Ceph monitor quorum coverage. Thresholds: red < 100%; green = 100%."
     },
     {
       "datasource": {
@@ -1415,8 +1411,8 @@
       },
       "gridPos": {
         "h": 3,
-        "w": 3,
-        "x": 6,
+        "w": 2,
+        "x": 10,
         "y": 9
       },
       "id": 27,
@@ -1479,8 +1475,8 @@
       },
       "gridPos": {
         "h": 3,
-        "w": 3,
-        "x": 9,
+        "w": 2,
+        "x": 12,
         "y": 9
       },
       "id": 28,
@@ -1504,15 +1500,79 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "100 * sum(ceph_mon_quorum_status{}) / clamp_min(count(ceph_mon_quorum_status{}), 1)",
+          "expr": "100 * sum((ceph_osd_up{} == 1) and on(ceph_daemon,cluster,namespace) (ceph_osd_in{} == 1)) / clamp_min(count(ceph_osd_up{}), 1)",
           "instant": true,
-          "legendFormat": "Ceph monitors",
+          "legendFormat": "Ceph OSDs In&Up",
           "refId": "A"
         }
       ],
       "title": "",
       "type": "stat",
-      "description": "Ceph monitor quorum coverage. Thresholds: red < 100%; green = 100%."
+      "description": "Ceph OSD availability, percentage of OSDs that are both in and up. Thresholds: red < 100%; green = 100%."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 100
+              }
+            ]
+          },
+          "unit": "suffix:%"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 2,
+        "x": 14,
+        "y": 9
+      },
+      "id": 59,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * count(ceph_mds_metadata{rank!=\"-1\"}) / clamp_min(count(ceph_fs_metadata{}), 1)",
+          "instant": true,
+          "legendFormat": "Ceph MDS active",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat",
+      "description": "Ceph MDS active-rank coverage, percentage of CephFS filesystems with an active MDS rank. Thresholds: red < 100%; green = 100%."
     },
     {
       "datasource": {
@@ -1547,8 +1607,8 @@
       },
       "gridPos": {
         "h": 3,
-        "w": 4,
-        "x": 12,
+        "w": 3,
+        "x": 3,
         "y": 9
       },
       "id": 22,
@@ -1580,6 +1640,64 @@
       "title": "",
       "type": "stat",
       "description": "Ceph storage usage. Thresholds: green < 50%; yellow >= 50% and < 80%; red >= 80%."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 2,
+        "x": 6,
+        "y": 9
+      },
+      "id": 60,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(ceph_cluster_total_bytes{})",
+          "instant": true,
+          "legendFormat": "Ceph total",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat",
+      "description": "Ceph total raw storage capacity from ceph_cluster_total_bytes."
     },
     {
       "datasource": {
