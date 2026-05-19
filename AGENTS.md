@@ -52,6 +52,7 @@ It complements `README.md` and focuses on execution behavior, change safety, and
   - `clusters/<cluster>/*_constants.tf`
 - Add concise comments for constants whose purpose, operational effect, or relationship to adjacent settings is not obvious.
 - Avoid hardcoding cluster names, hostnames, paths, or secrets in shared modules.
+- When changing CPU/memory resource constants in a real cluster, mirror the new intended baseline in the corresponding `clusters/sample/*_constants.tf` file unless the real-cluster value is explicitly environment-specific. `clusters/sample` is the reference contract used to update other real clusters.
 - When adding images from a new upstream container registry, update the registry mirror example in `clusters/sample/constants.auto.tfvars` and the required-registry list in `README.md`.
 
 ## Certificates and TLS Conventions

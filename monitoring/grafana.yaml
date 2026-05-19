@@ -284,7 +284,7 @@ spec:
               port: monitoring
               scheme: HTTP
             periodSeconds: 5
-            timeoutSeconds: 2
+            timeoutSeconds: 5
             successThreshold: 1
             failureThreshold: 60
           readinessProbe:
@@ -293,7 +293,7 @@ spec:
               port: monitoring
               scheme: HTTP
             periodSeconds: 10
-            timeoutSeconds: 2
+            timeoutSeconds: 5
             successThreshold: 1
             failureThreshold: 3
           livenessProbe:
@@ -302,9 +302,9 @@ spec:
               port: monitoring
               scheme: HTTP
             periodSeconds: 30
-            timeoutSeconds: 2
+            timeoutSeconds: 5
             successThreshold: 1
-            failureThreshold: 3
+            failureThreshold: 5
           resources:
             requests:
               cpu: ${grafana_cpu_request}

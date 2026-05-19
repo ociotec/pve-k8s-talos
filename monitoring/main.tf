@@ -781,15 +781,20 @@ resource "kubernetes_manifest" "monitoring_other" {
     "metadata.annotations[\"deprecated.daemonset.template.generation\"]",
     "object.metadata.annotations",
     "object.metadata.annotations[\"deprecated.daemonset.template.generation\"]",
+    "spec.template.metadata.annotations",
     "spec.template.spec.containers[0].resources.limits.cpu",
     "spec.template.spec.nodeSelector",
     ], try(each.value.kind, "") == "Deployment" ? [
+    "spec.template.metadata.annotations[\"kubectl.kubernetes.io/restartedAt\"]",
     "object.spec.template.metadata.annotations",
+    "object.spec.template.metadata.annotations[\"kubectl.kubernetes.io/restartedAt\"]",
   ] : [])
   lifecycle {
     ignore_changes = [
       manifest.metadata.annotations,
       object.metadata.annotations,
+      object.spec.template.metadata.annotations,
+      object.spec.template.metadata.annotations["kubectl.kubernetes.io/restartedAt"],
     ]
   }
   depends_on = [

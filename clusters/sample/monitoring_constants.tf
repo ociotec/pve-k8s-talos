@@ -82,10 +82,10 @@ locals {
   # Docs: https://prometheus.io/docs/prometheus/latest/command-line/prometheus/#flags
   prometheus_query_max_concurrency = 10
 
-  grafana_cpu_request = "100m"
-  grafana_cpu_limit   = "500m"
-  grafana_mem_request = "768Mi"
-  grafana_mem_limit   = "768Mi"
+  grafana_cpu_request = "500m"
+  grafana_cpu_limit   = "2"
+  grafana_mem_request = "1Gi"
+  grafana_mem_limit   = "1Gi"
 
   loki_cpu_request = "200m"
   loki_cpu_limit   = "1"
