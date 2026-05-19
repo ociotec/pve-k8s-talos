@@ -32,18 +32,28 @@
         "type": "prometheus",
         "uid": "Prometheus"
       },
-      "description": "CPU usage per control-plane VM from node-exporter.",
+      "description": "Control-plane node CPU usage from node-exporter. Thresholds: gray = N/A when node/exporter is not ready; green < 50%; yellow >= 50% and < 80%; red >= 80%.",
       "fieldConfig": {
         "defaults": {
           "decimals": 1,
           "max": 100,
-          "min": 0,
+          "min": -1,
           "mappings": [
+            {
+              "options": {
+                "-1": {
+                  "text": "N/A",
+                  "color": "dark-gray"
+                }
+              },
+              "type": "value"
+            },
             {
               "options": {
                 "match": "null",
                 "result": {
-                  "text": "N/A"
+                  "text": "N/A",
+                  "color": "dark-gray"
                 }
               },
               "type": "special"
@@ -52,6 +62,10 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
+              {
+                "color": "dark-gray",
+                "value": -1
+              },
               {
                 "color": "green",
                 "value": 0
@@ -72,7 +86,7 @@
       },
       "gridPos": {
         "h": 3,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 0
       },
@@ -98,7 +112,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "((\n  100 * (1 - avg by(nodename) (\n  rate(node_cpu_seconds_total{job=\"node-exporter\",mode=\"idle\"}[5m])\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n))\n)\nor on(nodename)\n(\n  100 * (max by(nodename) (label_replace(kube_node_info, \"nodename\", \"$1\", \"node\", \"(.*)\")) unless on(nodename) (max by(nodename) (label_replace(up{job=\"node-exporter\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\")) and on(nodename) max by(nodename) (label_replace(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\"))))\n))\n  * on(nodename) group_left() max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"}, \"nodename\", \"$1\", \"node\", \"(.*)\"))",
+          "expr": "((\n  100 * (1 - avg by(nodename) (\n  rate(node_cpu_seconds_total{job=\"node-exporter\",mode=\"idle\"}[5m])\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n))\n)\nor on(nodename)\n(\n  -1 * (max by(nodename) (label_replace(kube_node_info, \"nodename\", \"$1\", \"node\", \"(.*)\")) unless on(nodename) (max by(nodename) (label_replace(up{job=\"node-exporter\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\")) and on(nodename) max by(nodename) (label_replace(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\"))))\n))\n  * on(nodename) group_left() max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"}, \"nodename\", \"$1\", \"node\", \"(.*)\"))",
           "legendFormat": "{{nodename}}",
           "refId": "A"
         }
@@ -111,18 +125,28 @@
         "type": "prometheus",
         "uid": "Prometheus"
       },
-      "description": "Memory usage per control-plane VM from node-exporter.",
+      "description": "Control-plane node RAM usage from node-exporter. Thresholds: gray = N/A when node/exporter is not ready; green < 50%; yellow >= 50% and < 80%; red >= 80%.",
       "fieldConfig": {
         "defaults": {
           "decimals": 1,
           "max": 100,
-          "min": 0,
+          "min": -1,
           "mappings": [
+            {
+              "options": {
+                "-1": {
+                  "text": "N/A",
+                  "color": "dark-gray"
+                }
+              },
+              "type": "value"
+            },
             {
               "options": {
                 "match": "null",
                 "result": {
-                  "text": "N/A"
+                  "text": "N/A",
+                  "color": "dark-gray"
                 }
               },
               "type": "special"
@@ -131,6 +155,10 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
+              {
+                "color": "dark-gray",
+                "value": -1
+              },
               {
                 "color": "green",
                 "value": 0
@@ -151,8 +179,8 @@
       },
       "gridPos": {
         "h": 3,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 8,
         "y": 0
       },
       "id": 3,
@@ -177,7 +205,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "((\n  100 * (1 - (sum by(nodename) (\n  node_memory_MemAvailable_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n) / clamp_min(sum by(nodename) (\n  node_memory_MemTotal_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n), 1)))\n)\nor on(nodename)\n(\n  100 * (max by(nodename) (label_replace(kube_node_info, \"nodename\", \"$1\", \"node\", \"(.*)\")) unless on(nodename) (max by(nodename) (label_replace(up{job=\"node-exporter\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\")) and on(nodename) max by(nodename) (label_replace(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\"))))\n))\n  * on(nodename) group_left() max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"}, \"nodename\", \"$1\", \"node\", \"(.*)\"))",
+          "expr": "((\n  100 * (1 - (sum by(nodename) (\n  node_memory_MemAvailable_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n) / clamp_min(sum by(nodename) (\n  node_memory_MemTotal_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n), 1)))\n)\nor on(nodename)\n(\n  -1 * (max by(nodename) (label_replace(kube_node_info, \"nodename\", \"$1\", \"node\", \"(.*)\")) unless on(nodename) (max by(nodename) (label_replace(up{job=\"node-exporter\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\")) and on(nodename) max by(nodename) (label_replace(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\"))))\n))\n  * on(nodename) group_left() max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"}, \"nodename\", \"$1\", \"node\", \"(.*)\"))",
           "legendFormat": "{{nodename}}",
           "refId": "A"
         }
@@ -190,18 +218,28 @@
         "type": "prometheus",
         "uid": "Prometheus"
       },
-      "description": "CPU usage per worker VM from node-exporter.",
+      "description": "Control-plane pod slot usage per node, calculated as used pods / allocatable pods. Thresholds: gray = N/A when node is not ready; green < 70%; yellow >= 70% and < 90%; red >= 90%.",
       "fieldConfig": {
         "defaults": {
           "decimals": 1,
           "max": 100,
-          "min": 0,
+          "min": -1,
           "mappings": [
+            {
+              "options": {
+                "-1": {
+                  "text": "N/A",
+                  "color": "dark-gray"
+                }
+              },
+              "type": "value"
+            },
             {
               "options": {
                 "match": "null",
                 "result": {
-                  "text": "N/A"
+                  "text": "N/A",
+                  "color": "dark-gray"
                 }
               },
               "type": "special"
@@ -210,6 +248,103 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
+              {
+                "color": "dark-gray",
+                "value": -1
+              },
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "suffix:% pods"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "id": 34,
+      "maxDataPoints": 120,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "(100 * count by(node) ((kube_pod_status_phase{phase=~\"Pending|Running\"} == 1) * on(namespace,pod) group_left(node) max by(namespace,pod,node) (kube_pod_info)) / clamp_min(sum by(node) (kube_node_status_allocatable{resource=\"pods\"}), 1) or on(node) (-1 * (max by(node) (kube_node_info) unless on(node) max by(node) (kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1)))) * on(node) group_left() kube_node_role{role=~\"control-plane|master\"}",
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "description": "Worker node CPU usage from node-exporter. Thresholds: gray = N/A when node/exporter is not ready; green < 50%; yellow >= 50% and < 80%; red >= 80%.",
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 1,
+          "max": 100,
+          "min": -1,
+          "mappings": [
+            {
+              "options": {
+                "-1": {
+                  "text": "N/A",
+                  "color": "dark-gray"
+                }
+              },
+              "type": "value"
+            },
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "N/A",
+                  "color": "dark-gray"
+                }
+              },
+              "type": "special"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "dark-gray",
+                "value": -1
+              },
               {
                 "color": "green",
                 "value": 0
@@ -230,7 +365,7 @@
       },
       "gridPos": {
         "h": 3,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 3
       },
@@ -256,7 +391,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "((\n  100 * (1 - avg by(nodename) (\n  rate(node_cpu_seconds_total{job=\"node-exporter\",mode=\"idle\"}[5m])\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n))\n)\nor on(nodename)\n(\n  100 * (max by(nodename) (label_replace(kube_node_info, \"nodename\", \"$1\", \"node\", \"(.*)\")) unless on(nodename) (max by(nodename) (label_replace(up{job=\"node-exporter\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\")) and on(nodename) max by(nodename) (label_replace(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\"))))\n))\n  unless on(nodename) max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"}, \"nodename\", \"$1\", \"node\", \"(.*)\"))",
+          "expr": "((\n  100 * (1 - avg by(nodename) (\n  rate(node_cpu_seconds_total{job=\"node-exporter\",mode=\"idle\"}[5m])\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n))\n)\nor on(nodename)\n(\n  -1 * (max by(nodename) (label_replace(kube_node_info, \"nodename\", \"$1\", \"node\", \"(.*)\")) unless on(nodename) (max by(nodename) (label_replace(up{job=\"node-exporter\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\")) and on(nodename) max by(nodename) (label_replace(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\"))))\n))\n  unless on(nodename) max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"}, \"nodename\", \"$1\", \"node\", \"(.*)\"))",
           "legendFormat": "{{nodename}}",
           "refId": "A"
         }
@@ -269,18 +404,28 @@
         "type": "prometheus",
         "uid": "Prometheus"
       },
-      "description": "Memory usage per worker VM from node-exporter.",
+      "description": "Worker node RAM usage from node-exporter. Thresholds: gray = N/A when node/exporter is not ready; green < 50%; yellow >= 50% and < 80%; red >= 80%.",
       "fieldConfig": {
         "defaults": {
           "decimals": 1,
           "max": 100,
-          "min": 0,
+          "min": -1,
           "mappings": [
+            {
+              "options": {
+                "-1": {
+                  "text": "N/A",
+                  "color": "dark-gray"
+                }
+              },
+              "type": "value"
+            },
             {
               "options": {
                 "match": "null",
                 "result": {
-                  "text": "N/A"
+                  "text": "N/A",
+                  "color": "dark-gray"
                 }
               },
               "type": "special"
@@ -289,6 +434,10 @@
           "thresholds": {
             "mode": "absolute",
             "steps": [
+              {
+                "color": "dark-gray",
+                "value": -1
+              },
               {
                 "color": "green",
                 "value": 0
@@ -309,8 +458,8 @@
       },
       "gridPos": {
         "h": 3,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 8,
         "y": 3
       },
       "id": 5,
@@ -335,7 +484,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "((\n  100 * (1 - (sum by(nodename) (\n  node_memory_MemAvailable_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n) / clamp_min(sum by(nodename) (\n  node_memory_MemTotal_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n), 1)))\n)\nor on(nodename)\n(\n  100 * (max by(nodename) (label_replace(kube_node_info, \"nodename\", \"$1\", \"node\", \"(.*)\")) unless on(nodename) (max by(nodename) (label_replace(up{job=\"node-exporter\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\")) and on(nodename) max by(nodename) (label_replace(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\"))))\n))\n  unless on(nodename) max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"}, \"nodename\", \"$1\", \"node\", \"(.*)\"))",
+          "expr": "((\n  100 * (1 - (sum by(nodename) (\n  node_memory_MemAvailable_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n) / clamp_min(sum by(nodename) (\n  node_memory_MemTotal_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n), 1)))\n)\nor on(nodename)\n(\n  -1 * (max by(nodename) (label_replace(kube_node_info, \"nodename\", \"$1\", \"node\", \"(.*)\")) unless on(nodename) (max by(nodename) (label_replace(up{job=\"node-exporter\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\")) and on(nodename) max by(nodename) (label_replace(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\"))))\n))\n  unless on(nodename) max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"}, \"nodename\", \"$1\", \"node\", \"(.*)\"))",
           "legendFormat": "{{nodename}}",
           "refId": "A"
         }
@@ -348,250 +497,69 @@
         "type": "prometheus",
         "uid": "Prometheus"
       },
+      "description": "Worker pod slot usage per node, calculated as used pods / allocatable pods. Thresholds: gray = N/A when node is not ready; green < 70%; yellow >= 70% and < 90%; red >= 90%.",
       "fieldConfig": {
         "defaults": {
           "decimals": 1,
           "max": 100,
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": 0
-              },
-              {
-                "color": "yellow",
-                "value": 80
-              },
-              {
-                "color": "green",
-                "value": 99
-              }
-            ]
-          },
-          "unit": "suffix:% ready"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 4,
-        "x": 0,
-        "y": 6
-      },
-      "id": 11,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "value_and_name",
-        "wideLayout": false
-      },
-      "pluginVersion": "12.4.0-20648027705",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "100 * sum(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1) / clamp_min(count(kube_node_info), 1)",
-          "instant": true,
-          "legendFormat": "Ready nodes",
-          "refId": "A"
-        }
-      ],
-      "title": "",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "Prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "decimals": 1,
-          "max": 100,
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "yellow",
-                "value": 50
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "suffix:% CPU"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 5,
-        "x": 4,
-        "y": 6
-      },
-      "id": 12,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "value_and_name",
-        "wideLayout": false
-      },
-      "pluginVersion": "12.4.0-20648027705",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "100 * sum(rate(container_cpu_usage_seconds_total{container!=\"\",container!=\"POD\"}[5m])) / clamp_min(sum(kube_node_status_allocatable{resource=\"cpu\"}), 0.001)",
-          "legendFormat": "CPU allocatable",
-          "refId": "A"
-        }
-      ],
-      "title": "",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "Prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "decimals": 1,
-          "max": 100,
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "yellow",
-                "value": 50
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "suffix:% RAM"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 5,
-        "x": 9,
-        "y": 6
-      },
-      "id": 13,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "value_and_name",
-        "wideLayout": false
-      },
-      "pluginVersion": "12.4.0-20648027705",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "100 * sum((container_memory_working_set_bytes{container!=\"\",container!=\"POD\"}) or (container_memory_usage_bytes{container!=\"\",container!=\"POD\"})) / clamp_min(sum(kube_node_status_allocatable{resource=\"memory\"}), 1)",
-          "legendFormat": "Memory allocatable",
-          "refId": "A"
-        }
-      ],
-      "title": "",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "Prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "decimals": 0,
+          "min": -1,
           "mappings": [
             {
               "options": {
-                "0": {
-                  "text": "OK"
+                "-1": {
+                  "text": "N/A",
+                  "color": "dark-gray"
                 }
               },
               "type": "value"
+            },
+            {
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "N/A",
+                  "color": "dark-gray"
+                }
+              },
+              "type": "special"
             }
           ],
-          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
+              {
+                "color": "dark-gray",
+                "value": -1
+              },
               {
                 "color": "green",
                 "value": 0
               },
               {
                 "color": "yellow",
-                "value": 1
+                "value": 70
               },
               {
                 "color": "red",
-                "value": 3
+                "value": 90
               }
             ]
           },
-          "unit": "short"
+          "unit": "suffix:% pods"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 3,
-        "w": 5,
-        "x": 14,
-        "y": 6
+        "w": 8,
+        "x": 16,
+        "y": 3
       },
-      "id": 14,
+      "id": 35,
+      "maxDataPoints": 120,
       "options": {
         "colorMode": "background",
-        "graphMode": "none",
+        "graphMode": "area",
         "justifyMode": "auto",
         "orientation": "auto",
         "reduceOptions": {
@@ -609,9 +577,8 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "count(kube_pod_status_phase{namespace=~\"${infra_namespaces:raw}\",phase=~\"Failed|Unknown|Pending\"} == 1) or on() vector(0)",
-          "instant": true,
-          "legendFormat": "Problem pods",
+          "expr": "(100 * count by(node) ((kube_pod_status_phase{phase=~\"Pending|Running\"} == 1) * on(namespace,pod) group_left(node) max by(namespace,pod,node) (kube_pod_info)) / clamp_min(sum by(node) (kube_node_status_allocatable{resource=\"pods\"}), 1) or on(node) (-1 * (max by(node) (kube_node_info) unless on(node) max by(node) (kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1)))) unless on(node) kube_node_role{role=~\"control-plane|master\"}",
+          "legendFormat": "{{node}}",
           "refId": "A"
         }
       ],
@@ -623,22 +590,18 @@
         "type": "prometheus",
         "uid": "Prometheus"
       },
+      "description": "Worker CPU aggregate. Usage is compared with worker CPU capacity; requests and limits are compared with worker CPU allocatable. Limits can exceed allocatable. Bar color uses percent of each bar max: green < 50%; yellow >= 50% and < 80%; red >= 80%.",
       "fieldConfig": {
         "defaults": {
-          "decimals": 0,
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "-1": {
-                  "text": "N/A"
-                }
-              }
-            }
-          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
+          "displayName": "${__field.displayName}",
+          "mappings": [],
           "min": 0,
           "thresholds": {
-            "mode": "absolute",
+            "mode": "percentage",
             "steps": [
               {
                 "color": "green",
@@ -646,27 +609,148 @@
               },
               {
                 "color": "yellow",
-                "value": 1
+                "value": 50
               },
               {
                 "color": "red",
-                "value": 5
+                "value": 80
               }
             ]
           },
-          "unit": "short"
+          "unit": "cores"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 3,
-        "w": 5,
-        "x": 19,
+        "w": 6,
+        "x": 0,
         "y": 6
       },
-      "id": 15,
+      "id": 36,
+      "maxDataPoints": 120,
       "options": {
-        "colorMode": "background",
+        "displayMode": "basic",
+        "maxVizHeight": 300,
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "label_replace((sum(((1 - rate(node_cpu_seconds_total{job=\"node-exporter\",mode=\"idle\"}[5m])) * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})) unless on(nodename) max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"}, \"nodename\", \"$1\", \"node\", \"(.*)\")))), \"Type\", \"Workers CPU usage\", \"__name__\", \".*\") or label_replace((sum(kube_pod_container_resource_requests{resource=\"cpu\"} unless on(node) kube_node_role{role=~\"control-plane|master\"})), \"Type\", \"Workers CPU requests\", \"__name__\", \".*\") or label_replace((sum(kube_pod_container_resource_limits{resource=\"cpu\"} unless on(node) kube_node_role{role=~\"control-plane|master\"})), \"Type\", \"Workers CPU limits\", \"__name__\", \".*\")",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "label_replace((sum(kube_node_status_capacity{resource=\"cpu\"} unless on(node) kube_node_role{role=~\"control-plane|master\"})), \"Type\", \"Workers CPU usage\", \"__name__\", \".*\") or label_replace((sum(kube_node_status_allocatable{resource=\"cpu\"} unless on(node) kube_node_role{role=~\"control-plane|master\"})), \"Type\", \"Workers CPU requests\", \"__name__\", \".*\") or label_replace((sum(kube_node_status_allocatable{resource=\"cpu\"} unless on(node) kube_node_role{role=~\"control-plane|master\"})), \"Type\", \"Workers CPU limits\", \"__name__\", \".*\")",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "B"
+        }
+      ],
+      "title": "",
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {
+            "reducer": []
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "Type": 0,
+              "Value": 1,
+              "Max": 2
+            },
+            "renameByName": {
+              "Value 1": "Max",
+              "Value #A": "Value",
+              "Value #B": "Max"
+            }
+          }
+        },
+        {
+          "id": "rowsToFields",
+          "options": {
+            "mappings": [
+              {
+                "fieldName": "Type",
+                "handlerKey": "field.name"
+              },
+              {
+                "fieldName": "Value",
+                "handlerKey": "field.value"
+              },
+              {
+                "fieldName": "Max",
+                "handlerKey": "max"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "displayName": "${__field.labels.Type}",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "cores"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 2,
+        "x": 6,
+        "y": 6
+      },
+      "id": 39,
+      "maxDataPoints": 120,
+      "options": {
+        "colorMode": "none",
         "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
@@ -685,15 +769,463 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "(sum(increase(kube_event_count{type=\"Warning\",namespace=~\"${infra_namespaces:raw}\"}[30m])) or on() (absent(kube_event_count) * -1) or on() vector(0))",
+          "expr": "label_replace((sum(kube_node_status_capacity{resource=\"cpu\"} unless on(node) kube_node_role{role=~\"control-plane|master\"})), \"Type\", \"Workers total CPU\", \"__name__\", \".*\")",
+          "format": "time_series",
           "instant": true,
-          "legendFormat": "Warning events",
+          "legendFormat": "{{Type}}",
           "refId": "A"
         }
       ],
       "title": "",
       "type": "stat",
-      "description": "Kubernetes Warning events over the last 30 minutes when kube_event_count is exposed; shows N/A when event metrics are not available."
+      "description": "Informational worker CPU capacity total from kube_node_status_capacity. No warning threshold is applied."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "description": "Worker RAM aggregate. Usage is compared with worker node memory total; requests and limits are compared with worker memory allocatable. Limits can exceed allocatable. Bar color uses percent of each bar max: green < 50%; yellow >= 50% and < 80%; red >= 80%.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
+          "displayName": "${__field.displayName}",
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "percentage",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 6,
+        "x": 8,
+        "y": 6
+      },
+      "id": 37,
+      "maxDataPoints": 120,
+      "options": {
+        "displayMode": "basic",
+        "maxVizHeight": 300,
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "label_replace((sum(((node_memory_MemTotal_bytes{job=\"node-exporter\"} - node_memory_MemAvailable_bytes{job=\"node-exporter\"}) * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})) unless on(nodename) max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"}, \"nodename\", \"$1\", \"node\", \"(.*)\")))), \"Type\", \"Workers memory usage\", \"__name__\", \".*\") or label_replace((sum(kube_pod_container_resource_requests{resource=\"memory\"} unless on(node) kube_node_role{role=~\"control-plane|master\"})), \"Type\", \"Workers memory requests\", \"__name__\", \".*\") or label_replace((sum(kube_pod_container_resource_limits{resource=\"memory\"} unless on(node) kube_node_role{role=~\"control-plane|master\"})), \"Type\", \"Workers memory limits\", \"__name__\", \".*\")",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "label_replace((sum((node_memory_MemTotal_bytes{job=\"node-exporter\"} * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})) unless on(nodename) max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"}, \"nodename\", \"$1\", \"node\", \"(.*)\")))), \"Type\", \"Workers memory usage\", \"__name__\", \".*\") or label_replace((sum(kube_node_status_allocatable{resource=\"memory\"} unless on(node) kube_node_role{role=~\"control-plane|master\"})), \"Type\", \"Workers memory requests\", \"__name__\", \".*\") or label_replace((sum(kube_node_status_allocatable{resource=\"memory\"} unless on(node) kube_node_role{role=~\"control-plane|master\"})), \"Type\", \"Workers memory limits\", \"__name__\", \".*\")",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "B"
+        }
+      ],
+      "title": "",
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {
+            "reducer": []
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "Type": 0,
+              "Value": 1,
+              "Max": 2
+            },
+            "renameByName": {
+              "Value 1": "Max",
+              "Value #A": "Value",
+              "Value #B": "Max"
+            }
+          }
+        },
+        {
+          "id": "rowsToFields",
+          "options": {
+            "mappings": [
+              {
+                "fieldName": "Type",
+                "handlerKey": "field.name"
+              },
+              {
+                "fieldName": "Value",
+                "handlerKey": "field.value"
+              },
+              {
+                "fieldName": "Max",
+                "handlerKey": "max"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
+          "displayName": "${__field.labels.Type}",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 2,
+        "x": 14,
+        "y": 6
+      },
+      "id": 40,
+      "maxDataPoints": 120,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "label_replace((sum(kube_node_status_capacity{resource=\"memory\"} unless on(node) kube_node_role{role=~\"control-plane|master\"})), \"Type\", \"Workers total RAM\", \"__name__\", \".*\")",
+          "format": "time_series",
+          "instant": true,
+          "legendFormat": "{{Type}}",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat",
+      "description": "Informational worker RAM capacity total from kube_node_status_capacity. No warning threshold is applied."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "description": "Worker pod capacity and workload signals. Workers pods used is compared with worker allocatable pods: green < 50%, yellow >= 50% and < 80%, red >= 80%. Problem pods: green = 0, yellow > 0 and <= 10% of worker allocatable pods, red > 10%. Warning events (last 30'): green = 0, yellow > 0 and <= 10% of worker allocatable pods, red > 10%.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "displayName": "${__field.displayName}",
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "percentage",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Problem pods"
+            },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "percentage",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": 0
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 0.0001
+                    },
+                    {
+                      "color": "red",
+                      "value": 100.0001
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Warning events (last 30')"
+            },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "percentage",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": 0
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 0.0001
+                    },
+                    {
+                      "color": "red",
+                      "value": 100.0001
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 6,
+        "x": 16,
+        "y": 6
+      },
+      "id": 38,
+      "maxDataPoints": 120,
+      "options": {
+        "displayMode": "basic",
+        "maxVizHeight": 300,
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "label_replace((sum(count by(node) ((kube_pod_status_phase{phase=~\"Pending|Running\"} == 1) * on(namespace,pod) group_left(node) max by(namespace,pod,node) (kube_pod_info)) unless on(node) kube_node_role{role=~\"control-plane|master\"})), \"Type\", \"Workers pods used\", \"__name__\", \".*\") or label_replace((count(kube_pod_status_phase{namespace=~\"${infra_namespaces:raw}\",phase=~\"Failed|Unknown|Pending\"} == 1) or on() vector(0)), \"Type\", \"Problem pods\", \"__name__\", \".*\") or label_replace((sum(increase(kube_event_count{type=\"Warning\",namespace=~\"${infra_namespaces:raw}\"}[30m])) or on() vector(0)), \"Type\", \"Warning events (last 30')\", \"__name__\", \".*\")",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "label_replace((sum(kube_node_status_allocatable{resource=\"pods\"} unless on(node) kube_node_role{role=~\"control-plane|master\"})), \"Type\", \"Workers pods used\", \"__name__\", \".*\") or label_replace((0.1 * sum(kube_node_status_allocatable{resource=\"pods\"} unless on(node) kube_node_role{role=~\"control-plane|master\"})), \"Type\", \"Problem pods\", \"__name__\", \".*\") or label_replace((0.1 * sum(kube_node_status_allocatable{resource=\"pods\"} unless on(node) kube_node_role{role=~\"control-plane|master\"})), \"Type\", \"Warning events (last 30')\", \"__name__\", \".*\")",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "B"
+        }
+      ],
+      "title": "",
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {
+            "reducer": []
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true
+            },
+            "indexByName": {
+              "Type": 0,
+              "Value": 1,
+              "Max": 2
+            },
+            "renameByName": {
+              "Value 1": "Max",
+              "Value #A": "Value",
+              "Value #B": "Max"
+            }
+          }
+        },
+        {
+          "id": "rowsToFields",
+          "options": {
+            "mappings": [
+              {
+                "fieldName": "Type",
+                "handlerKey": "field.name"
+              },
+              {
+                "fieldName": "Value",
+                "handlerKey": "field.value"
+              },
+              {
+                "fieldName": "Max",
+                "handlerKey": "max"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 0,
+          "displayName": "${__field.labels.Type}",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 2,
+        "x": 22,
+        "y": 6
+      },
+      "id": 41,
+      "maxDataPoints": 120,
+      "options": {
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "value_and_name",
+        "wideLayout": false
+      },
+      "pluginVersion": "12.4.0-20648027705",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "label_replace((sum(kube_node_status_allocatable{resource=\"pods\"} unless on(node) kube_node_role{role=~\"control-plane|master\"})), \"Type\", \"Workers total pods\", \"__name__\", \".*\")",
+          "format": "time_series",
+          "instant": true,
+          "legendFormat": "{{Type}}",
+          "refId": "A"
+        }
+      ],
+      "title": "",
+      "type": "stat",
+      "description": "Informational worker pod slot total from kube_node_status_allocatable. No warning threshold is applied."
     },
     {
       "datasource": {
@@ -751,7 +1283,7 @@
       },
       "gridPos": {
         "h": 3,
-        "w": 4,
+        "w": 3,
         "x": 0,
         "y": 9
       },
@@ -778,12 +1310,13 @@
           "editorMode": "code",
           "expr": "ceph_health_status{}",
           "instant": true,
-          "legendFormat": "Health",
+          "legendFormat": "Ceph health",
           "refId": "A"
         }
       ],
       "title": "",
-      "type": "stat"
+      "type": "stat",
+      "description": "Ceph health status from ceph_health_status. Thresholds and mappings: 0 = HEALTHY/green; 1 = WARNING/yellow; 2 = ERROR/red; no data = N/A."
     },
     {
       "datasource": {
@@ -818,8 +1351,8 @@
       },
       "gridPos": {
         "h": 3,
-        "w": 4,
-        "x": 4,
+        "w": 3,
+        "x": 3,
         "y": 9
       },
       "id": 26,
@@ -845,13 +1378,13 @@
           "editorMode": "code",
           "expr": "100 * sum((ceph_osd_up{} == 1) and on(ceph_daemon,cluster,namespace) (ceph_osd_in{} == 1)) / clamp_min(count(ceph_osd_up{}), 1)",
           "instant": true,
-          "legendFormat": "OSDs In&Up",
+          "legendFormat": "Ceph OSDs In&Up",
           "refId": "A"
         }
       ],
       "title": "",
       "type": "stat",
-      "description": "Percentage of Ceph OSDs that are both in and up."
+      "description": "Ceph OSD availability, percentage of OSDs that are both in and up. Thresholds: red < 80%; yellow >= 80% and < 100%; green = 100%."
     },
     {
       "datasource": {
@@ -882,8 +1415,8 @@
       },
       "gridPos": {
         "h": 3,
-        "w": 4,
-        "x": 8,
+        "w": 3,
+        "x": 6,
         "y": 9
       },
       "id": 27,
@@ -909,13 +1442,13 @@
           "editorMode": "code",
           "expr": "100 * ((count(ceph_mgr_status{}) > bool 0) * (sum(ceph_mgr_status{}) == bool 1))",
           "instant": true,
-          "legendFormat": "Managers",
+          "legendFormat": "Ceph managers",
           "refId": "A"
         }
       ],
       "title": "",
       "type": "stat",
-      "description": "Ceph manager state. Green only when exactly one manager is active."
+      "description": "Ceph manager availability. Thresholds: red < 100%; green = 100%."
     },
     {
       "datasource": {
@@ -946,8 +1479,8 @@
       },
       "gridPos": {
         "h": 3,
-        "w": 4,
-        "x": 12,
+        "w": 3,
+        "x": 9,
         "y": 9
       },
       "id": 28,
@@ -973,145 +1506,13 @@
           "editorMode": "code",
           "expr": "100 * sum(ceph_mon_quorum_status{}) / clamp_min(count(ceph_mon_quorum_status{}), 1)",
           "instant": true,
-          "legendFormat": "Monitors",
+          "legendFormat": "Ceph monitors",
           "refId": "A"
         }
       ],
       "title": "",
       "type": "stat",
-      "description": "Ceph monitor quorum coverage. Green only when all monitors are in quorum."
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "Prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "decimals": 1,
-          "max": 100,
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": 0
-              },
-              {
-                "color": "green",
-                "value": 100
-              }
-            ]
-          },
-          "unit": "suffix:%"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 4,
-        "x": 16,
-        "y": 9
-      },
-      "id": 29,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "value_and_name",
-        "wideLayout": false
-      },
-      "pluginVersion": "12.4.0-20648027705",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "100 * count(count by(fs_id) (ceph_mds_metadata{fs_id!=\"-1\"})) / clamp_min(count(ceph_fs_metadata{}), 1)",
-          "instant": true,
-          "legendFormat": "MDS",
-          "refId": "A"
-        }
-      ],
-      "title": "",
-      "type": "stat",
-      "description": "CephFS filesystems with an active MDS. Green only when every filesystem has an active MDS."
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "Prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "decimals": 1,
-          "max": 100,
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": 0
-              },
-              {
-                "color": "yellow",
-                "value": 80
-              },
-              {
-                "color": "green",
-                "value": 100
-              }
-            ]
-          },
-          "unit": "suffix:%"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 4,
-        "x": 20,
-        "y": 9
-      },
-      "id": 30,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "value_and_name",
-        "wideLayout": false
-      },
-      "pluginVersion": "12.4.0-20648027705",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "100 * sum(ceph_pg_clean{}) / clamp_min(sum(ceph_pg_total{}), 1)",
-          "instant": true,
-          "legendFormat": "PGs clean",
-          "refId": "A"
-        }
-      ],
-      "title": "",
-      "type": "stat",
-      "description": "Ceph placement groups that are clean."
+      "description": "Ceph monitor quorum coverage. Thresholds: red < 100%; green = 100%."
     },
     {
       "datasource": {
@@ -1140,15 +1541,15 @@
               }
             ]
           },
-          "unit": "suffix:% used"
+          "unit": "suffix:%"
         },
         "overrides": []
       },
       "gridPos": {
         "h": 3,
         "w": 4,
-        "x": 0,
-        "y": 12
+        "x": 12,
+        "y": 9
       },
       "id": 22,
       "options": {
@@ -1172,12 +1573,13 @@
         {
           "editorMode": "code",
           "expr": "100 * sum(ceph_cluster_total_used_bytes{}) / clamp_min(sum(ceph_cluster_total_bytes{}), 1)",
-          "legendFormat": "Used",
+          "legendFormat": "Ceph usage",
           "refId": "A"
         }
       ],
       "title": "",
-      "type": "stat"
+      "type": "stat",
+      "description": "Ceph storage usage. Thresholds: green < 50%; yellow >= 50% and < 80%; red >= 80%."
     },
     {
       "datasource": {
@@ -1204,9 +1606,9 @@
       },
       "gridPos": {
         "h": 3,
-        "w": 5,
-        "x": 4,
-        "y": 12
+        "w": 4,
+        "x": 16,
+        "y": 9
       },
       "id": 24,
       "options": {
@@ -1230,12 +1632,13 @@
         {
           "editorMode": "code",
           "expr": "sum(irate(ceph_pool_rd_bytes[5m])) / 1000000",
-          "legendFormat": "Read MB/s",
+          "legendFormat": "Ceph read bandwidth",
           "refId": "A"
         }
       ],
       "title": "",
-      "type": "stat"
+      "type": "stat",
+      "description": "Ceph read bandwidth in MB/s. Informational throughput panel; no warning threshold is applied."
     },
     {
       "datasource": {
@@ -1262,9 +1665,9 @@
       },
       "gridPos": {
         "h": 3,
-        "w": 5,
-        "x": 9,
-        "y": 12
+        "w": 4,
+        "x": 20,
+        "y": 9
       },
       "id": 25,
       "options": {
@@ -1288,130 +1691,13 @@
         {
           "editorMode": "code",
           "expr": "sum(irate(ceph_pool_wr_bytes[5m])) / 1000000",
-          "legendFormat": "Write MB/s",
-          "refId": "A"
-        }
-      ],
-      "title": "",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "Prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "decimals": 1,
-          "max": 100,
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              }
-            ]
-          },
-          "unit": "suffix: IOPS"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 5,
-        "x": 14,
-        "y": 12
-      },
-      "id": 32,
-      "options": {
-        "colorMode": "none",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "value_and_name",
-        "wideLayout": false
-      },
-      "pluginVersion": "12.4.0-20648027705",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "sum(irate(ceph_pool_rd[5m]))",
-          "legendFormat": "Read IOPS",
+          "legendFormat": "Ceph write bandwidth",
           "refId": "A"
         }
       ],
       "title": "",
       "type": "stat",
-      "description": "Ceph pool read operations per second across all pools."
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "Prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "decimals": 1,
-          "max": 100,
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              }
-            ]
-          },
-          "unit": "suffix: IOPS"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 5,
-        "x": 19,
-        "y": 12
-      },
-      "id": 33,
-      "options": {
-        "colorMode": "none",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "value_and_name",
-        "wideLayout": false
-      },
-      "pluginVersion": "12.4.0-20648027705",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "sum(irate(ceph_pool_wr[5m]))",
-          "legendFormat": "Write IOPS",
-          "refId": "A"
-        }
-      ],
-      "title": "",
-      "type": "stat",
-      "description": "Ceph pool write operations per second across all pools."
+      "description": "Ceph write bandwidth in MB/s. Informational throughput panel; no warning threshold is applied."
     },
     {
       "datasource": {
@@ -1456,10 +1742,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
+        "h": 3,
         "w": 24,
         "x": 0,
-        "y": 15
+        "y": 12
       },
       "id": 23,
       "maxDataPoints": 120,
@@ -1490,7 +1776,7 @@
       ],
       "title": "",
       "type": "stat",
-      "description": "PVC usage in the selected infrastructure sections."
+      "description": "PVC usage in the selected infrastructure sections. Thresholds: green < 50%; yellow >= 50% and < 80%; red >= 80%."
     },
     {
       "datasource": {
@@ -1520,10 +1806,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 4,
+        "h": 3,
         "w": 3,
         "x": 0,
-        "y": 19
+        "y": 16
       },
       "id": 31,
       "options": {
@@ -1553,7 +1839,7 @@
       ],
       "title": "",
       "type": "stat",
-      "description": "Deployment, StatefulSet, and DaemonSet readiness grouped by app.kubernetes.io/part-of.",
+      "description": "Workload readiness grouped by app.kubernetes.io/part-of across Deployments, StatefulSets, and DaemonSets. Thresholds: green = 100% ready; red < 100% ready.",
       "repeat": "component",
       "repeatDirection": "h",
       "maxPerRow": 10
