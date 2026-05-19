@@ -508,6 +508,7 @@ resource "kubernetes_manifest" "pv" {
       name = format("s3-data-%s", each.key)
       labels = {
         app                             = local.garage_name_value
+        "app.kubernetes.io/part-of"     = "garage"
         (local.garage_node_label_value) = "true"
         "s3.garage/node-id"             = each.key
       }
@@ -656,7 +657,8 @@ resource "kubernetes_manifest" "api_service" {
       name      = local.api_service_name
       namespace = local.s3_namespace_value
       labels = {
-        app = local.garage_name_value
+        app                         = local.garage_name_value
+        "app.kubernetes.io/part-of" = "garage"
       }
     }
     spec = {
@@ -682,7 +684,8 @@ resource "kubernetes_manifest" "admin_service" {
       name      = local.admin_service_name
       namespace = local.s3_namespace_value
       labels = {
-        app = local.garage_name_value
+        app                         = local.garage_name_value
+        "app.kubernetes.io/part-of" = "garage"
       }
     }
     spec = {
@@ -915,7 +918,8 @@ resource "kubernetes_manifest" "pdb" {
       name      = local.garage_name_value
       namespace = local.s3_namespace_value
       labels = {
-        app = local.garage_name_value
+        app                         = local.garage_name_value
+        "app.kubernetes.io/part-of" = "garage"
       }
     }
     spec = {
@@ -1252,7 +1256,8 @@ resource "kubernetes_manifest" "console_service" {
       name      = local.console_service_name
       namespace = local.s3_namespace_value
       labels = {
-        app = local.console_service_name
+        app                         = local.console_service_name
+        "app.kubernetes.io/part-of" = "garage"
       }
     }
     spec = {
@@ -1453,7 +1458,8 @@ resource "kubernetes_manifest" "console_oauth2_proxy_service" {
       name      = "console-oauth2-proxy"
       namespace = local.s3_namespace_value
       labels = {
-        app = "console-oauth2-proxy"
+        app                         = "console-oauth2-proxy"
+        "app.kubernetes.io/part-of" = "garage"
       }
     }
     spec = {
