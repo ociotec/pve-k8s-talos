@@ -4,6 +4,10 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = ">= 3.1.0"
     }
+    null = {
+      source  = "hashicorp/null"
+      version = ">= 3.2.4"
+    }
   }
 }
 
@@ -343,6 +347,44 @@ locals {
       }
     ] : []
   )
+
+  # Rook owns these CSI workloads and may recreate their pod templates. Keep
+  # the operational grouping labels in one post-reconcile patch map.
+  rook_managed_workload_label_patches = {
+    "deployment/csi-cephfsplugin-provisioner" = {
+      resource = "deployment"
+      name     = "csi-cephfsplugin-provisioner"
+    }
+    "deployment/csi-rbdplugin-provisioner" = {
+      resource = "deployment"
+      name     = "csi-rbdplugin-provisioner"
+    }
+    "daemonset/csi-cephfsplugin" = {
+      resource = "daemonset"
+      name     = "csi-cephfsplugin"
+    }
+    "daemonset/csi-rbdplugin" = {
+      resource = "daemonset"
+      name     = "csi-rbdplugin"
+    }
+  }
+
+  rook_managed_workload_label_patch = jsonencode({
+    metadata = {
+      labels = {
+        "app.kubernetes.io/part-of" = "rook-ceph"
+      }
+    }
+    spec = {
+      template = {
+        metadata = {
+          labels = {
+            "app.kubernetes.io/part-of" = "rook-ceph"
+          }
+        }
+      }
+    }
+  })
 }
 
 check "ceph_mode_valid" {
@@ -382,5 +424,25 @@ resource "kubernetes_manifest" "rook_storageclass" {
 
   depends_on = [
     kubernetes_manifest.ceph_pools_and_filesystems,
+  ]
+}
+
+resource "null_resource" "rook_managed_workload_labels" {
+  for_each = local.rook_managed_workload_label_patches
+
+  triggers = {
+    kubeconfig_path = abspath("${path.module}/${var.kubeconfig_path}")
+    namespace       = local.effective_ceph_namespace
+    resource        = each.value.resource
+    name            = each.value.name
+    patch           = local.rook_managed_workload_label_patch
+  }
+
+  provisioner "local-exec" {
+    command = "for i in $(seq 1 60); do KUBECONFIG=${self.triggers.kubeconfig_path} kubectl -n ${self.triggers.namespace} get ${self.triggers.resource} ${self.triggers.name} >/dev/null 2>&1 && break; if [ \"$i\" -eq 60 ]; then KUBECONFIG=${self.triggers.kubeconfig_path} kubectl -n ${self.triggers.namespace} get ${self.triggers.resource} ${self.triggers.name}; exit 1; fi; sleep 10; done; KUBECONFIG=${self.triggers.kubeconfig_path} kubectl -n ${self.triggers.namespace} patch ${self.triggers.resource} ${self.triggers.name} --type=strategic --patch '${self.triggers.patch}'"
+  }
+
+  depends_on = [
+    kubernetes_manifest.rook_storageclass,
   ]
 }

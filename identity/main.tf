@@ -442,12 +442,10 @@ resource "kubernetes_manifest" "identity_other" {
   manifest = each.value
   computed_fields = [
     "metadata.annotations",
-    "spec.template.metadata.labels",
   ]
   lifecycle {
     ignore_changes = [
       manifest.metadata.annotations,
-      manifest.spec.template.metadata.labels,
     ]
   }
   depends_on = [
