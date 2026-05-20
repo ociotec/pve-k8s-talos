@@ -1824,22 +1824,15 @@
       },
       "fieldConfig": {
         "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
           "decimals": 1,
-          "max": 100,
+          "displayName": "${__field.name} (${__field.labels.Total} GiB)",
+          "mappings": [],
           "min": 0,
-          "mappings": [
-            {
-              "options": {
-                "match": "null",
-                "result": {
-                  "text": "N/A"
-                }
-              },
-              "type": "special"
-            }
-          ],
           "thresholds": {
-            "mode": "absolute",
+            "mode": "percentage",
             "steps": [
               {
                 "color": "green",
@@ -1855,23 +1848,25 @@
               }
             ]
           },
-          "unit": "suffix:% PVC"
+          "unit": "bytes"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 3,
-        "w": 24,
+        "h": 8,
+        "w": 12,
         "x": 0,
         "y": 12
       },
-      "id": 23,
+      "id": 61,
       "maxDataPoints": 120,
       "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
+        "displayMode": "basic",
+        "maxVizHeight": 300,
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "auto",
+        "orientation": "horizontal",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -1879,61 +1874,184 @@
           "fields": "",
           "values": false
         },
-        "showPercentChange": false,
-        "textMode": "value_and_name",
-        "wideLayout": false
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "color"
       },
       "pluginVersion": "12.4.0-20648027705",
       "targets": [
         {
           "editorMode": "code",
-          "expr": "(\n  label_replace(\n    100 * sum by(namespace) (kubelet_volume_stats_used_bytes{namespace=~\"${infra_namespaces:raw}\",namespace=~\"s3|kafka\"})\n      / clamp_min(sum by(namespace) (kubelet_volume_stats_capacity_bytes{namespace=~\"${infra_namespaces:raw}\",namespace=~\"s3|kafka\"}), 1),\n    \"workload\", \"$1 total\", \"namespace\", \"(.*)\"\n  )\n)\nor\n(\n  label_replace(\n    100 * sum by(namespace,persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace=~\"${infra_namespaces:raw}\",namespace!~\"s3|kafka\",persistentvolumeclaim=~\".+-postgres-data\"})\n      / clamp_min(sum by(namespace,persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{namespace=~\"${infra_namespaces:raw}\",namespace!~\"s3|kafka\",persistentvolumeclaim=~\".+-postgres-data\"}), 1),\n    \"workload\", \"$1 postgres\", \"persistentvolumeclaim\", \"(.+)-postgres-data\"\n  )\n)\nor\n(\n  label_replace(\n    100 * sum by(namespace,persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace=~\"${infra_namespaces:raw}\",namespace!~\"s3|kafka\",persistentvolumeclaim!~\".+-postgres-data\",persistentvolumeclaim=~\".+-data\"})\n      / clamp_min(sum by(namespace,persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{namespace=~\"${infra_namespaces:raw}\",namespace!~\"s3|kafka\",persistentvolumeclaim!~\".+-postgres-data\",persistentvolumeclaim=~\".+-data\"}), 1),\n    \"workload\", \"$1\", \"persistentvolumeclaim\", \"(.+)-data\"\n  )\n)\nor\n(\n  label_replace(\n    100 * sum by(namespace,persistentvolumeclaim) (kubelet_volume_stats_used_bytes{namespace=~\"${infra_namespaces:raw}\",namespace!~\"s3|kafka\",persistentvolumeclaim!~\".+-data\"})\n      / clamp_min(sum by(namespace,persistentvolumeclaim) (kubelet_volume_stats_capacity_bytes{namespace=~\"${infra_namespaces:raw}\",namespace!~\"s3|kafka\",persistentvolumeclaim!~\".+-data\"}), 1),\n    \"workload\", \"$1\", \"persistentvolumeclaim\", \"(.+)\"\n  )\n)",
-          "legendFormat": "{{workload}}",
+          "expr": "label_join(\n  100 * sum by(namespace,persistentvolumeclaim) (\n    kubelet_volume_stats_used_bytes{namespace=~\"${infra_namespaces:raw}\",persistentvolumeclaim!=\"\"}\n  )\n  / clamp_min(sum by(namespace,persistentvolumeclaim) (\n    kubelet_volume_stats_capacity_bytes{namespace=~\"${infra_namespaces:raw}\",persistentvolumeclaim!=\"\"}\n  ), 1),\n  \"pvc\", \"/\", \"namespace\", \"persistentvolumeclaim\"\n)",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{pvc}}",
           "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "label_join(\n  sum by(namespace,persistentvolumeclaim) (\n    kubelet_volume_stats_used_bytes{namespace=~\"${infra_namespaces:raw}\",persistentvolumeclaim!=\"\"}\n  ),\n  \"pvc\", \"/\", \"namespace\", \"persistentvolumeclaim\"\n)",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{pvc}}",
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "label_join(\n  round(\n    sum by(namespace,persistentvolumeclaim) (\n      kubelet_volume_stats_capacity_bytes{namespace=~\"${infra_namespaces:raw}\",persistentvolumeclaim!=\"\"}\n    ) / 1024 / 1024 / 1024,\n    0.1\n  ),\n  \"pvc\", \"/\", \"namespace\", \"persistentvolumeclaim\"\n)",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{pvc}}",
+          "refId": "C"
+        },
+        {
+          "editorMode": "code",
+          "expr": "label_join(\n  sum by(namespace,persistentvolumeclaim) (\n    kubelet_volume_stats_capacity_bytes{namespace=~\"${infra_namespaces:raw}\",persistentvolumeclaim!=\"\"}\n  ),\n  \"pvc\", \"/\", \"namespace\", \"persistentvolumeclaim\"\n)",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{pvc}}",
+          "refId": "D"
         }
       ],
-      "title": "",
-      "type": "stat",
-      "description": "PVC usage in the selected infrastructure sections. Thresholds: green < 50%; yellow >= 50% and < 80%; red >= 80%."
+      "title": "PVC usage sorted by used size",
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {
+            "reducer": []
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "namespace": true,
+              "persistentvolumeclaim": true
+            },
+            "indexByName": {
+              "PVC": 0,
+              "Used %": 1,
+              "Used": 2,
+              "Max": 3,
+              "Total": 4
+            },
+            "renameByName": {
+              "Value": "Used %",
+              "Value 1": "Used",
+              "Value 2": "Total",
+              "Value 3": "Max",
+              "Value #A": "Used %",
+              "Value #B": "Used",
+              "Value #C": "Total",
+              "Value #D": "Max",
+              "pvc": "PVC"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "desc": true,
+                "field": "Used %"
+              }
+            ]
+          }
+        },
+        {
+          "id": "rowsToFields",
+          "options": {
+            "mappings": [
+              {
+                "fieldName": "PVC",
+                "handlerKey": "field.name"
+              },
+              {
+                "fieldName": "Used",
+                "handlerKey": "field.value"
+              },
+              {
+                "fieldName": "Max",
+                "handlerKey": "max"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "bargauge",
+      "description": "PVC used bytes by namespace/PVC. Bar fill is based on used bytes over total capacity, sorted by highest used-capacity percentage. Thresholds: green < 50%; yellow >= 50% and < 80%; red >= 80%."
     },
     {
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
       },
+      "description": "Workload replica status for Deployments, StatefulSets, and DaemonSets. Mappings and thresholds: 0 = ready/green when ready replicas match expected replicas; 1 = scaled to zero/gray; 2 = degraded/red when ready and expected replicas differ.",
       "fieldConfig": {
         "defaults": {
-          "decimals": 1,
-          "max": 100,
-          "min": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "displayName": "${__field.name} Replicas: ${__field.labels.Ready}/${__field.labels.Expected}",
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "green",
+                  "index": 0,
+                  "text": "ready"
+                },
+                "1": {
+                  "color": "gray",
+                  "index": 1,
+                  "text": "scaled to zero"
+                },
+                "2": {
+                  "color": "red",
+                  "index": 2,
+                  "text": "degraded"
+                }
+              },
+              "type": "value"
+            }
+          ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "green",
                 "value": 0
               },
               {
-                "color": "green",
-                "value": 100
+                "color": "gray",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 2
               }
             ]
           },
-          "unit": "suffix:% ready"
+          "unit": "none"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 3,
-        "w": 3,
-        "x": 0,
-        "y": 16
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 12
       },
-      "id": 31,
+      "id": 62,
+      "maxDataPoints": 120,
       "options": {
         "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "auto",
+        "graphMode": "none",
+        "justifyMode": "center",
         "orientation": "auto",
         "reduceOptions": {
           "calcs": [
@@ -1943,24 +2061,103 @@
           "values": false
         },
         "showPercentChange": false,
-        "textMode": "value_and_name",
+        "textMode": "none",
         "wideLayout": false
       },
       "pluginVersion": "12.4.0-20648027705",
       "targets": [
         {
           "editorMode": "code",
-          "expr": "100 * (\n(sum(\n  kube_deployment_status_replicas_available{namespace=~\"${infra_namespaces:raw}\"}\n    * on(namespace,deployment) group_left(label_app_kubernetes_io_part_of)\n      kube_deployment_labels{namespace=~\"${infra_namespaces:raw}\",label_app_kubernetes_io_part_of=~\"${component:regex}\"}\n) or vector(0))\n+\n(sum(\n  kube_statefulset_status_replicas_ready{namespace=~\"${infra_namespaces:raw}\"}\n    * on(namespace,statefulset) group_left(label_app_kubernetes_io_part_of)\n      kube_statefulset_labels{namespace=~\"${infra_namespaces:raw}\",label_app_kubernetes_io_part_of=~\"${component:regex}\"}\n) or vector(0))\n+\n(sum(\n  kube_daemonset_status_number_available{namespace=~\"${infra_namespaces:raw}\"}\n    * on(namespace,daemonset) group_left(label_app_kubernetes_io_part_of)\n      kube_daemonset_labels{namespace=~\"${infra_namespaces:raw}\",label_app_kubernetes_io_part_of=~\"${component:regex}\"}\n) or vector(0))\n)\n/\nclamp_min((\n(sum(\n  kube_deployment_spec_replicas{namespace=~\"${infra_namespaces:raw}\"}\n    * on(namespace,deployment) group_left(label_app_kubernetes_io_part_of)\n      kube_deployment_labels{namespace=~\"${infra_namespaces:raw}\",label_app_kubernetes_io_part_of=~\"${component:regex}\"}\n) or vector(0))\n+\n(sum(\n  kube_statefulset_replicas{namespace=~\"${infra_namespaces:raw}\"}\n    * on(namespace,statefulset) group_left(label_app_kubernetes_io_part_of)\n      kube_statefulset_labels{namespace=~\"${infra_namespaces:raw}\",label_app_kubernetes_io_part_of=~\"${component:regex}\"}\n) or vector(0))\n+\n(sum(\n  kube_daemonset_status_desired_number_scheduled{namespace=~\"${infra_namespaces:raw}\"}\n    * on(namespace,daemonset) group_left(label_app_kubernetes_io_part_of)\n      kube_daemonset_labels{namespace=~\"${infra_namespaces:raw}\",label_app_kubernetes_io_part_of=~\"${component:regex}\"}\n) or vector(0))\n), 1)",
-          "legendFormat": "${component}",
+          "expr": "sum by (Workload) (label_join(label_replace(label_replace(((kube_deployment_spec_replicas{namespace=~\"${infra_namespaces:raw}\"} == bool 0) * 1) + (((kube_deployment_spec_replicas{namespace=~\"${infra_namespaces:raw}\"} > bool 0) * (kube_deployment_status_replicas_available{namespace=~\"${infra_namespaces:raw}\"} == bool kube_deployment_spec_replicas{namespace=~\"${infra_namespaces:raw}\"})) * 0) + (((kube_deployment_spec_replicas{namespace=~\"${infra_namespaces:raw}\"} > bool 0) * (kube_deployment_status_replicas_available{namespace=~\"${infra_namespaces:raw}\"} != bool kube_deployment_spec_replicas{namespace=~\"${infra_namespaces:raw}\"})) * 2), \"workload\", \"$1\", \"deployment\", \"(.*)\"), \"kind\", \"Deployment\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(((kube_statefulset_replicas{namespace=~\"${infra_namespaces:raw}\"} == bool 0) * 1) + (((kube_statefulset_replicas{namespace=~\"${infra_namespaces:raw}\"} > bool 0) * (kube_statefulset_status_replicas_ready{namespace=~\"${infra_namespaces:raw}\"} == bool kube_statefulset_replicas{namespace=~\"${infra_namespaces:raw}\"})) * 0) + (((kube_statefulset_replicas{namespace=~\"${infra_namespaces:raw}\"} > bool 0) * (kube_statefulset_status_replicas_ready{namespace=~\"${infra_namespaces:raw}\"} != bool kube_statefulset_replicas{namespace=~\"${infra_namespaces:raw}\"})) * 2), \"workload\", \"$1\", \"statefulset\", \"(.*)\"), \"kind\", \"StatefulSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(((kube_daemonset_status_desired_number_scheduled{namespace=~\"${infra_namespaces:raw}\"} == bool 0) * 1) + (((kube_daemonset_status_desired_number_scheduled{namespace=~\"${infra_namespaces:raw}\"} > bool 0) * (kube_daemonset_status_number_available{namespace=~\"${infra_namespaces:raw}\"} == bool kube_daemonset_status_desired_number_scheduled{namespace=~\"${infra_namespaces:raw}\"})) * 0) + (((kube_daemonset_status_desired_number_scheduled{namespace=~\"${infra_namespaces:raw}\"} > bool 0) * (kube_daemonset_status_number_available{namespace=~\"${infra_namespaces:raw}\"} != bool kube_daemonset_status_desired_number_scheduled{namespace=~\"${infra_namespaces:raw}\"})) * 2), \"workload\", \"$1\", \"daemonset\", \"(.*)\"), \"kind\", \"DaemonSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\"))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{Workload}}",
           "refId": "A"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by (Workload) (label_join(label_replace(label_replace(kube_deployment_status_replicas_available{namespace=~\"${infra_namespaces:raw}\"}, \"workload\", \"$1\", \"deployment\", \"(.*)\"), \"kind\", \"Deployment\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(kube_statefulset_status_replicas_ready{namespace=~\"${infra_namespaces:raw}\"}, \"workload\", \"$1\", \"statefulset\", \"(.*)\"), \"kind\", \"StatefulSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(kube_daemonset_status_number_available{namespace=~\"${infra_namespaces:raw}\"}, \"workload\", \"$1\", \"daemonset\", \"(.*)\"), \"kind\", \"DaemonSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\"))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{Workload}}",
+          "refId": "B"
+        },
+        {
+          "editorMode": "code",
+          "expr": "sum by (Workload) (label_join(label_replace(label_replace(kube_deployment_spec_replicas{namespace=~\"${infra_namespaces:raw}\"}, \"workload\", \"$1\", \"deployment\", \"(.*)\"), \"kind\", \"Deployment\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(kube_statefulset_replicas{namespace=~\"${infra_namespaces:raw}\"}, \"workload\", \"$1\", \"statefulset\", \"(.*)\"), \"kind\", \"StatefulSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(kube_daemonset_status_desired_number_scheduled{namespace=~\"${infra_namespaces:raw}\"}, \"workload\", \"$1\", \"daemonset\", \"(.*)\"), \"kind\", \"DaemonSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\"))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{Workload}}",
+          "refId": "C"
         }
       ],
-      "title": "",
-      "type": "stat",
-      "description": "Workload readiness grouped by app.kubernetes.io/part-of across Deployments, StatefulSets, and DaemonSets. Thresholds: green = 100% ready; red < 100% ready.",
-      "repeat": "component",
-      "repeatDirection": "h",
-      "maxPerRow": 10
+      "title": "Workload status by replica health",
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "Workload",
+            "mode": "outerTabular"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "daemonset": true,
+              "deployment": true,
+              "kind": true,
+              "namespace": true,
+              "statefulset": true,
+              "workload": true
+            },
+            "indexByName": {
+              "Workload": 0,
+              "Status": 1,
+              "Ready": 2,
+              "Expected": 3
+            },
+            "renameByName": {
+              "Value": "Status",
+              "Value 1": "Ready",
+              "Value 2": "Expected",
+              "Value #A": "Status",
+              "Value #B": "Ready",
+              "Value #C": "Expected"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "fields": {},
+            "sort": [
+              {
+                "desc": true,
+                "field": "Status"
+              }
+            ]
+          }
+        },
+        {
+          "id": "rowsToFields",
+          "options": {
+            "mappings": [
+              {
+                "fieldName": "Workload",
+                "handlerKey": "field.name"
+              },
+              {
+                "fieldName": "Status",
+                "handlerKey": "field.value"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "stat"
     }
   ],
   "preload": false,
