@@ -104,7 +104,7 @@
           "fields": "",
           "values": false
         },
-        "showPercentChange": false,
+        "showPercentChange": true,
         "textMode": "value_and_name",
         "wideLayout": false
       },
@@ -197,7 +197,7 @@
           "fields": "",
           "values": false
         },
-        "showPercentChange": false,
+        "showPercentChange": true,
         "textMode": "value_and_name",
         "wideLayout": false
       },
@@ -290,7 +290,7 @@
           "fields": "",
           "values": false
         },
-        "showPercentChange": false,
+        "showPercentChange": true,
         "textMode": "value_and_name",
         "wideLayout": false
       },
@@ -383,7 +383,7 @@
           "fields": "",
           "values": false
         },
-        "showPercentChange": false,
+        "showPercentChange": true,
         "textMode": "value_and_name",
         "wideLayout": false
       },
@@ -476,7 +476,7 @@
           "fields": "",
           "values": false
         },
-        "showPercentChange": false,
+        "showPercentChange": true,
         "textMode": "value_and_name",
         "wideLayout": false
       },
@@ -569,7 +569,7 @@
           "fields": "",
           "values": false
         },
-        "showPercentChange": false,
+        "showPercentChange": true,
         "textMode": "value_and_name",
         "wideLayout": false
       },
@@ -1882,7 +1882,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "label_join(\n  100 * sum by(namespace,persistentvolumeclaim) (\n    kubelet_volume_stats_used_bytes{namespace=~\"${infra_namespaces:raw}\",persistentvolumeclaim!=\"\"}\n  )\n  / clamp_min(sum by(namespace,persistentvolumeclaim) (\n    kubelet_volume_stats_capacity_bytes{namespace=~\"${infra_namespaces:raw}\",persistentvolumeclaim!=\"\"}\n  ), 1),\n  \"pvc\", \"/\", \"namespace\", \"persistentvolumeclaim\"\n)",
+          "expr": "label_join(\n  100 * sum by(namespace,persistentvolumeclaim) (\n    kubelet_volume_stats_used_bytes{persistentvolumeclaim!=\"\"}\n  )\n  / clamp_min(sum by(namespace,persistentvolumeclaim) (\n    kubelet_volume_stats_capacity_bytes{persistentvolumeclaim!=\"\"}\n  ), 1),\n  \"pvc\", \"/\", \"namespace\", \"persistentvolumeclaim\"\n)",
           "format": "table",
           "instant": true,
           "legendFormat": "{{pvc}}",
@@ -1890,7 +1890,7 @@
         },
         {
           "editorMode": "code",
-          "expr": "label_join(\n  sum by(namespace,persistentvolumeclaim) (\n    kubelet_volume_stats_used_bytes{namespace=~\"${infra_namespaces:raw}\",persistentvolumeclaim!=\"\"}\n  ),\n  \"pvc\", \"/\", \"namespace\", \"persistentvolumeclaim\"\n)",
+          "expr": "label_join(\n  sum by(namespace,persistentvolumeclaim) (\n    kubelet_volume_stats_used_bytes{persistentvolumeclaim!=\"\"}\n  ),\n  \"pvc\", \"/\", \"namespace\", \"persistentvolumeclaim\"\n)",
           "format": "table",
           "instant": true,
           "legendFormat": "{{pvc}}",
@@ -1898,7 +1898,7 @@
         },
         {
           "editorMode": "code",
-          "expr": "label_join(\n  round(\n    sum by(namespace,persistentvolumeclaim) (\n      kubelet_volume_stats_capacity_bytes{namespace=~\"${infra_namespaces:raw}\",persistentvolumeclaim!=\"\"}\n    ) / 1024 / 1024 / 1024,\n    0.1\n  ),\n  \"pvc\", \"/\", \"namespace\", \"persistentvolumeclaim\"\n)",
+          "expr": "label_join(\n  round(\n    sum by(namespace,persistentvolumeclaim) (\n      kubelet_volume_stats_capacity_bytes{persistentvolumeclaim!=\"\"}\n    ) / 1024 / 1024 / 1024,\n    0.1\n  ),\n  \"pvc\", \"/\", \"namespace\", \"persistentvolumeclaim\"\n)",
           "format": "table",
           "instant": true,
           "legendFormat": "{{pvc}}",
@@ -1906,7 +1906,7 @@
         },
         {
           "editorMode": "code",
-          "expr": "label_join(\n  sum by(namespace,persistentvolumeclaim) (\n    kubelet_volume_stats_capacity_bytes{namespace=~\"${infra_namespaces:raw}\",persistentvolumeclaim!=\"\"}\n  ),\n  \"pvc\", \"/\", \"namespace\", \"persistentvolumeclaim\"\n)",
+          "expr": "label_join(\n  sum by(namespace,persistentvolumeclaim) (\n    kubelet_volume_stats_capacity_bytes{persistentvolumeclaim!=\"\"}\n  ),\n  \"pvc\", \"/\", \"namespace\", \"persistentvolumeclaim\"\n)",
           "format": "table",
           "instant": true,
           "legendFormat": "{{pvc}}",
@@ -2068,7 +2068,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (Workload) (label_join(label_replace(label_replace(((kube_deployment_spec_replicas{namespace=~\"${infra_namespaces:raw}\"} == bool 0) * 1) + (((kube_deployment_spec_replicas{namespace=~\"${infra_namespaces:raw}\"} > bool 0) * (kube_deployment_status_replicas_available{namespace=~\"${infra_namespaces:raw}\"} == bool kube_deployment_spec_replicas{namespace=~\"${infra_namespaces:raw}\"})) * 0) + (((kube_deployment_spec_replicas{namespace=~\"${infra_namespaces:raw}\"} > bool 0) * (kube_deployment_status_replicas_available{namespace=~\"${infra_namespaces:raw}\"} != bool kube_deployment_spec_replicas{namespace=~\"${infra_namespaces:raw}\"})) * 2), \"workload\", \"$1\", \"deployment\", \"(.*)\"), \"kind\", \"Deployment\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(((kube_statefulset_replicas{namespace=~\"${infra_namespaces:raw}\"} == bool 0) * 1) + (((kube_statefulset_replicas{namespace=~\"${infra_namespaces:raw}\"} > bool 0) * (kube_statefulset_status_replicas_ready{namespace=~\"${infra_namespaces:raw}\"} == bool kube_statefulset_replicas{namespace=~\"${infra_namespaces:raw}\"})) * 0) + (((kube_statefulset_replicas{namespace=~\"${infra_namespaces:raw}\"} > bool 0) * (kube_statefulset_status_replicas_ready{namespace=~\"${infra_namespaces:raw}\"} != bool kube_statefulset_replicas{namespace=~\"${infra_namespaces:raw}\"})) * 2), \"workload\", \"$1\", \"statefulset\", \"(.*)\"), \"kind\", \"StatefulSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(((kube_daemonset_status_desired_number_scheduled{namespace=~\"${infra_namespaces:raw}\"} == bool 0) * 1) + (((kube_daemonset_status_desired_number_scheduled{namespace=~\"${infra_namespaces:raw}\"} > bool 0) * (kube_daemonset_status_number_available{namespace=~\"${infra_namespaces:raw}\"} == bool kube_daemonset_status_desired_number_scheduled{namespace=~\"${infra_namespaces:raw}\"})) * 0) + (((kube_daemonset_status_desired_number_scheduled{namespace=~\"${infra_namespaces:raw}\"} > bool 0) * (kube_daemonset_status_number_available{namespace=~\"${infra_namespaces:raw}\"} != bool kube_daemonset_status_desired_number_scheduled{namespace=~\"${infra_namespaces:raw}\"})) * 2), \"workload\", \"$1\", \"daemonset\", \"(.*)\"), \"kind\", \"DaemonSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\"))",
+          "expr": "sum by (Workload) (label_join(label_replace(label_replace(((kube_deployment_spec_replicas{} == bool 0) * 1) + (((kube_deployment_spec_replicas{} > bool 0) * (kube_deployment_status_replicas_available{} == bool kube_deployment_spec_replicas{})) * 0) + (((kube_deployment_spec_replicas{} > bool 0) * (kube_deployment_status_replicas_available{} != bool kube_deployment_spec_replicas{})) * 2), \"workload\", \"$1\", \"deployment\", \"(.*)\"), \"kind\", \"Deployment\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(((kube_statefulset_replicas{} == bool 0) * 1) + (((kube_statefulset_replicas{} > bool 0) * (kube_statefulset_status_replicas_ready{} == bool kube_statefulset_replicas{})) * 0) + (((kube_statefulset_replicas{} > bool 0) * (kube_statefulset_status_replicas_ready{} != bool kube_statefulset_replicas{})) * 2), \"workload\", \"$1\", \"statefulset\", \"(.*)\"), \"kind\", \"StatefulSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(((kube_daemonset_status_desired_number_scheduled{} == bool 0) * 1) + (((kube_daemonset_status_desired_number_scheduled{} > bool 0) * (kube_daemonset_status_number_available{} == bool kube_daemonset_status_desired_number_scheduled{})) * 0) + (((kube_daemonset_status_desired_number_scheduled{} > bool 0) * (kube_daemonset_status_number_available{} != bool kube_daemonset_status_desired_number_scheduled{})) * 2), \"workload\", \"$1\", \"daemonset\", \"(.*)\"), \"kind\", \"DaemonSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\"))",
           "format": "table",
           "instant": true,
           "legendFormat": "{{Workload}}",
@@ -2076,7 +2076,7 @@
         },
         {
           "editorMode": "code",
-          "expr": "sum by (Workload) (label_join(label_replace(label_replace(kube_deployment_status_replicas_available{namespace=~\"${infra_namespaces:raw}\"}, \"workload\", \"$1\", \"deployment\", \"(.*)\"), \"kind\", \"Deployment\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(kube_statefulset_status_replicas_ready{namespace=~\"${infra_namespaces:raw}\"}, \"workload\", \"$1\", \"statefulset\", \"(.*)\"), \"kind\", \"StatefulSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(kube_daemonset_status_number_available{namespace=~\"${infra_namespaces:raw}\"}, \"workload\", \"$1\", \"daemonset\", \"(.*)\"), \"kind\", \"DaemonSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\"))",
+          "expr": "sum by (Workload) (label_join(label_replace(label_replace(kube_deployment_status_replicas_available{}, \"workload\", \"$1\", \"deployment\", \"(.*)\"), \"kind\", \"Deployment\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(kube_statefulset_status_replicas_ready{}, \"workload\", \"$1\", \"statefulset\", \"(.*)\"), \"kind\", \"StatefulSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(kube_daemonset_status_number_available{}, \"workload\", \"$1\", \"daemonset\", \"(.*)\"), \"kind\", \"DaemonSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\"))",
           "format": "table",
           "instant": true,
           "legendFormat": "{{Workload}}",
@@ -2084,7 +2084,7 @@
         },
         {
           "editorMode": "code",
-          "expr": "sum by (Workload) (label_join(label_replace(label_replace(kube_deployment_spec_replicas{namespace=~\"${infra_namespaces:raw}\"}, \"workload\", \"$1\", \"deployment\", \"(.*)\"), \"kind\", \"Deployment\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(kube_statefulset_replicas{namespace=~\"${infra_namespaces:raw}\"}, \"workload\", \"$1\", \"statefulset\", \"(.*)\"), \"kind\", \"StatefulSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(kube_daemonset_status_desired_number_scheduled{namespace=~\"${infra_namespaces:raw}\"}, \"workload\", \"$1\", \"daemonset\", \"(.*)\"), \"kind\", \"DaemonSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\"))",
+          "expr": "sum by (Workload) (label_join(label_replace(label_replace(kube_deployment_spec_replicas{}, \"workload\", \"$1\", \"deployment\", \"(.*)\"), \"kind\", \"Deployment\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(kube_statefulset_replicas{}, \"workload\", \"$1\", \"statefulset\", \"(.*)\"), \"kind\", \"StatefulSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(kube_daemonset_status_desired_number_scheduled{}, \"workload\", \"$1\", \"daemonset\", \"(.*)\"), \"kind\", \"DaemonSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\"))",
           "format": "table",
           "instant": true,
           "legendFormat": "{{Workload}}",
