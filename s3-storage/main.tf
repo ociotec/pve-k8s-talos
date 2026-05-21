@@ -163,7 +163,7 @@ locals {
   metadata_auto_snapshot_interval = "6h"
   replication_factor = ${local.garage_replication_factor_value}
   compression_level = 2
-  rpc_bind_addr = "[::]:3901"
+  rpc_bind_addr = "0.0.0.0:3901"
 
   [kubernetes_discovery]
   namespace = "${local.s3_namespace_value}"
@@ -171,12 +171,12 @@ locals {
   skip_crd = true
 
   [s3_api]
-  api_bind_addr = "[::]:3900"
+  api_bind_addr = "0.0.0.0:3900"
   s3_region = "${local.garage_s3_region_value}"
   root_domain = ".${local.garage_s3_hostname_value}"
 
   [admin]
-  api_bind_addr = "[::]:3903"
+  api_bind_addr = "0.0.0.0:3903"
   metrics_require_token = false
   EOT
 
