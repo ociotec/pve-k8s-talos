@@ -617,7 +617,7 @@
               }
             ]
           },
-          "unit": "cores"
+          "unit": "suffix:vCPUs"
         },
         "overrides": []
       },
@@ -737,7 +737,7 @@
               }
             ]
           },
-          "unit": "cores"
+          "unit": "suffix:vCPUs"
         },
         "overrides": []
       },
