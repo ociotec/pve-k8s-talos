@@ -15,15 +15,10 @@ constants = {
     "net_size"    = "24"
     "gateway"     = "192.168.1.1"
     "dns_servers" = "80.58.61.250,80.58.61.254"
-    # Optional comma-separated DNS server IPs for the Talos kernel ip= argument.
-    # Leave empty to reuse the first entries from dns_servers when proxy_url uses a hostname.
-    # Example: "192.168.1.10,192.168.1.11"
-    "kernel_dns_servers" = ""
     # Disable IPv6 at kernel level for Talos nodes. Set to "false" to keep IPv6 enabled.
     "disable_ipv6" = "true"
     # Optional corporate proxy URL reused for both Talos http_proxy and https_proxy.
-    # When this uses a hostname, the generator also adds Talos kernel args so early stages
-    # can resolve the proxy with kernel DNS servers.
+    # When set, the generator also adds Talos kernel environment arguments.
     # Example: http://proxy.example.com:3128/
     "proxy_url" = ""
     # Optional extra comma-separated no_proxy entries appended after the auto-generated

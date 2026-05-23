@@ -84,7 +84,7 @@ resource "talos_machine_bootstrap" "bootstrap" {
 
 data "talos_cluster_health" "health" {
   count                = local.cluster_already_bootstrapped ? 0 : 1
-  depends_on           = [null_resource.controlplane_api_ready, talos_machine_configuration_apply.worker_config_apply]
+  depends_on           = [null_resource.controlplane_api_ready, talos_machine_configuration_apply.worker_config_apply, null_resource.talos_nodes_discovery_rbac]
   client_configuration = data.talos_client_configuration.talosconfig.client_configuration
   control_plane_nodes  = [for v in local.controlplane_vms : v.ip]
   worker_nodes         = [for v in local.worker_vms : v.ip]
@@ -115,6 +115,64 @@ resource "local_file" "kubeconfig" {
   depends_on = [talos_cluster_kubeconfig.kubeconfig]
   content    = local.cluster_already_bootstrapped ? file("${path.module}/../kubeconfig") : resource.talos_cluster_kubeconfig.kubeconfig[0].kubeconfig_raw
   filename   = "${path.module}/../kubeconfig"
+}
+
+resource "local_file" "talos_nodes_discovery_rbac_manifest" {
+  content  = <<-YAML
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRole
+    metadata:
+      name: system:talos-nodes
+      labels:
+        kubernetes.io/bootstrapping: rbac-defaults
+      annotations:
+        rbac.authorization.kubernetes.io/autoupdate: "true"
+    rules:
+      - apiGroups:
+          - discovery.k8s.io
+        resources:
+          - endpointslices
+        verbs:
+          - get
+          - list
+          - watch
+      - apiGroups:
+          - ""
+        resources:
+          - nodes
+        verbs:
+          - get
+          - list
+          - watch
+  YAML
+  filename = "${path.module}/talos-nodes-discovery-rbac.yaml"
+}
+
+resource "null_resource" "talos_nodes_discovery_rbac" {
+  depends_on = [local_file.kubeconfig, local_file.talos_nodes_discovery_rbac_manifest]
+
+  triggers = {
+    kubeconfig_sha = sha256(local_file.kubeconfig.content)
+    manifest_sha   = sha256(local_file.talos_nodes_discovery_rbac_manifest.content)
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -eu
+      kubeconfig="${path.module}/../kubeconfig"
+      manifest="${local_file.talos_nodes_discovery_rbac_manifest.filename}"
+
+      for attempt in $(seq 1 60); do
+        if KUBECONFIG="$kubeconfig" kubectl apply --validate=false -f "$manifest"; then
+          exit 0
+        fi
+        sleep 5
+      done
+
+      echo "Error: failed to apply Talos discovery RBAC after 60 attempts." >&2
+      exit 1
+    EOT
+  }
 }
 
 output "talosconfig" {

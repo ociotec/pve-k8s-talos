@@ -199,7 +199,6 @@ fi
 net_size="$(awk -F'"' '/"net_size"/ { print $4; exit }' "${constants_path}")"
 gateway="$(awk -F'"' '/"gateway"/ { print $4; exit }' "${constants_path}")"
 dns_servers="$(awk -F'"' '/"dns_servers"/ { print $4; exit }' "${constants_path}")"
-kernel_dns_servers_raw="$(awk -F'"' '/"kernel_dns_servers"/ { print $4; exit }' "${constants_path}")"
 ntp_servers="$(awk -F'"' '/"ntp_servers"/ { print $4; exit }' "${constants_path}")"
 disable_ipv6="$(awk -F'"' '/"disable_ipv6"/ { print $4; exit }' "${constants_path}")"
 talos_version="$(awk -F'"' '/"version"/ { print $4; exit }' "${constants_path}")"
@@ -280,54 +279,6 @@ sanitize_k8s_name() {
   fi
 
   printf '%s' "${sanitized}"
-}
-
-is_ipv4_address() {
-  local ip="$1"
-  local a b c d extra
-  IFS=. read -r a b c d extra <<< "${ip}"
-
-  if [[ -n "${extra:-}" ]]; then
-    return 1
-  fi
-  if [[ ! "${a}" =~ ^[0-9]+$ || ! "${b}" =~ ^[0-9]+$ || ! "${c}" =~ ^[0-9]+$ || ! "${d}" =~ ^[0-9]+$ ]]; then
-    return 1
-  fi
-  if (( a > 255 || b > 255 || c > 255 || d > 255 )); then
-    return 1
-  fi
-
-  return 0
-}
-
-is_ipv6_address() {
-  local ip="$1"
-  [[ "${ip}" == *:* ]]
-}
-
-proxy_host_from_url() {
-  local url="$1"
-  local remainder
-
-  remainder="${url#*://}"
-  remainder="${remainder%%/*}"
-  remainder="${remainder##*@}"
-
-  if [[ "${remainder}" == \[* ]]; then
-    remainder="${remainder#\[}"
-    printf '%s' "${remainder%%]*}"
-  else
-    printf '%s' "${remainder%%:*}"
-  fi
-}
-
-kernel_ip_value() {
-  local value="$1"
-  if is_ipv6_address "${value}" && [[ "${value}" != \[*\] ]]; then
-    printf '[%s]' "${value}"
-  else
-    printf '%s' "${value}"
-  fi
 }
 
 registry_host_from_url() {
@@ -509,7 +460,6 @@ network_cidr_from_ip() {
 
 proxy_url="$(trim "${proxy_url}")"
 no_proxy_extra="$(trim "${no_proxy_extra}")"
-kernel_dns_servers_raw="$(trim "${kernel_dns_servers_raw}")"
 cert_files_raw="$(trim "${cert_files_raw}")"
 legacy_proxy_ca_path="$(trim "${legacy_proxy_ca_path}")"
 talos_discovery_service_disabled="$(trim "${talos_discovery_service_disabled}")"
@@ -1009,68 +959,6 @@ if [[ -n "${proxy_url}" ]]; then
   proxy_env_section+=$'    no_proxy: "'"$(yaml_escape "${no_proxy_value}")"$'"'
 fi
 
-proxy_host=""
-proxy_uses_hostname=false
-if [[ -n "${proxy_url}" ]]; then
-  proxy_host="$(proxy_host_from_url "${proxy_url}")"
-  if [[ -n "${proxy_host}" ]] && ! is_ipv4_address "${proxy_host}" && ! is_ipv6_address "${proxy_host}"; then
-    proxy_uses_hostname=true
-  fi
-fi
-
-if [[ "${proxy_uses_hostname}" == "true" ]]; then
-  kernel_dns_servers_effective="${kernel_dns_servers_raw}"
-  if [[ -z "${kernel_dns_servers_effective}" ]]; then
-    kernel_dns_servers_effective="${dns_servers}"
-  fi
-
-  kernel_dns_servers_array=()
-  IFS=',' read -ra kernel_dns_list <<< "${kernel_dns_servers_effective}"
-  for server in "${kernel_dns_list[@]}"; do
-    server="$(trim "${server}")"
-    if [[ -z "${server}" ]]; then
-      continue
-    fi
-    if ! is_ipv4_address "${server}" && ! is_ipv6_address "${server}"; then
-      echo "Error: kernel DNS entries must be IP addresses when network.proxy_url uses a hostname (got ${server})." >&2
-      echo "Fix: set network.kernel_dns_servers or network.dns_servers to IP addresses reachable during early Talos boot." >&2
-      exit 1
-    fi
-    kernel_dns_servers_array+=("${server}")
-  done
-
-  if [[ ${#kernel_dns_servers_array[@]} -eq 0 ]]; then
-    echo "Error: network.proxy_url uses a hostname, but no kernel DNS servers were found." >&2
-    echo "Fix: set network.kernel_dns_servers or network.dns_servers to at least one reachable DNS server IP." >&2
-    exit 1
-  fi
-
-  kernel_dns_0="$(kernel_ip_value "${kernel_dns_servers_array[0]}")"
-  kernel_dns_1=""
-  if [[ ${#kernel_dns_servers_array[@]} -ge 2 ]]; then
-    kernel_dns_1="$(kernel_ip_value "${kernel_dns_servers_array[1]}")"
-  fi
-  kernel_ntp_0=""
-  if [[ ${#ntp_servers_array[@]} -ge 1 ]]; then
-    if is_ipv4_address "${ntp_servers_array[0]}" || is_ipv6_address "${ntp_servers_array[0]}"; then
-      kernel_ntp_0="$(kernel_ip_value "${ntp_servers_array[0]}")"
-    fi
-  fi
-  kernel_args+=("ip=:::::::${kernel_dns_0}:${kernel_dns_1}:${kernel_ntp_0}")
-fi
-
-if [[ ${#kernel_args[@]} -gt 0 ]]; then
-  grub_use_uki_cmdline_section=$'    grubUseUKICmdline: false'
-  extra_kernel_args_section=$'\n'
-  for kernel_arg in "${kernel_args[@]}"; do
-    extra_kernel_args_section+=$'      - "'"$(yaml_escape "${kernel_arg}")"$'"\n'
-  done
-  extra_kernel_args_section="${extra_kernel_args_section%$'\n'}"
-else
-  grub_use_uki_cmdline_section=""
-  extra_kernel_args_section=" []"
-fi
-
 if [[ ${#cert_file_paths[@]} -gt 0 ]]; then
   cert_files_section=$'\n'
   for cert_file_path in "${cert_file_paths[@]}"; do
@@ -1502,6 +1390,19 @@ for name in "${!vm_ips[@]}"; do
     k8s_node_labels_section="${k8s_node_labels_block}"
   else
     k8s_node_labels_section=" {}"
+  fi
+
+  node_kernel_args=("${kernel_args[@]}")
+  if [[ ${#node_kernel_args[@]} -gt 0 ]]; then
+    grub_use_uki_cmdline_section=$'    grubUseUKICmdline: false'
+    extra_kernel_args_section=$'\n'
+    for kernel_arg in "${node_kernel_args[@]}"; do
+      extra_kernel_args_section+=$'      - "'"$(yaml_escape "${kernel_arg}")"$'"\n'
+    done
+    extra_kernel_args_section="${extra_kernel_args_section%$'\n'}"
+  else
+    grub_use_uki_cmdline_section=""
+    extra_kernel_args_section=" []"
   fi
 
   rendered="${template}"

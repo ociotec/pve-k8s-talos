@@ -5,8 +5,8 @@ data "talos_machine_configuration" "machineconfig___SAFE_NAME__" {
   machine_type     = "controlplane"
   machine_secrets  = talos_machine_secrets.machine_secrets.machine_secrets
   config_patches = compact([
-    "${path.module}/patches/machine-__NAME__.yaml",
-    fileexists("${path.module}/patches/trusted-roots-root-ca.yaml") ? "${path.module}/patches/trusted-roots-root-ca.yaml" : "",
-    "${path.module}/patches/qemu.yaml",
+    file("${path.module}/patches/machine-__NAME__.yaml"),
+    fileexists("${path.module}/patches/trusted-roots-root-ca.yaml") ? file("${path.module}/patches/trusted-roots-root-ca.yaml") : "",
+    file("${path.module}/patches/qemu.yaml"),
   ])
 }
