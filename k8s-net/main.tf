@@ -387,6 +387,7 @@ resource "kubernetes_manifest" "ingress_nginx" {
   computed_fields = [
     "metadata.labels",
     "spec.minReadySeconds",
+    "spec.template.metadata.annotations",
     "spec.template.metadata.labels",
   ]
   depends_on = [
@@ -394,6 +395,9 @@ resource "kubernetes_manifest" "ingress_nginx" {
     kubernetes_manifest.ingress_nginx_namespace,
     kubernetes_manifest.infrastructure_priority_classes,
   ]
+  field_manager {
+    force_conflicts = true
+  }
 }
 
 resource "kubernetes_manifest" "ingress_nginx_namespace" {
