@@ -135,7 +135,7 @@ ceph_filesystem_exists_via_ssh() {
   local payload
 
   payload="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
-    "ceph fs volume ls --format json")"
+    "ceph fs ls --format json")"
   printf '%s' "${payload}" | jq -er --arg filesystem_name "${filesystem_name}" '.[] | select(.name == $filesystem_name)' >/dev/null
 }
 
@@ -441,13 +441,24 @@ converge_ec_pool_via_ssh() {
   local pool_name="$2"
   local min_size="$3"
   local application="$4"
-  local quoted_pool
+  local quoted_pool ssh_user output
 
   quoted_pool="$(shell_quote "${pool_name}")"
+  ssh_user="${CEPH_SSH_USER:-root}"
   run_ceph_via_ssh "${ssh_host}" "osd pool application enable ${quoted_pool} ${application} --yes-i-really-mean-it"
   run_ceph_via_ssh "${ssh_host}" "osd pool set ${quoted_pool} min_size ${min_size}"
   run_ceph_via_ssh "${ssh_host}" "osd pool set ${quoted_pool} pg_autoscale_mode on"
-  run_ceph_via_ssh "${ssh_host}" "osd pool set ${quoted_pool} allow_ec_overwrites true"
+
+  if ! output="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
+    "ceph osd pool set ${quoted_pool} allow_ec_overwrites true" 2>&1)"; then
+    if grep -q "ec overwrites can only be enabled for an erasure coded pool" <<<"${output}"; then
+      echo "Pool ${pool_name} is not erasure-coded; skipping allow_ec_overwrites." >&2
+    else
+      printf '%s\n' "${output}" >&2
+      exit 1
+    fi
+  fi
+
   echo "Pool ${pool_name} converged via Ceph CLI."
 }
 
@@ -667,6 +678,7 @@ ensure_cephfs() {
   local k=""
   local m=""
   local quoted_filesystem quoted_metadata_pool quoted_data_pool quoted_ec_data_pool
+  local filesystem_existed=false
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -784,6 +796,7 @@ ensure_cephfs() {
 
   if ceph_filesystem_exists_via_ssh "${ssh_host}" "${filesystem_name}"; then
     echo "CephFS ${filesystem_name} already exists on ${ssh_host}."
+    filesystem_existed=true
   else
     run_ceph_via_ssh "${ssh_host}" "fs new ${quoted_filesystem} ${quoted_metadata_pool} ${quoted_data_pool}"
     echo "CephFS ${filesystem_name} created on ${ssh_host}."
@@ -800,9 +813,17 @@ ensure_cephfs() {
       echo "CephFS ${filesystem_name} data pool ${ec_data_pool} added."
     fi
 
-    ensure_cephfs_csi_subvolume_group_via_ssh "${ssh_host}" "${filesystem_name}" "${ec_data_pool}"
+    if [[ "${filesystem_existed}" == "true" ]]; then
+      echo "CephFS ${filesystem_name} already existed; skipping CSI subvolume group check."
+    else
+      ensure_cephfs_csi_subvolume_group_via_ssh "${ssh_host}" "${filesystem_name}" "${ec_data_pool}"
+    fi
   else
-    ensure_cephfs_csi_subvolume_group_via_ssh "${ssh_host}" "${filesystem_name}" "${data_pool}"
+    if [[ "${filesystem_existed}" == "true" ]]; then
+      echo "CephFS ${filesystem_name} already existed; skipping CSI subvolume group check."
+    else
+      ensure_cephfs_csi_subvolume_group_via_ssh "${ssh_host}" "${filesystem_name}" "${data_pool}"
+    fi
   fi
 
   ensure_cephfs_active_mds_via_ssh "${ssh_host}" "${filesystem_name}" "${filesystem_name}"
