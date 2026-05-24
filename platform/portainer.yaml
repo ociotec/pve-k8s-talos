@@ -29,7 +29,11 @@ metadata:
     io.portainer.kubernetes.application.stack: portainer
     app.kubernetes.io/name: portainer
     app.kubernetes.io/instance: portainer
+    app.kubernetes.io/component: server
     app.kubernetes.io/part-of: portainer
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: platform
+    pve-k8s-talos/storage-role: app-data
     app.kubernetes.io/version: "ce-latest-ee-lts"
 spec:
   storageClassName: "${portainer_storage}"

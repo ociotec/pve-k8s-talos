@@ -917,6 +917,34 @@ resource "kubernetes_manifest" "statefulset" {
   ]
 }
 
+resource "kubernetes_labels" "broker_data_pvc" {
+  for_each = local.broker_vms_by_id
+
+  api_version = "v1"
+  kind        = "PersistentVolumeClaim"
+  force       = true
+
+  metadata {
+    name      = format("datadir-%s-%s", local.redpanda_resource_name_value, each.key)
+    namespace = local.redpanda_namespace_value
+  }
+
+  labels = {
+    app                            = local.redpanda_resource_name_value
+    "app.kubernetes.io/name"       = local.redpanda_resource_name_value
+    "app.kubernetes.io/instance"   = local.redpanda_resource_name_value
+    "app.kubernetes.io/component"  = "broker"
+    "app.kubernetes.io/part-of"    = "redpanda"
+    "app.kubernetes.io/managed-by" = "infrastructure"
+    "pve-k8s-talos/section"        = "kafka"
+    "pve-k8s-talos/storage-role"   = "broker-data"
+  }
+
+  depends_on = [
+    kubernetes_manifest.statefulset,
+  ]
+}
+
 resource "kubernetes_manifest" "broker_pdb" {
   manifest = {
     apiVersion = "policy/v1"

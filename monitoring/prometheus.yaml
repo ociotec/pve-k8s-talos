@@ -435,6 +435,14 @@ kind: PersistentVolumeClaim
 metadata:
   name: prometheus-data
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/instance: prometheus
+    app.kubernetes.io/component: server
+    app.kubernetes.io/part-of: prometheus
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+    pve-k8s-talos/storage-role: metrics
 spec:
   accessModes:
     - ReadWriteOnce

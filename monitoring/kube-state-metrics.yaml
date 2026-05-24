@@ -142,7 +142,7 @@ spec:
         - name: kube-state-metrics
           image: registry.k8s.io/kube-state-metrics/kube-state-metrics:${kube_state_metrics_image_tag}
           args:
-            - --metric-labels-allowlist=pods=[app.kubernetes.io/component,component,app.kubernetes.io/name,app.kubernetes.io/part-of,app],deployments=[app.kubernetes.io/part-of,app.kubernetes.io/name,app],statefulsets=[app.kubernetes.io/part-of,app.kubernetes.io/name,app],daemonsets=[app.kubernetes.io/part-of,app.kubernetes.io/name,app]
+            - --metric-labels-allowlist=pods=[app.kubernetes.io/component,component,app.kubernetes.io/name,app.kubernetes.io/part-of,app],deployments=[app.kubernetes.io/part-of,app.kubernetes.io/name,app],statefulsets=[app.kubernetes.io/part-of,app.kubernetes.io/name,app],daemonsets=[app.kubernetes.io/part-of,app.kubernetes.io/name,app],persistentvolumeclaims=[app.kubernetes.io/component,app.kubernetes.io/name,app.kubernetes.io/instance,app.kubernetes.io/part-of,app.kubernetes.io/managed-by,pve-k8s-talos/section,pve-k8s-talos/storage-role]
           ports:
             - name: metrics
               containerPort: 8080

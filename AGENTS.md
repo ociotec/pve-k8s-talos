@@ -81,6 +81,24 @@ It complements `README.md` and focuses on execution behavior, change safety, and
 - Use `computed_fields`/`ignore_changes` for known unstable fields when provider inconsistencies are observed.
 - Avoid unnecessary manifest churn; preserve field order and semantics unless a behavior change is intended.
 
+## Kubernetes Labels and Annotations
+
+- Repository-managed Kubernetes objects should carry ownership labels where the resource supports labels and the labels are meaningful for inventory, dashboards, or operations.
+- Use Kubernetes recommended app labels consistently:
+  - `app.kubernetes.io/name` for the concrete app or workload name.
+  - `app.kubernetes.io/instance` for the deployed instance name.
+  - `app.kubernetes.io/component` for the functional component, such as `server`, `database`, `broker`, `node`, `controller`, `oauth2-proxy`, or `dashboard-provisioning`.
+  - `app.kubernetes.io/part-of` for the broader system, such as `keycloak`, `grafana`, `loki`, `prometheus`, `portainer`, `redpanda`, `garage`, `rook-ceph`, `cert-manager`, or `benchmark`.
+  - `app.kubernetes.io/managed-by` with value `infrastructure` for resources owned by this repository.
+- For repository grouping, add `pve-k8s-talos/section` to PVCs and other durable or dashboarded resources when useful. Use the deployment section names: `identity`, `k8s-net`, `monitoring`, `platform`, `rook`, `s3-storage`, `kafka`, or `benchmark`.
+- Workloads should put ownership labels on both the workload `metadata.labels` and the pod template `spec.template.metadata.labels`.
+- Service selectors and workload selectors must use stable identity labels only. Do not use labels that are expected to change, such as image versions, storage roles, or operational grouping labels, in selectors.
+- Every repository-managed PVC and StatefulSet-created PVC must be labeled with ownership labels plus `pve-k8s-talos/section` and `pve-k8s-talos/storage-role`. Use low-cardinality storage roles such as `database`, `metrics`, `logs`, `dashboards`, `broker-data`, `object-data`, `app-data`, or `benchmark`.
+- Do not encode dynamic infrastructure facts as PVC labels when Kubernetes or metrics already expose them, such as size, StorageClass, PV name, node name, provisioner, or volume handle.
+- Do not add or change labels under `volumeClaimTemplates` for an existing StatefulSet unless the StatefulSet is intentionally being recreated. Kubernetes treats most StatefulSet spec changes outside the pod template as immutable. For existing StatefulSets, label the generated PVCs directly, preferably with `kubernetes_labels`.
+- When adding labels intended for Prometheus/Grafana, update `kube-state-metrics` `--metric-labels-allowlist` and any affected dashboards or PromQL joins in the same change.
+- If a workload is scraped by annotation-based Prometheus discovery, set `prometheus.io/scrape`, `prometheus.io/port`, and `prometheus.io/path` on the pod template. Prefer named container ports when practical, and keep scrape labels/annotations aligned with existing Prometheus relabeling.
+
 ## Kubernetes Resource Requirements
 
 - Every service deployed into the cluster must define CPU and memory `requests` and `limits` for every container.

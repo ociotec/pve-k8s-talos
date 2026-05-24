@@ -22,6 +22,14 @@ kind: PersistentVolumeClaim
 metadata:
   name: grafana-postgres-data
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: grafana-postgres
+    app.kubernetes.io/instance: grafana
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: grafana
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+    pve-k8s-talos/storage-role: database
 spec:
   accessModes:
     - ReadWriteOnce
@@ -189,6 +197,14 @@ kind: PersistentVolumeClaim
 metadata:
   name: grafana-data
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/instance: grafana
+    app.kubernetes.io/component: server
+    app.kubernetes.io/part-of: grafana
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+    pve-k8s-talos/storage-role: app-data
 spec:
   accessModes:
     - ReadWriteOnce
@@ -203,6 +219,14 @@ kind: PersistentVolumeClaim
 metadata:
   name: ${grafana_dashboard_provisioning_pvc_name}
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/instance: grafana
+    app.kubernetes.io/component: dashboard-provisioning
+    app.kubernetes.io/part-of: grafana
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+    pve-k8s-talos/storage-role: dashboards
 spec:
   accessModes:
 %{ for mode in grafana_dashboard_provisioning_pvc_access_modes ~}

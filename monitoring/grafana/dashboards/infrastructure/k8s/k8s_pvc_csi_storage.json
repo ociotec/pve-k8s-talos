@@ -68,7 +68,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(kubelet_volume_stats_used_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
+          "expr": "sum(kubelet_volume_stats_used_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) max by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) ((kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role=~\"$storage_role\"}) * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
           "legendFormat": "Used",
           "refId": "A"
         }
@@ -115,7 +115,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(kubelet_volume_stats_capacity_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
+          "expr": "sum(kubelet_volume_stats_capacity_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) max by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) ((kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role=~\"$storage_role\"}) * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
           "legendFormat": "Capacity",
           "refId": "A"
         }
@@ -180,7 +180,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "100 * sum(kubelet_volume_stats_used_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})) / clamp_min(sum(kubelet_volume_stats_capacity_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})), 1)",
+          "expr": "100 * sum(kubelet_volume_stats_used_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) max by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) ((kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role=~\"$storage_role\"}) * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})) / clamp_min(sum(kubelet_volume_stats_capacity_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) max by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) ((kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role=~\"$storage_role\"}) * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})), 1)",
           "legendFormat": "Used %",
           "refId": "A"
         }
@@ -228,7 +228,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "count((kube_persistentvolumeclaim_status_phase{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\",phase=\"Bound\"} == 1) * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
+          "expr": "count((kube_persistentvolumeclaim_status_phase{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\",phase=\"Bound\"} == 1) * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) max by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) ((kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role=~\"$storage_role\"}) * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
           "legendFormat": "Bound",
           "refId": "A"
         }
@@ -293,7 +293,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "count((100 * kubelet_volume_stats_used_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} / clamp_min(kubelet_volume_stats_capacity_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"}, 1) > 85) * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})) or on() vector(0)",
+          "expr": "count((100 * kubelet_volume_stats_used_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} / clamp_min(kubelet_volume_stats_capacity_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"}, 1) > 85) * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) max by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) ((kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role=~\"$storage_role\"}) * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})) or on() vector(0)",
           "legendFormat": ">85%",
           "refId": "A"
         }
@@ -354,7 +354,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum((kubelet_volume_stats_health_status_abnormal{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} == 1) * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})) or on() vector(0)",
+          "expr": "sum((kubelet_volume_stats_health_status_abnormal{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} == 1) * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) max by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) ((kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role=~\"$storage_role\"}) * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})) or on() vector(0)",
           "legendFormat": "Abnormal",
           "refId": "A"
         }
@@ -398,13 +398,13 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (namespace,persistentvolumeclaim,storageclass,provisioner) (kubelet_volume_stats_used_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
+          "expr": "sum by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) (kubelet_volume_stats_used_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) max by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) ((kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role=~\"$storage_role\"}) * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
           "legendFormat": "{{namespace}}/{{persistentvolumeclaim}} used",
           "refId": "A"
         },
         {
           "editorMode": "code",
-          "expr": "sum by (namespace,persistentvolumeclaim,storageclass,provisioner) (kubelet_volume_stats_capacity_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
+          "expr": "sum by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) (kubelet_volume_stats_capacity_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) max by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) ((kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role=~\"$storage_role\"}) * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
           "legendFormat": "{{namespace}}/{{persistentvolumeclaim}} capacity",
           "refId": "B"
         }
@@ -466,7 +466,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "100 * sum by (namespace,persistentvolumeclaim,storageclass,provisioner) (kubelet_volume_stats_used_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})) / clamp_min(sum by (namespace,persistentvolumeclaim,storageclass,provisioner) (kubelet_volume_stats_capacity_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})), 1)",
+          "expr": "100 * sum by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) (kubelet_volume_stats_used_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) max by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) ((kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role=~\"$storage_role\"}) * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})) / clamp_min(sum by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) (kubelet_volume_stats_capacity_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) max by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) ((kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role=~\"$storage_role\"}) * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})), 1)",
           "legendFormat": "{{namespace}}/{{persistentvolumeclaim}}",
           "refId": "A"
         }
@@ -510,7 +510,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (namespace,persistentvolumeclaim,storageclass,provisioner) (kubelet_volume_stats_available_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
+          "expr": "sum by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) (kubelet_volume_stats_available_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) max by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) ((kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role=~\"$storage_role\"}) * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
           "legendFormat": "{{namespace}}/{{persistentvolumeclaim}}",
           "refId": "A"
         }
@@ -572,7 +572,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "100 * sum by (namespace,persistentvolumeclaim,storageclass,provisioner) (kubelet_volume_stats_inodes_used{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})) / clamp_min(sum by (namespace,persistentvolumeclaim,storageclass,provisioner) (kubelet_volume_stats_inodes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})), 1)",
+          "expr": "100 * sum by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) (kubelet_volume_stats_inodes_used{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) max by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) ((kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role=~\"$storage_role\"}) * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})) / clamp_min(sum by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) (kubelet_volume_stats_inodes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) max by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) ((kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role=~\"$storage_role\"}) * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})), 1)",
           "legendFormat": "{{namespace}}/{{persistentvolumeclaim}}",
           "refId": "A"
         }
@@ -632,7 +632,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "100 * sum by (namespace,persistentvolumeclaim,storageclass,provisioner) (kubelet_volume_stats_used_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})) / clamp_min(sum by (namespace,persistentvolumeclaim,storageclass,provisioner) (kubelet_volume_stats_capacity_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})), 1)",
+          "expr": "100 * sum by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) (kubelet_volume_stats_used_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) max by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) ((kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role=~\"$storage_role\"}) * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})) / clamp_min(sum by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) (kubelet_volume_stats_capacity_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) max by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) ((kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role=~\"$storage_role\"}) * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})), 1)",
           "format": "table",
           "instant": true,
           "legendFormat": "{{namespace}}/{{persistentvolumeclaim}}",
@@ -653,7 +653,11 @@
               "namespace": "Namespace",
               "persistentvolumeclaim": "PVC",
               "provisioner": "CSI",
-              "storageclass": "StorageClass"
+              "storageclass": "StorageClass",
+              "label_pve_k8s_talos_section": "Section",
+              "label_app_kubernetes_io_part_of": "Part of",
+              "label_app_kubernetes_io_component": "Component",
+              "label_pve_k8s_talos_storage_role": "Storage role"
             }
           }
         },
@@ -708,7 +712,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (namespace,persistentvolumeclaim,storageclass,provisioner) (kubelet_volume_stats_used_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
+          "expr": "sum by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) (kubelet_volume_stats_used_bytes{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) max by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) ((kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role=~\"$storage_role\"}) * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
           "format": "table",
           "instant": true,
           "legendFormat": "{{namespace}}/{{persistentvolumeclaim}}",
@@ -729,7 +733,11 @@
               "namespace": "Namespace",
               "persistentvolumeclaim": "PVC",
               "provisioner": "CSI",
-              "storageclass": "StorageClass"
+              "storageclass": "StorageClass",
+              "label_pve_k8s_talos_section": "Section",
+              "label_app_kubernetes_io_part_of": "Part of",
+              "label_app_kubernetes_io_component": "Component",
+              "label_pve_k8s_talos_storage_role": "Storage role"
             }
           }
         },
@@ -785,7 +793,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "(kube_persistentvolumeclaim_status_phase{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\",phase=~\"Pending|Lost\"} == 1) * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})",
+          "expr": "(kube_persistentvolumeclaim_status_phase{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\",phase=~\"Pending|Lost\"} == 1) * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) max by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) ((kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role=~\"$storage_role\"}) * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})",
           "format": "table",
           "instant": true,
           "legendFormat": "{{namespace}}/{{persistentvolumeclaim}} {{phase}}",
@@ -807,7 +815,11 @@
               "persistentvolumeclaim": "PVC",
               "phase": "Phase",
               "provisioner": "CSI",
-              "storageclass": "StorageClass"
+              "storageclass": "StorageClass",
+              "label_pve_k8s_talos_section": "Section",
+              "label_app_kubernetes_io_part_of": "Part of",
+              "label_app_kubernetes_io_component": "Component",
+              "label_pve_k8s_talos_storage_role": "Storage role"
             }
           }
         }
@@ -851,14 +863,14 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "max by (namespace,persistentvolumeclaim,pod,label_app_kubernetes_io_component) (kube_pod_spec_volumes_persistentvolumeclaims_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,pod) group_left(label_app_kubernetes_io_component) kube_pod_labels{namespace=~\"$namespace\",label_app_kubernetes_io_component=~\"$component\"}) and on(namespace,persistentvolumeclaim) max by (namespace,persistentvolumeclaim,storageclass,provisioner) (kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"})",
+          "expr": "max by (namespace,persistentvolumeclaim,pod,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) (kube_pod_spec_volumes_persistentvolumeclaims_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) max by (namespace,persistentvolumeclaim,storageclass,provisioner,label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) ((kube_persistentvolumeclaim_info{namespace=~\"$namespace\",persistentvolumeclaim=~\"$pvc\"} * on(namespace,persistentvolumeclaim) group_left(label_pve_k8s_talos_section,label_app_kubernetes_io_part_of,label_app_kubernetes_io_component,label_pve_k8s_talos_storage_role) kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role=~\"$storage_role\"}) * on(storageclass) group_left(provisioner) kube_storageclass_info{provisioner=~\"$csi\"}))",
           "format": "table",
           "instant": true,
           "legendFormat": "{{namespace}}/{{persistentvolumeclaim}} {{pod}}",
           "refId": "A"
         }
       ],
-      "title": "Mounted PVCs by component",
+      "title": "Mounted PVCs by PVC labels",
       "transformations": [
         {
           "id": "organize",
@@ -872,7 +884,10 @@
               "label_app_kubernetes_io_component": "Component",
               "namespace": "Namespace",
               "persistentvolumeclaim": "PVC",
-              "pod": "Pod"
+              "pod": "Pod",
+              "label_pve_k8s_talos_section": "Section",
+              "label_app_kubernetes_io_part_of": "Part of",
+              "label_pve_k8s_talos_storage_role": "Storage role"
             }
           }
         }
@@ -1352,7 +1367,11 @@
               "provisioner": "CSI",
               "reclaim_policy": "Reclaim policy",
               "storageclass": "StorageClass",
-              "volume_binding_mode": "Binding mode"
+              "volume_binding_mode": "Binding mode",
+              "label_pve_k8s_talos_section": "Section",
+              "label_app_kubernetes_io_part_of": "Part of",
+              "label_app_kubernetes_io_component": "Component",
+              "label_pve_k8s_talos_storage_role": "Storage role"
             }
           }
         }
@@ -1417,7 +1436,11 @@
               "attacher": "CSI",
               "node": "Node",
               "volumeattachment": "VolumeAttachment",
-              "volumename": "PV"
+              "volumename": "PV",
+              "label_pve_k8s_talos_section": "Section",
+              "label_app_kubernetes_io_part_of": "Part of",
+              "label_app_kubernetes_io_component": "Component",
+              "label_pve_k8s_talos_storage_role": "Storage role"
             }
           }
         }
@@ -1462,7 +1485,7 @@
         "hide": 0,
         "includeAll": true,
         "label": "Section",
-        "multi": false,
+        "multi": true,
         "name": "section",
         "options": [
           {
@@ -1496,8 +1519,17 @@
             "value": "cattle-system|cattle-capi-system|cattle-fleet-system|cattle-fleet-local-system|cattle-provisioning-capi-system|fleet-default|portainer"
           }
         ],
-        "query": "k8s : kube-system,k8s-net : cert-manager|metallb-system|ingress-nginx,monitoring : monitoring,identity : identity,rook : rook-ceph,platform : cattle-system|cattle-capi-system|cattle-fleet-system|cattle-fleet-local-system|cattle-provisioning-capi-system|fleet-default|portainer",
-        "type": "custom"
+        "query": {
+          "query": "label_values(kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section!=\"\"}, label_pve_k8s_talos_section)",
+          "refId": "A"
+        },
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section!=\"\"}, label_pve_k8s_talos_section)",
+        "refresh": 2
       },
       {
         "allValue": ".*",
@@ -1510,14 +1542,38 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(kube_persistentvolumeclaim_info{namespace=~\"$section\"}, namespace)",
+        "definition": "label_values(kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section=~\"$section\"}, namespace)",
         "hide": 0,
         "includeAll": true,
         "label": "Namespace",
         "multi": true,
         "name": "namespace",
         "query": {
-          "query": "label_values(kube_persistentvolumeclaim_info{namespace=~\"$section\"}, namespace)",
+          "query": "label_values(kube_persistentvolumeclaim_labels{label_pve_k8s_talos_section=~\"$section\"}, namespace)",
+          "refId": "A"
+        },
+        "refresh": 2,
+        "type": "query"
+      },
+      {
+        "name": "part_of",
+        "allValue": ".*",
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kube_persistentvolumeclaim_labels{namespace=~\"$namespace\",label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of!=\"\"}, label_app_kubernetes_io_part_of)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Part of",
+        "multi": true,
+        "query": {
+          "query": "label_values(kube_persistentvolumeclaim_labels{namespace=~\"$namespace\",label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of!=\"\"}, label_app_kubernetes_io_part_of)",
           "refId": "A"
         },
         "refresh": 2,
@@ -1558,14 +1614,38 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(kube_pod_labels{namespace=~\"$namespace\",label_app_kubernetes_io_component!=\"\"}, label_app_kubernetes_io_component)",
+        "definition": "label_values(kube_persistentvolumeclaim_labels{namespace=~\"$namespace\",label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component!=\"\"}, label_app_kubernetes_io_component)",
         "hide": 0,
         "includeAll": true,
         "label": "Component",
         "multi": true,
         "name": "component",
         "query": {
-          "query": "label_values(kube_pod_labels{namespace=~\"$namespace\",label_app_kubernetes_io_component!=\"\"}, label_app_kubernetes_io_component)",
+          "query": "label_values(kube_persistentvolumeclaim_labels{namespace=~\"$namespace\",label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component!=\"\"}, label_app_kubernetes_io_component)",
+          "refId": "A"
+        },
+        "refresh": 2,
+        "type": "query"
+      },
+      {
+        "name": "storage_role",
+        "allValue": ".*",
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kube_persistentvolumeclaim_labels{namespace=~\"$namespace\",label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role!=\"\"}, label_pve_k8s_talos_storage_role)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Storage role",
+        "multi": true,
+        "query": {
+          "query": "label_values(kube_persistentvolumeclaim_labels{namespace=~\"$namespace\",label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role!=\"\"}, label_pve_k8s_talos_storage_role)",
           "refId": "A"
         },
         "refresh": 2,
@@ -1582,14 +1662,14 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(kube_persistentvolumeclaim_info{namespace=~\"$namespace\"}, persistentvolumeclaim)",
+        "definition": "label_values(kube_persistentvolumeclaim_labels{namespace=~\"$namespace\",label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role=~\"$storage_role\"}, persistentvolumeclaim)",
         "hide": 0,
         "includeAll": true,
         "label": "PVC",
         "multi": true,
         "name": "pvc",
         "query": {
-          "query": "label_values(kube_persistentvolumeclaim_info{namespace=~\"$namespace\"}, persistentvolumeclaim)",
+          "query": "label_values(kube_persistentvolumeclaim_labels{namespace=~\"$namespace\",label_pve_k8s_talos_section=~\"$section\",label_app_kubernetes_io_part_of=~\"$part_of\",label_app_kubernetes_io_component=~\"$component\",label_pve_k8s_talos_storage_role=~\"$storage_role\"}, persistentvolumeclaim)",
           "refId": "A"
         },
         "refresh": 2,

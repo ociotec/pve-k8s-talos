@@ -910,6 +910,34 @@ resource "kubernetes_manifest" "statefulset" {
   ]
 }
 
+resource "kubernetes_labels" "data_pvc" {
+  for_each = local.garage_vms_by_id
+
+  api_version = "v1"
+  kind        = "PersistentVolumeClaim"
+  force       = true
+
+  metadata {
+    name      = format("data-%s-%s", local.garage_name_value, each.key)
+    namespace = local.s3_namespace_value
+  }
+
+  labels = {
+    app                            = local.garage_name_value
+    "app.kubernetes.io/name"       = local.garage_name_value
+    "app.kubernetes.io/instance"   = local.garage_name_value
+    "app.kubernetes.io/component"  = "node"
+    "app.kubernetes.io/part-of"    = "garage"
+    "app.kubernetes.io/managed-by" = "infrastructure"
+    "pve-k8s-talos/section"        = "s3-storage"
+    "pve-k8s-talos/storage-role"   = "object-data"
+  }
+
+  depends_on = [
+    kubernetes_manifest.statefulset,
+  ]
+}
+
 resource "kubernetes_manifest" "pdb" {
   manifest = {
     apiVersion = "policy/v1"

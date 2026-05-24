@@ -52,6 +52,15 @@ locals {
     name => storage_class
     if try(storage_class.enabled, true)
   }
+  benchmark_disk_pvc_labels = merge(concat([{}], [
+    for storage_class_name, _ in local.benchmark_enabled_disk_storage_classes : {
+      for ordinal in range(local.benchmark_disk_replicas_value) :
+      format("%s-%d", storage_class_name, ordinal) => {
+        name     = format("data-benchmark-disk-%s-%dmbs-%d", storage_class_name, local.benchmark_disk_rate_mbs_value, ordinal)
+        workload = format("benchmark-disk-%s-%dmbs", storage_class_name, local.benchmark_disk_rate_mbs_value)
+      }
+    }
+  ])...)
 }
 
 check "benchmark_cpu_integer" {
@@ -104,7 +113,7 @@ resource "kubernetes_manifest" "priority_class" {
     metadata = {
       name = local.benchmark_priority_class_name
       labels = {
-        "app.kubernetes.io/managed-by" = "pve-k8s-talos"
+        "app.kubernetes.io/managed-by" = "infrastructure"
       }
     }
     value            = -1000
@@ -388,6 +397,34 @@ resource "kubernetes_manifest" "disk_statefulset" {
     kubernetes_manifest.namespace,
     kubernetes_manifest.priority_class,
     kubernetes_manifest.disk_headless_service,
+  ]
+}
+
+resource "kubernetes_labels" "disk_data_pvc" {
+  for_each = local.benchmark_disk_pvc_labels
+
+  api_version = "v1"
+  kind        = "PersistentVolumeClaim"
+  force       = true
+
+  metadata {
+    name      = each.value.name
+    namespace = local.benchmark_namespace_value
+  }
+
+  labels = {
+    app                            = each.value.workload
+    "app.kubernetes.io/name"       = each.value.workload
+    "app.kubernetes.io/instance"   = each.value.workload
+    "app.kubernetes.io/component"  = "disk"
+    "app.kubernetes.io/part-of"    = "benchmark"
+    "app.kubernetes.io/managed-by" = "infrastructure"
+    "pve-k8s-talos/section"        = "benchmark"
+    "pve-k8s-talos/storage-role"   = "benchmark"
+  }
+
+  depends_on = [
+    kubernetes_manifest.disk_statefulset,
   ]
 }
 

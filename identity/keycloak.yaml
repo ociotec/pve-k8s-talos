@@ -8,6 +8,14 @@ kind: PersistentVolumeClaim
 metadata:
   name: keycloak-postgres-data
   namespace: ${identity_namespace}
+  labels:
+    app.kubernetes.io/name: keycloak-postgres
+    app.kubernetes.io/instance: keycloak
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: keycloak
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: identity
+    pve-k8s-talos/storage-role: database
 spec:
   accessModes:
     - ReadWriteOnce

@@ -309,7 +309,7 @@ resource "kubernetes_manifest" "infrastructure_priority_classes" {
     metadata = {
       name = each.key
       labels = {
-        "app.kubernetes.io/managed-by" = "pve-k8s-talos"
+        "app.kubernetes.io/managed-by" = "infrastructure"
       }
     }
     value            = each.value.value
