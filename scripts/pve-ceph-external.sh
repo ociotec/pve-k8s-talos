@@ -40,6 +40,7 @@ Environment:
   PROXMOX_VE_INSECURE      Set to true/1 to skip TLS verification
   CEPH_SSH_USER            SSH user for Ceph CLI fallback. Default: root
   CEPH_SSH_HOST            SSH host/IP for ensure-cephfs.
+  CEPH_CLI_TIMEOUT         Timeout in seconds for Ceph CLI SSH commands. Default: 60
 EOF
 }
 
@@ -107,6 +108,20 @@ shell_quote() {
   printf "'%s'" "${value//\'/\'\\\'\'}"
 }
 
+ceph_cli_timeout() {
+  local timeout_seconds="${CEPH_CLI_TIMEOUT:-60}"
+  if [[ ! "${timeout_seconds}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "CEPH_CLI_TIMEOUT must be a positive integer, got: ${timeout_seconds}" >&2
+    exit 1
+  fi
+  printf '%s' "${timeout_seconds}"
+}
+
+remote_ceph_cmd() {
+  local ceph_args="$1"
+  printf 'timeout %s ceph %s' "$(ceph_cli_timeout)" "${ceph_args}"
+}
+
 pool_exists() {
   local node="$1"
   local pool_name="$2"
@@ -124,7 +139,7 @@ ceph_pool_exists_via_ssh() {
   local payload
 
   payload="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
-    "ceph osd pool ls --format json")"
+    "$(remote_ceph_cmd "osd pool ls --format json")")"
   printf '%s' "${payload}" | jq -er --arg pool_name "${pool_name}" '.[] | select(. == $pool_name)' >/dev/null
 }
 
@@ -135,7 +150,7 @@ ceph_filesystem_exists_via_ssh() {
   local payload
 
   payload="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
-    "ceph fs ls --format json")"
+    "$(remote_ceph_cmd "fs ls --format json")")"
   printf '%s' "${payload}" | jq -er --arg filesystem_name "${filesystem_name}" '.[] | select(.name == $filesystem_name)' >/dev/null
 }
 
@@ -147,7 +162,7 @@ ceph_filesystem_has_data_pool_via_ssh() {
   local payload
 
   payload="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
-    "ceph fs ls --format json")"
+    "$(remote_ceph_cmd "fs ls --format json")")"
   printf '%s' "${payload}" | jq -er \
     --arg filesystem_name "${filesystem_name}" \
     --arg pool_name "${pool_name}" \
@@ -161,8 +176,11 @@ ceph_subvolume_group_exists_via_ssh() {
   local ssh_user="${CEPH_SSH_USER:-root}"
   local payload
 
-  payload="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
-    "ceph fs subvolumegroup ls $(shell_quote "${filesystem_name}") --format json")"
+  if ! payload="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
+    "$(remote_ceph_cmd "fs subvolumegroup ls $(shell_quote "${filesystem_name}") --format json")" 2>&1)"; then
+    echo "Failed to list CephFS ${filesystem_name} subvolume groups on ${ssh_host}: ${payload}" >&2
+    return 2
+  fi
   printf '%s' "${payload}" | jq -er --arg group_name "${group_name}" '.[] | select(.name == $group_name)' >/dev/null
 }
 
@@ -173,7 +191,7 @@ ceph_filesystem_has_active_mds_via_ssh() {
   local payload
 
   payload="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
-    "ceph fs dump --format json")"
+    "$(remote_ceph_cmd "fs dump --format json")")"
   printf '%s' "${payload}" | jq -er \
     --arg filesystem_name "${filesystem_name}" \
     '.filesystems[] | select(.mdsmap.fs_name == $filesystem_name) | (.mdsmap.up | length > 0)' >/dev/null
@@ -186,7 +204,7 @@ ceph_mds_daemon_exists_via_ssh() {
   local payload
 
   payload="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
-    "ceph fs dump --format json")"
+    "$(remote_ceph_cmd "fs dump --format json")")"
   printf '%s' "${payload}" | jq -er \
     --arg mds_name "${mds_name}" \
     '([.standbys[]?.name] + [.filesystems[]?.mdsmap.info[]?.name])[] | select(. == $mds_name)' >/dev/null
@@ -337,7 +355,7 @@ set_pool_allow_ec_overwrites_via_ssh() {
   require_cmd ssh
   quoted_pool="$(shell_quote "${pool_name}")"
   ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
-    "ceph osd pool set ${quoted_pool} allow_ec_overwrites true" 1>/dev/null
+    "$(remote_ceph_cmd "osd pool set ${quoted_pool} allow_ec_overwrites true")" 1>/dev/null
   echo "Pool ${pool_name} allow_ec_overwrites set to on via Ceph CLI."
 }
 
@@ -348,7 +366,7 @@ run_ceph_via_ssh() {
 
   require_cmd ssh
   ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
-    "ceph ${ceph_args}" 1>/dev/null
+    "$(remote_ceph_cmd "${ceph_args}")" 1>/dev/null
 }
 
 run_remote_via_ssh() {
@@ -387,10 +405,16 @@ ensure_cephfs_csi_subvolume_group_via_ssh() {
   local data_pool="$3"
   local group_name="csi"
   local quoted_filesystem quoted_group quoted_data_pool
+  local exists_status
 
   if ceph_subvolume_group_exists_via_ssh "${ssh_host}" "${filesystem_name}" "${group_name}"; then
     echo "CephFS ${filesystem_name} subvolume group ${group_name} already exists."
     return 0
+  fi
+  exists_status=$?
+  if [[ "${exists_status}" -ne 1 ]]; then
+    echo "Cannot verify CephFS ${filesystem_name} subvolume group ${group_name}; refusing to create blindly." >&2
+    exit 1
   fi
 
   quoted_filesystem="$(shell_quote "${filesystem_name}")"
@@ -813,17 +837,9 @@ ensure_cephfs() {
       echo "CephFS ${filesystem_name} data pool ${ec_data_pool} added."
     fi
 
-    if [[ "${filesystem_existed}" == "true" ]]; then
-      echo "CephFS ${filesystem_name} already existed; skipping CSI subvolume group check."
-    else
-      ensure_cephfs_csi_subvolume_group_via_ssh "${ssh_host}" "${filesystem_name}" "${ec_data_pool}"
-    fi
+    ensure_cephfs_csi_subvolume_group_via_ssh "${ssh_host}" "${filesystem_name}" "${ec_data_pool}"
   else
-    if [[ "${filesystem_existed}" == "true" ]]; then
-      echo "CephFS ${filesystem_name} already existed; skipping CSI subvolume group check."
-    else
-      ensure_cephfs_csi_subvolume_group_via_ssh "${ssh_host}" "${filesystem_name}" "${data_pool}"
-    fi
+    ensure_cephfs_csi_subvolume_group_via_ssh "${ssh_host}" "${filesystem_name}" "${data_pool}"
   fi
 
   ensure_cephfs_active_mds_via_ssh "${ssh_host}" "${filesystem_name}" "${filesystem_name}"
