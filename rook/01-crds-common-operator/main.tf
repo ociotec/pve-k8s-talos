@@ -72,6 +72,17 @@ resource "kubernetes_manifest" "rook_common" {
 resource "kubernetes_manifest" "rook_operator" {
   for_each   = { for i, m in local.rook_operator : i => m }
   manifest   = each.value
+  computed_fields = try(each.value.kind, "") == "Deployment" ? [
+    "spec.template.metadata.annotations[\"kubectl.kubernetes.io/restartedAt\"]",
+    "object.spec.template.metadata.annotations",
+    "object.spec.template.metadata.annotations[\"kubectl.kubernetes.io/restartedAt\"]",
+  ] : []
+  lifecycle {
+    ignore_changes = [
+      object.spec.template.metadata.annotations,
+      object.spec.template.metadata.annotations["kubectl.kubernetes.io/restartedAt"],
+    ]
+  }
   depends_on = [kubernetes_manifest.rook_common]
 }
 

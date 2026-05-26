@@ -721,6 +721,15 @@ wait_for_cephcluster_ready() {
   done
 }
 
+clear_rook_operator_restart_annotation() {
+  if kubectl -n rook-ceph get deploy/rook-ceph-operator 1>/dev/null 2>&1; then
+    kubectl -n rook-ceph patch deploy/rook-ceph-operator \
+      --type=merge \
+      -p '{"spec":{"template":{"metadata":{"annotations":{"kubectl.kubernetes.io/restartedAt":null}}}}}' \
+      1>/dev/null 2>&1 || true
+  fi
+}
+
 wait_for_dashboard_cert() {
   local timeout_seconds="${1:-300}"
   local start
@@ -1444,6 +1453,7 @@ else
     message "Rook Ceph cluster already Ready; skipping operator/cluster apply."
   else
     message "Deploying Rook Ceph operator..."
+    clear_rook_operator_restart_annotation
     run_tofu_init "${cluster_rook_01_workspace}"
     run tofu -chdir="${cluster_rook_01_workspace}" apply -auto-approve
     wait_for_pods_ready "rook-ceph" "rook-ceph-operator" "180s"
@@ -1458,9 +1468,15 @@ else
   run_tofu_init "${cluster_rook_04_workspace}"
   run tofu -chdir="${cluster_rook_04_workspace}" apply -auto-approve
   if [[ "${ceph_mode_value}" == "external" ]]; then
-    message "Restarting Rook Ceph CSI RBD provisioner to reload external Ceph monitor configuration..."
+    message "Restarting Rook Ceph CSI components to reload external Ceph configuration..."
+    kubectl -n rook-ceph rollout restart deploy/csi-cephfsplugin-provisioner 1>/dev/null
     kubectl -n rook-ceph rollout restart deploy/csi-rbdplugin-provisioner 1>/dev/null
+    kubectl -n rook-ceph rollout restart daemonset/csi-cephfsplugin 1>/dev/null
+    kubectl -n rook-ceph rollout restart daemonset/csi-rbdplugin 1>/dev/null
+    wait_for_rollout_ready "rook-ceph" "deploy/csi-cephfsplugin-provisioner" "180s"
     wait_for_rollout_ready "rook-ceph" "deploy/csi-rbdplugin-provisioner" "180s"
+    wait_for_rollout_ready "rook-ceph" "daemonset/csi-cephfsplugin" "300s"
+    wait_for_rollout_ready "rook-ceph" "daemonset/csi-rbdplugin" "300s"
   fi
   kubectl -n rook-ceph get storageclasses.storage.k8s.io
 fi
