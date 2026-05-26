@@ -701,6 +701,7 @@ ensure_cephfs() {
   local ec_data_min_size=""
   local k=""
   local m=""
+  local csi_data_pool=""
   local quoted_filesystem quoted_metadata_pool quoted_data_pool quoted_ec_data_pool
   local filesystem_existed=false
 
@@ -837,9 +838,15 @@ ensure_cephfs() {
       echo "CephFS ${filesystem_name} data pool ${ec_data_pool} added."
     fi
 
-    ensure_cephfs_csi_subvolume_group_via_ssh "${ssh_host}" "${filesystem_name}" "${ec_data_pool}"
+    csi_data_pool="${ec_data_pool}"
   else
-    ensure_cephfs_csi_subvolume_group_via_ssh "${ssh_host}" "${filesystem_name}" "${data_pool}"
+    csi_data_pool="${data_pool}"
+  fi
+
+  if [[ "${filesystem_existed}" == "true" ]]; then
+    echo "CephFS ${filesystem_name} already existed; skipping CSI subvolume group verification to avoid blocking external Ceph deployments on ceph-mgr volumes API issues."
+  else
+    ensure_cephfs_csi_subvolume_group_via_ssh "${ssh_host}" "${filesystem_name}" "${csi_data_pool}"
   fi
 
   ensure_cephfs_active_mds_via_ssh "${ssh_host}" "${filesystem_name}" "${filesystem_name}"

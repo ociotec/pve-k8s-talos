@@ -98,7 +98,14 @@ locals {
   enable_filesystem_ec         = local.effective_ceph_filesystem_ec.enabled
 
   create_block_pool_crs = local.effective_ceph_mode == "internal"
-  create_filesystem_crs = local.effective_ceph_mode == "internal" || trimspace(try(local.ceph_external.admin_secret, "")) != ""
+  # In external mode, CephFS pools/filesystems are converged directly on the
+  # external Ceph cluster, including MDS ownership. Kubernetes keeps only the
+  # CSI StorageClasses and secrets that reference those external filesystems.
+  create_filesystem_crs = local.effective_ceph_mode == "internal"
+  external_cephfilesystem_cr_names = local.effective_ceph_mode == "external" ? concat(
+    local.enable_filesystem_replicated ? [local.effective_ceph_filesystem_replicated.filesystem_name] : [],
+    local.enable_filesystem_ec ? [local.effective_ceph_filesystem_ec.filesystem_name] : []
+  ) : []
 
   block_pool_resources = concat(
     local.create_block_pool_crs && local.enable_block_replicated ? [
@@ -397,7 +404,21 @@ check "ceph_mode_valid" {
 check "external_filesystem_admin_required" {
   assert {
     condition     = local.effective_ceph_mode != "external" || !(local.enable_filesystem_replicated || local.enable_filesystem_ec) || trimspace(try(local.ceph_external.admin_secret, "")) != ""
-    error_message = "External CephFS resources require ceph_external.admin_secret in ceph_constants.tf so Rook can manage filesystem CRs on the external cluster."
+    error_message = "External CephFS resources require ceph_external.admin_secret in ceph_constants.tf so external filesystems, pools, and CSI credentials can be reconciled."
+  }
+}
+
+resource "null_resource" "external_cephfilesystem_finalizer_cleanup" {
+  for_each = toset(local.external_cephfilesystem_cr_names)
+
+  triggers = {
+    kubeconfig_path = abspath("${path.module}/${var.kubeconfig_path}")
+    namespace       = local.effective_ceph_namespace
+    name            = each.value
+  }
+
+  provisioner "local-exec" {
+    command = "KUBECONFIG=${self.triggers.kubeconfig_path} kubectl -n ${self.triggers.namespace} get cephfilesystem ${self.triggers.name} >/dev/null 2>&1 || exit 0; KUBECONFIG=${self.triggers.kubeconfig_path} kubectl -n ${self.triggers.namespace} patch cephfilesystem ${self.triggers.name} --type=merge --patch '{\"metadata\":{\"finalizers\":[]}}'"
   }
 }
 
@@ -406,6 +427,10 @@ resource "kubernetes_manifest" "ceph_pools_and_filesystems" {
     for i, manifest in concat(local.block_pool_resources, local.filesystem_resources) : i => manifest
   }
   manifest = each.value
+
+  depends_on = [
+    null_resource.external_cephfilesystem_finalizer_cleanup,
+  ]
 
   field_manager {
     name            = "opentofu"
