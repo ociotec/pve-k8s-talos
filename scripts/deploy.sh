@@ -1477,6 +1477,17 @@ else
     wait_for_rollout_ready "rook-ceph" "deploy/csi-rbdplugin-provisioner" "180s"
     wait_for_rollout_ready "rook-ceph" "daemonset/csi-cephfsplugin" "300s"
     wait_for_rollout_ready "rook-ceph" "daemonset/csi-rbdplugin" "300s"
+    message "Clearing Rook Ceph CSI leader-election leases after restart..."
+    kubectl -n rook-ceph delete lease \
+      rook-ceph-cephfs-csi-ceph-com \
+      rook-ceph-rbd-csi-ceph-com \
+      external-attacher-leader-rook-ceph-cephfs-csi-ceph-com \
+      external-attacher-leader-rook-ceph-rbd-csi-ceph-com \
+      external-resizer-rook-ceph-cephfs-csi-ceph-com \
+      external-resizer-rook-ceph-rbd-csi-ceph-com \
+      external-snapshotter-leader-rook-ceph-cephfs-csi-ceph-com \
+      external-snapshotter-leader-rook-ceph-rbd-csi-ceph-com \
+      --ignore-not-found 1>/dev/null
   fi
   kubectl -n rook-ceph get storageclasses.storage.k8s.io
 fi
