@@ -63,6 +63,11 @@ directories are ignored by Git.
 - Do not update `.repo-status.json` merely because a new repository commit was
   detected. Update it only after this workflow completes successfully, or after
   explicit user confirmation that the relevant deployment was already applied.
+- When comparing `.repo-status.json.repo_commit` with `git rev-parse HEAD`,
+  inspect the changed paths between the two commits. If the difference is only
+  documentation or agent-operation guidance, such as `README.md`, `docs/**`, or
+  `AGENTS.md`, report it as documentation-only drift and do not treat it as a
+  cluster update or deployment requirement by itself.
 
 ## Repository Status Stamp
 
@@ -93,6 +98,10 @@ Stamp semantics:
 - If the user explicitly states that they already ran the recommended deployment
   successfully, the agent may set `deployment_confirmed = true`.
 - If validation fails, do not update `.repo-status.json`.
+- Documentation-only drift may be ignored for deciding whether a live cluster is
+  operationally stale. Do not update `.repo-status.json` solely to advance past
+  documentation-only commits unless the user explicitly asks for that metadata
+  update.
 
 ## Confirmation Report
 
@@ -111,7 +120,10 @@ Use these classifications:
 - `generated stale`: generated `out/*` content is missing, stale, or not linked
   to current repo sources.
 - `stamp mismatch`: `.repo-status.json.repo_commit` is missing or differs from
-  `git rev-parse HEAD`.
+  `git rev-parse HEAD` and the commit range includes non-documentation changes.
+- `documentation-only drift`: `.repo-status.json.repo_commit` differs from
+  `git rev-parse HEAD`, but every changed path in the range is documentation or
+  agent-operation guidance, such as `README.md`, `docs/**`, or `AGENTS.md`.
 
 The confirmation message must also list:
 
@@ -136,6 +148,8 @@ If the user does not confirm, stop after the report and make no changes.
    - record `git rev-parse HEAD`
    - read `clusters/<cluster>/.repo-status.json` if present
    - compare the stamp commit with the current repo commit
+   - when the commits differ, inspect `git diff --name-only <stamp>..HEAD` and
+     distinguish documentation-only drift from operational source/config changes
    - verify whether the repository is clean enough for a clean sync stamp
 3. Compare the cluster directory with `clusters/sample` without editing:
    - identify missing constants files

@@ -173,9 +173,13 @@ For any non-trivial change:
 - When the user indicates they are working with a specific real cluster, inspect
   `clusters/<cluster>/.repo-status.json` if it exists and compare its
   `repo_commit` with `git rev-parse HEAD`. If the stamp is missing or differs,
-  tell the user before other work that the cluster has no repo validation stamp,
-  or that it was last validated against the old commit and the repo is now at
-  the new commit. Do not update the stamp just because a new commit is detected;
+  inspect the changed paths between the stamped commit and `HEAD`. If the range
+  only contains documentation or agent-operation guidance, such as `README.md`,
+  `docs/**`, or `AGENTS.md`, report it as documentation-only drift and do not
+  treat the cluster as operationally stale on that basis alone. Otherwise, tell
+  the user before other work that the cluster has no repo validation stamp, or
+  that it was last validated against the old commit and the repo is now at the
+  new commit. Do not update the stamp just because a new commit is detected;
   only update it after a successful `update-cluster-from-repo` run, or after
   explicit user confirmation that the relevant deployment already succeeded.
 - Treat files under `docs/agent-workflows/` as repo-local operating procedures for agents:
