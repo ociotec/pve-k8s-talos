@@ -117,6 +117,10 @@ The confirmation message must also list:
 
 - files that will be edited
 - workspaces that will be regenerated or validated
+- whether deployment sections/workspaces were added or removed by the current
+  repository compared with the target cluster, including an explicit "none" when
+  no section changes are detected; do not assume the section set is unchanged
+  without checking
 - `TODO` comments that will be added
 - whether `.repo-status.json` will be updated
 - the recommended `scripts/deploy.sh` command, if deployment is needed
@@ -147,6 +151,10 @@ If the user does not confirm, stop after the report and make no changes.
    - component modules under `k8s-net/`, `rook/`, `identity/`, `platform/`,
      `monitoring/`, and `identity-config/`
 5. Inspect generated workspaces without editing:
+   - compare the deployment sections currently known to `scripts/deploy.sh` with
+     the cluster's generated `out/*` workspaces and report any sections that
+     appear or disappear before proposing a deployment plan; ask the user before
+     creating, removing, or deploying newly detected sections
    - verify expected `clusters/<cluster>/out/*` workspaces exist for enabled
      components
    - verify symlinked files point at current repository source modules or the
