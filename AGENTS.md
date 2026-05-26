@@ -19,6 +19,10 @@ It complements `README.md` and focuses on execution behavior, change safety, and
 ## Required Working Style
 
 - Run scripts from `clusters/<cluster>` (never from `clusters/sample`).
+- Before running cluster-local scripts or OpenTofu/Kubernetes commands that rely on
+  Proxmox, Talos, or Kubernetes environment variables, load the cluster-local
+  `.envrc` from `clusters/<cluster>` when it exists. Use `direnv exec . <command>`
+  from the cluster directory, or `bash -lc 'source .envrc; <command>'`.
 - Prefer `scripts/deploy.sh` for end-to-end deployment.
 - Do not offer to run deployments on behalf of the user by default. When changes need to be applied, provide the exact `scripts/deploy.sh` command with the minimum skip flags needed to deploy only the affected components and minimize runtime.
 - An agent may run `scripts/deploy.sh` only when the user gives explicit permission for that specific deployment and names the allowed cluster and deployment sections. The agent must keep skip flags constrained to those sections, must not expand scope without renewed permission, and must stop and ask before running a deployment command that would affect any section outside the user-approved set.
