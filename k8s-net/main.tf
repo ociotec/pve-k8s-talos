@@ -96,7 +96,15 @@ locals {
   ]
   ingress_nginx = [
     for doc in split("\n---\n", templatefile("${path.module}/ingress-nginx-controller.yaml", {
-      ingress_lb_ip = local.ingress_lb_ip
+      ingress_lb_ip                           = local.ingress_lb_ip
+      ingress_nginx_controller_cpu_request    = local.ingress_nginx_controller_cpu_request
+      ingress_nginx_controller_cpu_limit      = local.ingress_nginx_controller_cpu_limit
+      ingress_nginx_controller_mem_request    = local.ingress_nginx_controller_mem_request
+      ingress_nginx_controller_mem_limit      = local.ingress_nginx_controller_mem_limit
+      ingress_nginx_admission_job_cpu_request = local.ingress_nginx_admission_job_cpu_request
+      ingress_nginx_admission_job_cpu_limit   = local.ingress_nginx_admission_job_cpu_limit
+      ingress_nginx_admission_job_mem_request = local.ingress_nginx_admission_job_mem_request
+      ingress_nginx_admission_job_mem_limit   = local.ingress_nginx_admission_job_mem_limit
     })) :
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0

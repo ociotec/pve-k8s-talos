@@ -493,11 +493,11 @@ spec:
           timeoutSeconds: 1
         resources:
           limits:
-            cpu: 500m
-            memory: 90Mi
+            cpu: "${ingress_nginx_controller_cpu_limit}"
+            memory: "${ingress_nginx_controller_mem_limit}"
           requests:
-            cpu: 100m
-            memory: 90Mi
+            cpu: "${ingress_nginx_controller_cpu_request}"
+            memory: "${ingress_nginx_controller_mem_request}"
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -563,6 +563,13 @@ spec:
         image: registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.9@sha256:01038e7de14b78d702d2849c3aad72fd25903c4765af63cf16aa3398f5d5f2dd
         imagePullPolicy: IfNotPresent
         name: create
+        resources:
+          limits:
+            cpu: "${ingress_nginx_admission_job_cpu_limit}"
+            memory: "${ingress_nginx_admission_job_mem_limit}"
+          requests:
+            cpu: "${ingress_nginx_admission_job_cpu_request}"
+            memory: "${ingress_nginx_admission_job_mem_request}"
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -620,6 +627,13 @@ spec:
         image: registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.6.9@sha256:01038e7de14b78d702d2849c3aad72fd25903c4765af63cf16aa3398f5d5f2dd
         imagePullPolicy: IfNotPresent
         name: patch
+        resources:
+          limits:
+            cpu: "${ingress_nginx_admission_job_cpu_limit}"
+            memory: "${ingress_nginx_admission_job_mem_limit}"
+          requests:
+            cpu: "${ingress_nginx_admission_job_cpu_request}"
+            memory: "${ingress_nginx_admission_job_mem_request}"
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
