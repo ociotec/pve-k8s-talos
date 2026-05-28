@@ -85,16 +85,17 @@ locals {
   redpanda_console_oauth2_proxy_mem_limit         = "128Mi"
   redpanda_console_oauth2_proxy_trusted_proxy_ips = []
 
-  redpanda_broker_cpu_request = "2"
-  redpanda_broker_cpu_limit   = "3"
-  redpanda_broker_mem_request = "4Gi"
-  redpanda_broker_mem_limit   = "4Gi"
-
-  # Keep Redpanda internal memory below the Kubernetes memory limit so the process
-  # has headroom for non-Redpanda allocations inside the container.
-  redpanda_enable_smp_memory_flags = true
-  redpanda_smp                     = 2
-  redpanda_memory                  = "2Gi"
+  # Kubernetes CPU and memory requests/limits for Redpanda brokers are derived
+  # from these values; do not define separate request/limit constants.
+  # CPU request equals smp cores, CPU limit adds broker extra CPU.
+  # Redpanda internal memory is computed as cores multiplied by memory per core.
+  # Extra memory is passed to Redpanda as --reserve-memory for overhead outside
+  # Seastar, and spare percentage leaves headroom for transient pressure.
+  redpanda_smp_cores               = 2
+  redpanda_broker_extra_cpu        = "1"
+  redpanda_memory_per_core         = "2Gi"
+  redpanda_extra_memory            = "1Gi"
+  redpanda_memory_spare_percentage = "10%"
 
   redpanda_config_renderer_cpu_request = "50m"
   redpanda_config_renderer_cpu_limit   = "200m"

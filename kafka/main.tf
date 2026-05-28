@@ -96,15 +96,55 @@ locals {
   redpanda_console_auth_ca_secret_name_value = try(local.redpanda_console_auth_ca_secret_name, "redpanda-console-oauth-ca")
   redpanda_console_auth_ca_content           = local.redpanda_console_auth_enabled ? try(file(local.root_ca_crt), "") : ""
   redpanda_console_auth_ca_enabled           = trimspace(local.redpanda_console_auth_ca_content) != ""
-  redpanda_broker_cpu_request_value          = try(local.redpanda_broker_cpu_request, "2")
-  redpanda_broker_cpu_limit_value            = try(local.redpanda_broker_cpu_limit, "2500m")
-  redpanda_broker_mem_request_value          = try(local.redpanda_broker_mem_request, "5Gi")
-  redpanda_broker_mem_limit_value            = try(local.redpanda_broker_mem_limit, "5Gi")
-  redpanda_broker_priority_class_name_value  = "infra-critical"
-  redpanda_broker_pdb_min_available_value    = 2
-  redpanda_enable_smp_memory_flags_value     = try(local.redpanda_enable_smp_memory_flags, true)
-  redpanda_smp_value                         = try(local.redpanda_smp, 2)
-  redpanda_memory_value                      = try(local.redpanda_memory, "4Gi")
+  redpanda_smp_cores_raw                     = try(local.redpanda_smp_cores, 2)
+  redpanda_smp_cores_number                  = try(tonumber(local.redpanda_smp_cores_raw), null)
+  redpanda_smp_cores_value                   = try(floor(local.redpanda_smp_cores_number), 0)
+  redpanda_memory_per_core_raw               = try(local.redpanda_memory_per_core, "2Gi")
+  redpanda_memory_per_core_match             = try(regex("^\\s*([0-9]+)\\s*([MmGg]i)\\s*$", tostring(local.redpanda_memory_per_core_raw)), null)
+  redpanda_memory_per_core_mi                = try(tonumber(local.redpanda_memory_per_core_match[0]) * lookup({ mi = 1, gi = 1024 }, lower(local.redpanda_memory_per_core_match[1])), null)
+  redpanda_extra_memory_raw                  = try(local.redpanda_extra_memory, "1Gi")
+  redpanda_extra_memory_match                = try(regex("^\\s*([0-9]+)\\s*([MmGg]i)\\s*$", tostring(local.redpanda_extra_memory_raw)), null)
+  redpanda_extra_memory_mi                   = try(tonumber(local.redpanda_extra_memory_match[0]) * lookup({ mi = 1, gi = 1024 }, lower(local.redpanda_extra_memory_match[1])), null)
+  redpanda_memory_spare_percentage_raw       = try(local.redpanda_memory_spare_percentage, "10%")
+  redpanda_memory_spare_percentage_match     = try(regex("^\\s*([0-9]+(?:\\.[0-9]+)?)%?\\s*$", tostring(local.redpanda_memory_spare_percentage_raw)), null)
+  redpanda_memory_spare_percentage_value     = try(tonumber(local.redpanda_memory_spare_percentage_match[0]), null)
+  redpanda_internal_memory_mi                = try(local.redpanda_smp_cores_value * local.redpanda_memory_per_core_mi, null)
+  redpanda_broker_memory_before_spare_mi     = try(local.redpanda_internal_memory_mi + local.redpanda_extra_memory_mi, null)
+  redpanda_broker_memory_total_mi            = try(ceil(local.redpanda_broker_memory_before_spare_mi * (100 + local.redpanda_memory_spare_percentage_value) / 100), null)
+  redpanda_memory_value = try(
+    local.redpanda_internal_memory_mi % 1024 == 0 ? format("%dGi", local.redpanda_internal_memory_mi / 1024) : format("%dMi", local.redpanda_internal_memory_mi),
+    ""
+  )
+  redpanda_reserve_memory_value = try(
+    local.redpanda_extra_memory_mi % 1024 == 0 ? format("%dGi", local.redpanda_extra_memory_mi / 1024) : format("%dMi", local.redpanda_extra_memory_mi),
+    ""
+  )
+  redpanda_broker_memory_value = try(
+    local.redpanda_broker_memory_total_mi % 1024 == 0 ? format("%dGi", local.redpanda_broker_memory_total_mi / 1024) : format("%dMi", local.redpanda_broker_memory_total_mi),
+    ""
+  )
+
+  redpanda_broker_extra_cpu_raw             = try(local.redpanda_broker_extra_cpu, "500m")
+  redpanda_broker_extra_cpu_m_match         = try(regex("^\\s*([0-9]+)m\\s*$", tostring(local.redpanda_broker_extra_cpu_raw)), null)
+  redpanda_broker_extra_cpu_core_match      = try(regex("^\\s*([0-9]+)\\s*$", tostring(local.redpanda_broker_extra_cpu_raw)), null)
+  redpanda_broker_extra_cpu_millicores      = try(local.redpanda_broker_extra_cpu_m_match != null ? tonumber(local.redpanda_broker_extra_cpu_m_match[0]) : tonumber(local.redpanda_broker_extra_cpu_core_match[0]) * 1000, null)
+  redpanda_broker_cpu_request_value         = tostring(local.redpanda_smp_cores_value)
+  redpanda_broker_cpu_limit_millicores      = try((local.redpanda_smp_cores_value * 1000) + local.redpanda_broker_extra_cpu_millicores, null)
+  redpanda_broker_cpu_limit_value           = try(local.redpanda_broker_cpu_limit_millicores % 1000 == 0 ? tostring(local.redpanda_broker_cpu_limit_millicores / 1000) : format("%dm", local.redpanda_broker_cpu_limit_millicores), "")
+  redpanda_broker_mem_request_value         = local.redpanda_broker_memory_value
+  redpanda_broker_mem_limit_value           = local.redpanda_broker_memory_value
+  redpanda_broker_priority_class_name_value = "infra-critical"
+  redpanda_broker_pdb_min_available_value   = 2
+  redpanda_constants_content                = try(file("${path.root}/constants.tf"), "")
+  redpanda_legacy_resource_constants = compact([
+    length(regexall("(?m)^\\s*redpanda_smp\\s*=", local.redpanda_constants_content)) > 0 ? "redpanda_smp" : "",
+    length(regexall("(?m)^\\s*redpanda_memory\\s*=", local.redpanda_constants_content)) > 0 ? "redpanda_memory" : "",
+    length(regexall("(?m)^\\s*redpanda_enable_smp_memory_flags\\s*=", local.redpanda_constants_content)) > 0 ? "redpanda_enable_smp_memory_flags" : "",
+    length(regexall("(?m)^\\s*redpanda_broker_cpu_request\\s*=", local.redpanda_constants_content)) > 0 ? "redpanda_broker_cpu_request" : "",
+    length(regexall("(?m)^\\s*redpanda_broker_cpu_limit\\s*=", local.redpanda_constants_content)) > 0 ? "redpanda_broker_cpu_limit" : "",
+    length(regexall("(?m)^\\s*redpanda_broker_mem_request\\s*=", local.redpanda_constants_content)) > 0 ? "redpanda_broker_mem_request" : "",
+    length(regexall("(?m)^\\s*redpanda_broker_mem_limit\\s*=", local.redpanda_constants_content)) > 0 ? "redpanda_broker_mem_limit" : "",
+  ])
   redpanda_cluster_config_raw = merge(
     {
       core_balancing_continuous    = false
@@ -250,10 +290,11 @@ locals {
   ])
   broker_bootstrap_config = merge({ cluster_id = local.redpanda_cluster_id_value }, local.redpanda_cluster_config_normalized)
   broker_bootstrap_yaml   = yamlencode(local.broker_bootstrap_config)
-  broker_start_flags = local.redpanda_enable_smp_memory_flags_value ? [
-    format("--smp=%s", tostring(local.redpanda_smp_value)),
+  broker_start_flags = [
+    format("--smp=%s", tostring(local.redpanda_smp_cores_value)),
     format("--memory=%s", local.redpanda_memory_value),
-  ] : []
+    format("--reserve-memory=%s", local.redpanda_reserve_memory_value),
+  ]
 
   kafka_broker_urls = [
     for broker_dns_name in local.broker_dns_names : "${broker_dns_name}:9092"
@@ -464,6 +505,65 @@ check "redpanda_console_auth_groups" {
   assert {
     condition     = !local.redpanda_console_auth_enabled || (length(local.redpanda_console_auth_effective_allowed_groups) > 0 && length(local.missing_redpanda_console_auth_group_definitions) == 0)
     error_message = format("Redpanda Console auth groups must exist in the selected Keycloak realm. Missing logical groups: %s", join(", ", local.missing_redpanda_console_auth_group_definitions))
+  }
+}
+
+resource "terraform_data" "redpanda_resource_settings_validation" {
+  input = {
+    broker_cpu_limit   = local.redpanda_broker_cpu_limit_value
+    broker_cpu_request = local.redpanda_broker_cpu_request_value
+    broker_memory      = local.redpanda_broker_memory_value
+    redpanda_memory    = local.redpanda_memory_value
+    reserve_memory     = local.redpanda_reserve_memory_value
+  }
+
+  lifecycle {
+    precondition {
+      condition = (
+        local.redpanda_smp_cores_number != null &&
+        local.redpanda_smp_cores_number == local.redpanda_smp_cores_value &&
+        local.redpanda_smp_cores_value >= 1
+      )
+      error_message = format("redpanda_smp_cores must be a positive whole number of cores; got %q.", tostring(local.redpanda_smp_cores_raw))
+    }
+
+    precondition {
+      condition     = length(local.redpanda_legacy_resource_constants) == 0
+      error_message = format("Remove legacy Redpanda resource constants. The --smp, --memory, and --reserve-memory flags are always passed; use redpanda_smp_cores, redpanda_memory_per_core, redpanda_extra_memory, redpanda_memory_spare_percentage, and redpanda_broker_extra_cpu instead. Legacy constants found: %s.", join(", ", local.redpanda_legacy_resource_constants))
+    }
+
+    precondition {
+      condition = (
+        local.redpanda_memory_per_core_mi != null &&
+        local.redpanda_memory_per_core_mi >= 2048
+      )
+      error_message = format("redpanda_memory_per_core must be an Mi/Gi memory quantity of at least 2Gi per core; got %q.", tostring(local.redpanda_memory_per_core_raw))
+    }
+
+    precondition {
+      condition = (
+        local.redpanda_extra_memory_mi != null &&
+        local.redpanda_extra_memory_mi >= 0
+      )
+      error_message = format("redpanda_extra_memory must be a non-negative Mi/Gi memory quantity; got %q.", tostring(local.redpanda_extra_memory_raw))
+    }
+
+    precondition {
+      condition = (
+        local.redpanda_memory_spare_percentage_value != null &&
+        local.redpanda_memory_spare_percentage_value >= 0 &&
+        local.redpanda_memory_spare_percentage_value <= 100
+      )
+      error_message = format("redpanda_memory_spare_percentage must be a percentage between 0 and 100, such as \"10%%\"; got %q.", tostring(local.redpanda_memory_spare_percentage_raw))
+    }
+
+    precondition {
+      condition = (
+        local.redpanda_broker_extra_cpu_millicores != null &&
+        local.redpanda_broker_extra_cpu_millicores >= 0
+      )
+      error_message = format("redpanda_broker_extra_cpu must be a non-negative whole-core or millicore CPU quantity; got %q.", tostring(local.redpanda_broker_extra_cpu_raw))
+    }
   }
 }
 
