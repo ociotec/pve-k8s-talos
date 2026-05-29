@@ -10,14 +10,27 @@ data "talos_client_configuration" "talosconfig" {
 locals {
   # On scale-out re-applies we already have a working cluster and persisted configs
   # under clusters/<name>/out/. Avoid rerunning bootstrap/health gates in that case.
-  cluster_already_bootstrapped = fileexists("${path.module}/../kubeconfig")
+  # The marker is written only after the Talos health check passes; kubeconfig alone
+  # can exist after a failed bootstrap attempt.
+  cluster_already_bootstrapped = fileexists("${path.module}/../.talos-bootstrap-complete")
+  primary_controlplane_vms     = { "__CONTROLPLANE_PRIMARY__" = local.controlplane_vms["__CONTROLPLANE_PRIMARY__"] }
+  secondary_controlplane_names = sort([for k, _ in local.controlplane_vms : k if k != "__CONTROLPLANE_PRIMARY__"])
+  secondary_controlplane_vms   = { for k in local.secondary_controlplane_names : k => local.controlplane_vms[k] }
 }
 
 # Generated from templates/controlplane-data.template.tf
 __CONTROLPLANE_DATA__
 
-resource "talos_machine_configuration_apply" "controlplane_config_apply" {
-  for_each                    = local.controlplane_vms
+resource "talos_machine_configuration_apply" "controlplane_primary_config_apply" {
+  for_each                    = local.primary_controlplane_vms
+  depends_on                  = [null_resource.all_vms_ready]
+  client_configuration        = talos_machine_secrets.machine_secrets.client_configuration
+  machine_configuration_input = local.controlplane_machine_config[each.key]
+  node                        = each.value.ip
+}
+
+resource "talos_machine_configuration_apply" "controlplane_secondary_config_apply" {
+  for_each                    = local.secondary_controlplane_vms
   depends_on                  = [null_resource.all_vms_ready]
   client_configuration        = talos_machine_secrets.machine_secrets.client_configuration
   machine_configuration_input = local.controlplane_machine_config[each.key]
@@ -32,7 +45,7 @@ __MACHINE_CONFIG_LOCALS__
 
 resource "talos_machine_configuration_apply" "worker_config_apply" {
   for_each                    = local.worker_vms
-  depends_on                  = [null_resource.all_vms_ready]
+  depends_on                  = [null_resource.controlplane_etcd_members_ready]
   client_configuration        = talos_machine_secrets.machine_secrets.client_configuration
   machine_configuration_input = local.worker_machine_config[each.key]
   node                        = each.value.ip
@@ -41,7 +54,8 @@ resource "talos_machine_configuration_apply" "worker_config_apply" {
 resource "null_resource" "controlplane_api_ready" {
   count = local.cluster_already_bootstrapped ? 0 : 1
   depends_on = [
-    talos_machine_configuration_apply.controlplane_config_apply,
+    talos_machine_configuration_apply.controlplane_primary_config_apply,
+    talos_machine_configuration_apply.controlplane_secondary_config_apply,
     local_file.talosconfig,
   ]
 
@@ -63,8 +77,8 @@ resource "null_resource" "controlplane_api_ready" {
           fi
 
           now=$(date +%s)
-          if [ $((now-start_time)) -ge 300 ]; then
-            echo "Error: Talos API on $node_ip did not leave maintenance mode within 300s." >&2
+          if [ $((now-start_time)) -ge 180 ]; then
+            echo "Error: Talos API on $node_ip did not leave maintenance mode within 180s." >&2
             exit 1
           fi
 
@@ -77,32 +91,138 @@ resource "null_resource" "controlplane_api_ready" {
 
 resource "talos_machine_bootstrap" "bootstrap" {
   count                = local.cluster_already_bootstrapped ? 0 : 1
-  depends_on           = [null_resource.controlplane_api_ready, talos_machine_configuration_apply.worker_config_apply]
+  depends_on           = [null_resource.controlplane_api_ready]
   client_configuration = talos_machine_secrets.machine_secrets.client_configuration
   node                 = local.controlplane_vms["__CONTROLPLANE_PRIMARY__"].ip
 }
 
-data "talos_cluster_health" "health" {
-  count                = local.cluster_already_bootstrapped ? 0 : 1
-  depends_on           = [null_resource.controlplane_api_ready, talos_machine_configuration_apply.worker_config_apply, null_resource.talos_nodes_discovery_rbac]
-  client_configuration = data.talos_client_configuration.talosconfig.client_configuration
-  control_plane_nodes  = [for v in local.controlplane_vms : v.ip]
-  worker_nodes         = [for v in local.worker_vms : v.ip]
-  endpoints            = data.talos_client_configuration.talosconfig.endpoints
-  # On scale-out runs, new workers can take a bit longer to finish all k8s checks
-  # even though the cluster is already usable. Give the provider more time here.
-  timeouts = {
-    read = "30m"
+resource "null_resource" "cluster_health" {
+  count = local.cluster_already_bootstrapped ? 0 : 1
+  depends_on = [
+    null_resource.controlplane_etcd_members_ready,
+    null_resource.talos_nodes_discovery_rbac,
+    talos_machine_configuration_apply.worker_config_apply,
+  ]
+
+  triggers = {
+    controlplane_names = join(",", keys(local.controlplane_vms))
+    worker_names       = join(",", keys(local.worker_vms))
+    kubeconfig_sha     = sha256(local_file.kubeconfig.content)
+    talosconfig_sha    = sha256(local_file.talosconfig.content)
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -eu
+      talosconfig="${path.module}/../talosconfig"
+      kubeconfig="${path.module}/../kubeconfig"
+
+      start_time=$(date +%s)
+      while true; do
+        missing=""
+
+        for cp_ip in ${join(" ", [for v in local.controlplane_vms : v.ip])}; do
+          if ! timeout 10s talosctl --talosconfig="$talosconfig" etcd status -n "$cp_ip" >/dev/null 2>&1; then
+            missing="$missing etcd-status:$cp_ip"
+          fi
+
+          members="$(timeout 10s talosctl --talosconfig="$talosconfig" etcd members -n "$cp_ip" 2>/dev/null || true)"
+          for node_name in ${join(" ", keys(local.controlplane_vms))}; do
+            if ! printf '%s\n' "$members" | grep -q " $node_name "; then
+              missing="$missing etcd-member:$cp_ip:$node_name"
+            fi
+          done
+        done
+
+        nodes="$(timeout 10s kubectl --kubeconfig="$kubeconfig" get nodes --no-headers 2>/dev/null || true)"
+        for node_name in ${join(" ", concat(keys(local.controlplane_vms), keys(local.worker_vms)))}; do
+          if ! printf '%s\n' "$nodes" | grep -q "^$node_name[[:space:]]\\+Ready[[:space:]]"; then
+            missing="$missing node-ready:$node_name"
+          fi
+        done
+
+        if [ -z "$missing" ]; then
+          break
+        fi
+
+        now=$(date +%s)
+        if [ $((now-start_time)) -ge 300 ]; then
+          echo "Error: cluster did not become healthy within 300s. Missing:$missing" >&2
+          for cp_ip in ${join(" ", [for v in local.controlplane_vms : v.ip])}; do
+            echo "Diagnostics for control plane $cp_ip:" >&2
+            timeout 10s talosctl --talosconfig="$talosconfig" service etcd -n "$cp_ip" >&2 || true
+            timeout 10s talosctl --talosconfig="$talosconfig" get machinestatuses -n "$cp_ip" >&2 || true
+            timeout 10s talosctl --talosconfig="$talosconfig" get timestatuses -n "$cp_ip" >&2 || true
+            timeout 10s talosctl --talosconfig="$talosconfig" get members -n "$cp_ip" >&2 || true
+          done
+          exit 1
+        fi
+
+        sleep 5
+      done
+    EOT
   }
 }
 
 resource "talos_cluster_kubeconfig" "kubeconfig" {
   count                = local.cluster_already_bootstrapped ? 0 : 1
-  depends_on           = [talos_machine_bootstrap.bootstrap, talos_machine_configuration_apply.controlplane_config_apply, talos_machine_configuration_apply.worker_config_apply]
+  depends_on           = [talos_machine_bootstrap.bootstrap, talos_machine_configuration_apply.controlplane_primary_config_apply]
   client_configuration = talos_machine_secrets.machine_secrets.client_configuration
   node                 = local.controlplane_vms["__CONTROLPLANE_PRIMARY__"].ip
   timeouts = {
     read = "5m"
+  }
+}
+
+resource "null_resource" "controlplane_etcd_members_ready" {
+  count = local.cluster_already_bootstrapped ? 0 : 1
+  depends_on = [
+    talos_cluster_kubeconfig.kubeconfig,
+    talos_machine_configuration_apply.controlplane_primary_config_apply,
+    talos_machine_configuration_apply.controlplane_secondary_config_apply,
+  ]
+
+  triggers = {
+    controlplane_names = join(",", keys(local.controlplane_vms))
+    talosconfig_sha    = sha256(local_file.talosconfig.content)
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -eu
+      talosconfig="${path.module}/../talosconfig"
+      primary_ip="${local.controlplane_vms["__CONTROLPLANE_PRIMARY__"].ip}"
+
+      start_time=$(date +%s)
+      while true; do
+        members="$(timeout 10s talosctl --talosconfig="$talosconfig" etcd members -n "$primary_ip" 2>/dev/null || true)"
+        missing=""
+        for node_name in ${join(" ", keys(local.controlplane_vms))}; do
+          if ! printf '%s\n' "$members" | grep -q " $node_name "; then
+            missing="$missing $node_name"
+          fi
+        done
+
+        if [ -z "$missing" ]; then
+          break
+        fi
+
+        now=$(date +%s)
+        if [ $((now-start_time)) -ge 300 ]; then
+          echo "Error: etcd did not include all control planes within 300s. Missing:$missing" >&2
+          for cp_ip in ${join(" ", [for v in local.controlplane_vms : v.ip])}; do
+            echo "Diagnostics for control plane $cp_ip:" >&2
+            timeout 10s talosctl --talosconfig="$talosconfig" service etcd -n "$cp_ip" >&2 || true
+            timeout 10s talosctl --talosconfig="$talosconfig" get machinestatuses -n "$cp_ip" >&2 || true
+            timeout 10s talosctl --talosconfig="$talosconfig" get timestatuses -n "$cp_ip" >&2 || true
+            timeout 10s talosctl --talosconfig="$talosconfig" get members -n "$cp_ip" >&2 || true
+          done
+          exit 1
+        fi
+
+        sleep 5
+      done
+    EOT
   }
 }
 
@@ -144,6 +264,23 @@ resource "local_file" "talos_nodes_discovery_rbac_manifest" {
           - get
           - list
           - watch
+    ---
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: ClusterRoleBinding
+    metadata:
+      name: system:talos-nodes
+      labels:
+        kubernetes.io/bootstrapping: rbac-defaults
+      annotations:
+        rbac.authorization.kubernetes.io/autoupdate: "true"
+    roleRef:
+      apiGroup: rbac.authorization.k8s.io
+      kind: ClusterRole
+      name: system:talos-nodes
+    subjects:
+      - apiGroup: rbac.authorization.k8s.io
+        kind: Group
+        name: system:nodes
   YAML
   filename = "${path.module}/talos-nodes-discovery-rbac.yaml"
 }
@@ -173,6 +310,13 @@ resource "null_resource" "talos_nodes_discovery_rbac" {
       exit 1
     EOT
   }
+}
+
+resource "local_file" "talos_bootstrap_complete" {
+  count      = local.cluster_already_bootstrapped ? 0 : 1
+  depends_on = [null_resource.cluster_health]
+  content    = "ok\n"
+  filename   = "${path.module}/../.talos-bootstrap-complete"
 }
 
 output "talosconfig" {

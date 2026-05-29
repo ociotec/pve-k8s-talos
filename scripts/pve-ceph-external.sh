@@ -210,6 +210,36 @@ ceph_mds_daemon_exists_via_ssh() {
     '([.standbys[]?.name] + [.filesystems[]?.mdsmap.info[]?.name])[] | select(. == $mds_name)' >/dev/null
 }
 
+ensure_ec_profile_via_ssh() {
+  local ssh_host="$1"
+  local profile_name="$2"
+  local k="$3"
+  local m="$4"
+  local ssh_user="${CEPH_SSH_USER:-root}"
+  local quoted_profile output
+
+  quoted_profile="$(shell_quote "${profile_name}")"
+  if output="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
+    "$(remote_ceph_cmd "osd erasure-code-profile get ${quoted_profile}")" 2>&1)"; then
+    if ! grep -qx "k=${k}" <<<"${output}" || ! grep -qx "m=${m}" <<<"${output}" || ! grep -qx "crush-failure-domain=host" <<<"${output}"; then
+      echo "Erasure-code profile ${profile_name} already exists on ${ssh_host}, but it does not match k=${k}, m=${m}, crush-failure-domain=host." >&2
+      echo "Refusing to overwrite an existing Ceph erasure-code profile." >&2
+      exit 1
+    fi
+
+    echo "Erasure-code profile ${profile_name} already exists on ${ssh_host} with the expected settings."
+    return 0
+  fi
+
+  if ! grep -Eq "ENOENT|not found|does not exist|doesn't exist" <<<"${output}"; then
+    printf '%s\n' "${output}" >&2
+    exit 1
+  fi
+
+  run_ceph_via_ssh "${ssh_host}" "osd erasure-code-profile set ${quoted_profile} k=${k} m=${m} crush-failure-domain=host --force"
+  echo "Erasure-code profile ${profile_name} created on ${ssh_host}."
+}
+
 discover_ceph_node() {
   local payload
   payload="$(api_get "/nodes")"
@@ -384,6 +414,7 @@ ensure_cephfs_active_mds_via_ssh() {
   local filesystem_name="$2"
   local mds_name="$3"
   local quoted_mds_name
+  local started_at
 
   if ceph_filesystem_has_active_mds_via_ssh "${ssh_host}" "${filesystem_name}"; then
     echo "CephFS ${filesystem_name} already has an active MDS."
@@ -397,15 +428,32 @@ ensure_cephfs_active_mds_via_ssh() {
     run_remote_via_ssh "${ssh_host}" "pveceph mds create --name ${quoted_mds_name}"
     echo "MDS ${mds_name} created on ${ssh_host}."
   fi
+
+  started_at="$(date +%s)"
+  while true; do
+    if ceph_filesystem_has_active_mds_via_ssh "${ssh_host}" "${filesystem_name}"; then
+      echo "CephFS ${filesystem_name} has an active MDS."
+      return 0
+    fi
+
+    if (( $(date +%s) - started_at > 180 )); then
+      echo "Timed out waiting for CephFS ${filesystem_name} to get an active MDS." >&2
+      exit 1
+    fi
+
+    sleep 3
+  done
 }
 
 ensure_cephfs_csi_subvolume_group_via_ssh() {
   local ssh_host="$1"
   local filesystem_name="$2"
   local data_pool="$3"
+  local ssh_user="${CEPH_SSH_USER:-root}"
   local group_name="csi"
   local quoted_filesystem quoted_group quoted_data_pool
   local exists_status
+  local create_output
 
   if ceph_subvolume_group_exists_via_ssh "${ssh_host}" "${filesystem_name}" "${group_name}"; then
     echo "CephFS ${filesystem_name} subvolume group ${group_name} already exists."
@@ -413,14 +461,25 @@ ensure_cephfs_csi_subvolume_group_via_ssh() {
   fi
   exists_status=$?
   if [[ "${exists_status}" -ne 1 ]]; then
-    echo "Cannot verify CephFS ${filesystem_name} subvolume group ${group_name}; refusing to create blindly." >&2
-    exit 1
+    echo "Could not verify CephFS ${filesystem_name} subvolume group ${group_name}; attempting idempotent create." >&2
   fi
 
   quoted_filesystem="$(shell_quote "${filesystem_name}")"
   quoted_group="$(shell_quote "${group_name}")"
   quoted_data_pool="$(shell_quote "${data_pool}")"
-  run_ceph_via_ssh "${ssh_host}" "fs subvolumegroup create ${quoted_filesystem} ${quoted_group} 0 ${quoted_data_pool}"
+  if ! create_output="$(
+    ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "${ssh_user}@${ssh_host}" \
+      "$(remote_ceph_cmd "fs subvolumegroup create ${quoted_filesystem} ${quoted_group} 0 ${quoted_data_pool}")" 2>&1
+  )"; then
+    if printf '%s\n' "${create_output}" | grep -Eiq 'already exists|eexist|file exists'; then
+      echo "CephFS ${filesystem_name} subvolume group ${group_name} already exists."
+      return 0
+    fi
+
+    echo "Failed to create CephFS ${filesystem_name} subvolume group ${group_name}: ${create_output}" >&2
+    exit 1
+  fi
+
   echo "CephFS ${filesystem_name} subvolume group ${group_name} created with pool layout ${data_pool}."
 }
 
@@ -506,7 +565,7 @@ ensure_ec_rbd_pool_via_ssh() {
     return 0
   fi
 
-  run_ceph_via_ssh "${ssh_host}" "osd erasure-code-profile set ${quoted_profile} k=${k} m=${m} crush-failure-domain=host --force"
+  ensure_ec_profile_via_ssh "${ssh_host}" "${profile_name}" "${k}" "${m}"
   run_ceph_via_ssh "${ssh_host}" "osd pool create ${quoted_pool} ${pg_num} ${pg_num} erasure ${quoted_profile}"
   echo "Pool ${pool_name} created on ${ssh_host} via Ceph CLI."
   converge_ec_pool_via_ssh "${ssh_host}" "${pool_name}" "${min_size}" "rbd"
@@ -532,7 +591,7 @@ ensure_ec_cephfs_pool_via_ssh() {
     return 0
   fi
 
-  run_ceph_via_ssh "${ssh_host}" "osd erasure-code-profile set ${quoted_profile} k=${k} m=${m} crush-failure-domain=host --force"
+  ensure_ec_profile_via_ssh "${ssh_host}" "${profile_name}" "${k}" "${m}"
   run_ceph_via_ssh "${ssh_host}" "osd pool create ${quoted_pool} ${pg_num} ${pg_num} erasure ${quoted_profile}"
   echo "Pool ${pool_name} created on ${ssh_host} via Ceph CLI."
   converge_ec_pool_via_ssh "${ssh_host}" "${pool_name}" "${min_size}" "cephfs"
@@ -843,13 +902,9 @@ ensure_cephfs() {
     csi_data_pool="${data_pool}"
   fi
 
-  if [[ "${filesystem_existed}" == "true" ]]; then
-    echo "CephFS ${filesystem_name} already existed; skipping CSI subvolume group verification to avoid blocking external Ceph deployments on ceph-mgr volumes API issues."
-  else
-    ensure_cephfs_csi_subvolume_group_via_ssh "${ssh_host}" "${filesystem_name}" "${csi_data_pool}"
-  fi
-
   ensure_cephfs_active_mds_via_ssh "${ssh_host}" "${filesystem_name}" "${filesystem_name}"
+
+  ensure_cephfs_csi_subvolume_group_via_ssh "${ssh_host}" "${filesystem_name}" "${csi_data_pool}"
 }
 
 main() {

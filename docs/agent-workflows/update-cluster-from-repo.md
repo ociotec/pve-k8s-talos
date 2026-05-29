@@ -21,6 +21,7 @@ Handle cluster-local files such as:
 - `identity_constants.tf`
 - `platform_constants.tf`
 - `monitoring_constants.tf`
+- `secrets/credentials.json`
 - cluster-local supporting directories such as `certs/` and `patches/` only when
   they are referenced by cluster constants
 
@@ -60,6 +61,12 @@ directories are ignored by Git.
   components.
 - Keep skip flags consistent between Talos asset generation and deployment.
 - Do not expose or summarize secret values in the final answer.
+- Preserve existing `secrets/credentials.json` values. If the file or required keys are
+  missing, first run `scripts/extract-credentials-from-state.sh` from the
+  cluster directory to recover values from local state, then use
+  `scripts/ensure-credentials.sh` only for values that still need generation.
+  Do not copy sample placeholder values. Treat `--purge-credentials` as explicit
+  credential rotation and do not recommend it for normal cluster refreshes.
 - Do not update `.repo-status.json` merely because a new repository commit was
   detected. Update it only after this workflow completes successfully, or after
   explicit user confirmation that the relevant deployment was already applied.
@@ -164,6 +171,7 @@ If the user does not confirm, stop after the report and make no changes.
    - root OpenTofu files and templates
    - component modules under `k8s-net/`, `rook/`, `identity/`, `platform/`,
      `monitoring/`, and `identity-config/`
+   - service credential reads from `secrets/credentials.json`
 5. Inspect generated workspaces without editing:
    - compare the deployment sections currently known to `scripts/deploy.sh` with
      the cluster's generated `out/*` workspaces and report any sections that

@@ -8,10 +8,10 @@ Automated in `identity`:
 
 - A shared Keycloak realm group named `k8s-admins`.
 - LDAP-to-Keycloak group mapping for that group.
-- The Rancher OIDC client, including redirect URIs and a generated confidential client secret.
-- The Portainer OIDC client, including redirect URI and a generated confidential client secret.
-- The Grafana OIDC client, including redirect URI and a generated confidential client secret.
-- The Redpanda Console OIDC client for ingress `oauth2-proxy`, including redirect URI and a generated confidential client secret.
+- The Rancher OIDC client, including redirect URIs and a confidential client secret from `secrets/credentials.json`.
+- The Portainer OIDC client, including redirect URI and a confidential client secret from `secrets/credentials.json`.
+- The Grafana OIDC client, including redirect URI and a confidential client secret from `secrets/credentials.json`.
+- The Redpanda Console OIDC client for ingress `oauth2-proxy`, including redirect URI and a confidential client secret from `secrets/credentials.json`.
 - Optional Keycloak-side Portainer login restriction by OIDC client `login_allowed_groups`.
 - Optional Keycloak-side Grafana login restriction by OIDC client `login_allowed_groups`.
 - The `groups` OIDC claim with full group path enabled.
@@ -51,20 +51,19 @@ Declare the Rancher, Portainer, Grafana, Prometheus, and Redpanda Console client
 The sample cluster already includes `k8s-admins`, a Rancher client with redirect URI `https://<rancher-host>/verify-auth`, and a Portainer client with redirect URI `https://<portainer-host>/`.
 For Grafana, use redirect URI `https://<grafana-host>/login/generic_oauth`.
 
-## Retrieving generated OIDC settings
+## Retrieving OIDC settings
 
-After applying the identity workspace, inspect the generated values from the cluster workspace:
+Service passwords and OIDC client secrets are persisted in `clusters/<cluster>/secrets/credentials.json`. `scripts/deploy.sh` runs `scripts/ensure-credentials.sh` before deployment to migrate missing values from existing local state when possible and create any remaining missing values. The identity workspace exposes the applied non-secret metadata through outputs:
 
 ```bash
 tofu -chdir=out/identity output keycloak_oidc_client_metadata
-tofu -chdir=out/identity output -json keycloak_oidc_client_secrets
 ```
 
 Use:
 
 - issuer URL: `https://<keycloak-host>/realms/<realm>`
 - client ID: `rancher`, `portainer`, `grafana`, `prometheus`, or `redpanda-console`
-- client secret: from `keycloak_oidc_client_secrets`
+- client secret: from `secrets/credentials.json`
 
 ## Platform configuration
 
@@ -78,7 +77,7 @@ portainer_auth_keycloak_realm = "company"
 
 Do not remove local Rancher or Portainer admins after external auth is enabled.
 
-For an existing Portainer data volume, deployment treats the OpenTofu-generated admin password as authoritative. If the local Portainer database has drifted, the OAuth configuration step reconciles the local admin password back to the generated state value before calling the Portainer API.
+For an existing Portainer data volume, deployment treats the `secrets/credentials.json` admin password as authoritative. If the local Portainer database has drifted, the OAuth configuration step reconciles the local admin password back to that persisted value before calling the Portainer API.
 
 Restrict Portainer OAuth login in `clusters/<cluster>/identity_constants.tf` by setting the `portainer` OIDC client groups:
 

@@ -9,21 +9,27 @@ usage() {
   cat <<'USAGE'
 Usage: urls-and-credentials.sh [options]
 
-Shows installed service URLs and generated credentials for the current cluster.
+Shows installed service URLs and deployed credentials for the current cluster.
 Run it from clusters/<cluster>.
 
 Options:
       --hide-secrets  Show URLs and usernames, but do not print passwords.
+      --markdown      Render output as Markdown.
   -h, --help          Show this help message.
 USAGE
 }
 
 show_secrets=true
+output_format="console"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --hide-secrets)
       show_secrets=false
+      shift
+      ;;
+    --markdown)
+      output_format="markdown"
       shift
       ;;
     -h|--help)
@@ -49,6 +55,42 @@ DATA_FMT_START="\033[1m\033[3m"
 DATA_FMT_END="\033[23m\033[22m"
 
 printed_any=false
+markdown_section_count=0
+
+emit_line() {
+  local value="$1"
+
+  if [[ "${output_format}" == "markdown" ]]; then
+    printf '%s\n' "${value}"
+  else
+    message "${value}"
+  fi
+}
+
+markdown_inline_code() {
+  local value="$1"
+  value="${value//\`/\\\`}"
+  printf '`%s`' "${value}"
+}
+
+markdown_link() {
+  local text="$1"
+  local url="$2"
+
+  text="${text//\\/\\\\}"
+  text="${text//[/\\[}"
+  text="${text//]/\\]}"
+  url="${url// /%20}"
+  url="${url//(/%28}"
+  url="${url//)/%29}"
+  printf '[%s](%s)' "${text}" "${url}"
+}
+
+if [[ "${output_format}" == "markdown" ]]; then
+  printf '# Cluster URLs and Credentials\n\n'
+  printf -- '- Cluster: `%s`\n' "${cluster_name}"
+  printf -- '- Generated at: `%s`\n\n' "$(date -Iseconds)"
+fi
 
 workspace_has_state() {
   local workspace="$1"
@@ -115,7 +157,15 @@ has_value() {
 print_service() {
   local name="$1"
 
-  message "${SERVICE_FMT_START}${name}${SERVICE_FMT_END}"
+  if [[ "${output_format}" == "markdown" ]]; then
+    if (( markdown_section_count > 0 )); then
+      printf '\n'
+    fi
+    printf '## %s\n\n' "${name}"
+    markdown_section_count=$((markdown_section_count + 1))
+  else
+    message "${SERVICE_FMT_START}${name}${SERVICE_FMT_END}"
+  fi
   printed_any=true
 }
 
@@ -124,7 +174,11 @@ print_url_bullet() {
   local value="$2"
 
   if has_value "${value}"; then
-    message "  - ${label}: ${URL_FMT_START}${value}${URL_FMT_END}"
+    if [[ "${output_format}" == "markdown" ]]; then
+      emit_line "- ${label}: $(markdown_link "${value}" "${value}")"
+    else
+      message "  - ${label}: ${URL_FMT_START}${value}${URL_FMT_END}"
+    fi
     printed_any=true
   fi
 }
@@ -134,7 +188,11 @@ print_data_bullet() {
   local value="$2"
 
   if has_value "${value}"; then
-    message "  - ${label}: ${DATA_FMT_START}${value}${DATA_FMT_END}"
+    if [[ "${output_format}" == "markdown" ]]; then
+      emit_line "- ${label}: $(markdown_inline_code "${value}")"
+    else
+      message "  - ${label}: ${DATA_FMT_START}${value}${DATA_FMT_END}"
+    fi
     printed_any=true
   fi
 }
@@ -150,7 +208,11 @@ print_secret_bullet() {
   if [[ "${show_secrets}" == "true" ]]; then
     print_data_bullet "${label}" "${value}"
   else
-    message "  - ${label}: ${DATA_FMT_START}<hidden>${DATA_FMT_END}"
+    if [[ "${output_format}" == "markdown" ]]; then
+      emit_line "- ${label}: $(markdown_inline_code "<hidden>")"
+    else
+      message "  - ${label}: ${DATA_FMT_START}<hidden>${DATA_FMT_END}"
+    fi
     printed_any=true
   fi
 }
@@ -170,11 +232,19 @@ print_json_array_bullet() {
     return 0
   fi
 
-  message "  - ${label}:"
+  if [[ "${output_format}" == "markdown" ]]; then
+    emit_line "- ${label}:"
+  else
+    message "  - ${label}:"
+  fi
   printed_any=true
   while IFS= read -r value; do
     if has_value "${value}"; then
-      message "    - ${URL_FMT_START}${value}${URL_FMT_END}"
+      if [[ "${output_format}" == "markdown" ]]; then
+        emit_line "  - $(markdown_link "${value}" "${value}")"
+      else
+        message "    - ${URL_FMT_START}${value}${URL_FMT_END}"
+      fi
     fi
   done < <(jq -r '.[]' <<< "${json}")
 }
@@ -185,25 +255,45 @@ message_keycloak_realm_console_line() {
 
   case "${line}" in
     "  - "*)
-      message "      - ${line#"  - "}"
+      if [[ "${output_format}" == "markdown" ]]; then
+        emit_line "  - ${line#"  - "}"
+      else
+        message "      - ${line#"  - "}"
+      fi
       printed_any=true
       ;;
     "    Admin console: "*)
       url="${line#"    Admin console: "}"
-      message "        Admin console: ${URL_FMT_START}${url}${URL_FMT_END}"
+      if [[ "${output_format}" == "markdown" ]]; then
+        emit_line "    - Admin console: $(markdown_link "${url}" "${url}")"
+      else
+        message "        Admin console: ${URL_FMT_START}${url}${URL_FMT_END}"
+      fi
       printed_any=true
       ;;
     "    Account URL:   "*)
       url="${line#"    Account URL:   "}"
-      message "        Account URL:   ${URL_FMT_START}${url}${URL_FMT_END}"
+      if [[ "${output_format}" == "markdown" ]]; then
+        emit_line "    - Account URL: $(markdown_link "${url}" "${url}")"
+      else
+        message "        Account URL:   ${URL_FMT_START}${url}${URL_FMT_END}"
+      fi
       printed_any=true
       ;;
     "    LDAP:          "*)
-      message "        LDAP:          ${line#"    LDAP:          "}"
+      if [[ "${output_format}" == "markdown" ]]; then
+        emit_line "    - LDAP: ${line#"    LDAP:          "}"
+      else
+        message "        LDAP:          ${line#"    LDAP:          "}"
+      fi
       printed_any=true
       ;;
     *)
-      message "    ${line}"
+      if [[ "${output_format}" == "markdown" ]]; then
+        emit_line "  - ${line}"
+      else
+        message "    ${line}"
+      fi
       printed_any=true
       ;;
   esac
@@ -289,7 +379,11 @@ print_keycloak() {
 
   keycloak_realm_console_summary="$(output_raw "${cluster_identity_workspace}" keycloak_realm_console_summary)"
   if [[ -n "${keycloak_realm_console_summary}" ]]; then
-    message "  - Configured realms:"
+    if [[ "${output_format}" == "markdown" ]]; then
+      emit_line "- Configured realms:"
+    else
+      message "  - Configured realms:"
+    fi
     while IFS= read -r keycloak_realm_console_line; do
       message_keycloak_realm_console_line "${keycloak_realm_console_line}"
     done <<< "${keycloak_realm_console_summary}"
@@ -391,12 +485,20 @@ print_redpanda_console() {
   kafka_listener_bootstrap="$(output_json "${cluster_kafka_workspace}" kafka_listener_bootstrap)"
   if has_value "${kafka_listener_bootstrap}" && command -v jq >/dev/null 2>&1; then
     if [[ "$(jq -r 'if type == "object" then length else 0 end' <<< "${kafka_listener_bootstrap}")" -gt 0 ]]; then
-      message "  - Kafka bootstrap:"
+      if [[ "${output_format}" == "markdown" ]]; then
+        emit_line "- Kafka bootstrap:"
+      else
+        message "  - Kafka bootstrap:"
+      fi
       printed_any=true
     fi
     while IFS=$'\t' read -r listener_name listener_protocol listener_scope listener_bootstrap; do
       if has_value "${listener_name}" && has_value "${listener_bootstrap}"; then
-        message "    - ${listener_name} (${listener_protocol}, ${listener_scope}): ${DATA_FMT_START}${listener_bootstrap}${DATA_FMT_END}"
+        if [[ "${output_format}" == "markdown" ]]; then
+          emit_line "  - ${listener_name} (${listener_protocol}, ${listener_scope}): $(markdown_inline_code "${listener_bootstrap}")"
+        else
+          message "    - ${listener_name} (${listener_protocol}, ${listener_scope}): ${DATA_FMT_START}${listener_bootstrap}${DATA_FMT_END}"
+        fi
         printed_any=true
       fi
     done < <(jq -r 'to_entries[] | [.key, (.value.protocol // ""), (.value.scope // ""), (.value.bootstrap_server // "")] | @tsv' <<< "${kafka_listener_bootstrap}")
@@ -475,5 +577,5 @@ print_redpanda_console
 print_rook_dashboard
 
 if [[ "${printed_any}" != "true" ]]; then
-  message "No installed service URLs or generated credentials found for cluster ${cluster_name}."
+  emit_line "No installed service URLs or deployed credentials found for cluster ${cluster_name}."
 fi

@@ -23,6 +23,8 @@ Options:
   -D, --destroy-only        Destroy the cluster and exit (no deployment).
       --purge-external-ceph Purge external Ceph resources managed by this cluster.
                             Can be used alone or combined with --destroy/--destroy-only.
+      --purge-credentials   Delete generated cluster credentials and generated internal root CA.
+                            Requires --destroy or --destroy-only.
   -v, --verbose             Show all command output (do not silence tofu/kubectl).
   -g, --debug               Enable shell tracing + verbose output (sets TF_LOG=DEBUG).
   -c, --skip-ceph           Skip all Rook Ceph steps (operator, cluster, dashboard, CSI).
@@ -48,6 +50,7 @@ USAGE
 destroy_first=false
 destroy_only=false
 purge_external_ceph=false
+purge_credentials=false
 debug=false
 verbose=false
 skip_ceph=false
@@ -74,6 +77,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --purge-external-ceph)
       purge_external_ceph=true
+      shift
+      ;;
+    --purge-credentials)
+      purge_credentials=true
       shift
       ;;
     -c|--skip-ceph)
@@ -135,6 +142,11 @@ done
 
 if [[ "${purge_external_ceph}" == "true" && "${destroy_first}" != "true" ]]; then
   error "--purge-external-ceph requires --destroy or --destroy-only." >&2
+  exit 1
+fi
+
+if [[ "${purge_credentials}" == "true" && "${destroy_first}" != "true" ]]; then
+  error "--purge-credentials requires --destroy or --destroy-only." >&2
   exit 1
 fi
 
@@ -266,6 +278,58 @@ purge_cluster_out_dir() {
   rm -rf "${cluster_out_dir}"
 }
 
+tf_string_value() {
+  local file="$1"
+  local name="$2"
+  awk -v name="${name}" -F'"' '$0 ~ "^[[:space:]]*" name "[[:space:]]*=" { print $2; exit }' "${file}" 2>/dev/null || true
+}
+
+resolve_cluster_path() {
+  local raw_path="$1"
+
+  case "${raw_path}" in
+    "")
+      printf ""
+      ;;
+    /*)
+      printf "%s" "${raw_path}"
+      ;;
+    *)
+      printf "%s/%s" "${cluster_dir}" "${raw_path#./}"
+      ;;
+  esac
+}
+
+purge_cluster_credentials() {
+  local tls_source
+  local root_ca_crt_raw
+  local root_ca_key_raw
+  local root_ca_crt_path
+  local root_ca_key_path
+
+  message "Removing generated cluster credentials..."
+  rm -f "${cluster_credentials_path}"
+
+  if [[ ! -r "${cluster_k8s_net_constants_path}" ]]; then
+    return 0
+  fi
+
+  tls_source="$(tf_string_value "${cluster_k8s_net_constants_path}" tls_source)"
+  if [[ "${tls_source:-ca_issuer}" != "ca_issuer" ]]; then
+    return 0
+  fi
+
+  root_ca_crt_raw="$(tf_string_value "${cluster_k8s_net_constants_path}" root_ca_crt)"
+  root_ca_key_raw="$(tf_string_value "${cluster_k8s_net_constants_path}" root_ca_key)"
+  if [[ -z "${root_ca_crt_raw}" || -z "${root_ca_key_raw}" ]]; then
+    return 0
+  fi
+
+  root_ca_crt_path="$(resolve_cluster_path "${root_ca_crt_raw}")"
+  root_ca_key_path="$(resolve_cluster_path "${root_ca_key_raw}")"
+  rm -f "${root_ca_crt_path}" "${root_ca_key_path}"
+}
+
 clear_stale_lock_if_present() {
   local workspace="$1"
   local lock_path="${workspace}/.terraform.tfstate.lock.info"
@@ -289,6 +353,29 @@ state_dir_has_state() {
   [[ -f "${state_dir}/terraform.tfstate" || -f "${state_dir}/terraform.tfstate.backup" ]]
 }
 
+hydrate_workspace_providers_from_cluster_cache() {
+  local workspace="$1"
+  local target_providers="${workspace}/.terraform/providers"
+  local candidate
+  local copied=false
+
+  if [[ ! -d "${cluster_out_dir}" ]]; then
+    return 1
+  fi
+
+  mkdir -p "${target_providers}"
+  while IFS= read -r candidate; do
+    if [[ "${candidate}" == "${target_providers}" ]]; then
+      continue
+    fi
+
+    cp -a "${candidate}/." "${target_providers}/"
+    copied=true
+  done < <(find "${cluster_out_dir}" -path '*/.terraform/providers' -type d 2>/dev/null | sort)
+
+  [[ "${copied}" == "true" ]]
+}
+
 # Helper to run commands, optionally silencing output for normal runs.
 run() {
   if [[ "${verbose}" == "true" ]]; then
@@ -306,9 +393,30 @@ run_gen_talos_assets() {
   fi
 }
 
+run_ensure_credentials() {
+  if [[ "${verbose}" == "true" ]]; then
+    "${script_dir}/ensure-credentials.sh" --cluster "${cluster_name}"
+  else
+    "${script_dir}/ensure-credentials.sh" --cluster "${cluster_name}" 1>/dev/null
+  fi
+}
+
+write_credentials_and_urls_report() {
+  local report_path="${cluster_credentials_report_path}"
+
+  mkdir -p "${cluster_secrets_dir}"
+  message "Writing service URLs and credentials report to ${report_path}..."
+  if ! "${script_dir}/urls-and-credentials.sh" --markdown > "${report_path}"; then
+    error "Failed to write service URLs and credentials report." >&2
+    exit 1
+  fi
+  chmod 600 "${report_path}"
+}
+
 run_tofu_init() {
   local workspace="$1"
   local init_log
+  local retry_log
 
   clear_stale_lock_if_present "${workspace}"
   message "Initializing OpenTofu providers in ${workspace}..."
@@ -323,10 +431,54 @@ run_tofu_init() {
     return 0
   fi
 
+  if grep -qE 'registry\.opentofu\.org|Failed to resolve provider packages' "${init_log}" &&
+    hydrate_workspace_providers_from_cluster_cache "${workspace}"; then
+    message "Retrying OpenTofu init in ${workspace} with cluster-local cached providers..."
+    retry_log="$(mktemp)"
+    if tofu -chdir="${workspace}" init >"${retry_log}" 2>&1; then
+      rm -f "${init_log}" "${retry_log}"
+      return 0
+    fi
+
+    error "OpenTofu init retry failed in ${workspace}. Output:" >&2
+    cat "${retry_log}" >&2
+    rm -f "${retry_log}"
+  fi
+
   error "OpenTofu init failed in ${workspace}. Output:" >&2
   cat "${init_log}" >&2
   rm -f "${init_log}"
   return 1
+}
+
+current_section=""
+section_start=""
+
+start_deploy_section() {
+  local section_name="$1"
+
+  current_section="${section_name}"
+  section_start="$(start_timer)"
+  message "Starting section: ${section_name}."
+}
+
+finish_deploy_section() {
+  local section_name="$1"
+  local status="${2:-completed}"
+
+  message "Section ${section_name} ${status} in $(render_elapsed "${section_start}") (total elapsed: $(render_elapsed "${deploy_start}"))."
+  current_section=""
+  section_start=""
+}
+
+report_current_section_failure() {
+  local exit_code="$?"
+
+  set +e
+  if [[ -n "${current_section}" && -n "${section_start}" ]]; then
+    error "Section ${current_section} failed after $(render_elapsed "${section_start}") (total elapsed: $(render_elapsed "${deploy_start}"))." >&2
+  fi
+  exit "${exit_code}"
 }
 
 kubernetes_resource_version() {
@@ -428,6 +580,7 @@ prepare_monitoring_workspace() {
 
   require_cluster_file "${cluster_monitoring_constants_path}" "monitoring constants"
   require_cluster_file "${cluster_ceph_constants_path}" "ceph constants"
+  require_cluster_file "${cluster_credentials_path}" "cluster credentials"
   mkdir -p "${workspace}" "${cluster_certs_dir}"
   if [[ -d "${repo_root}/monitoring/.terraform" ]]; then
     link_into_workspace "${repo_root}/monitoring/.terraform" "${workspace}/.terraform"
@@ -436,6 +589,7 @@ prepare_monitoring_workspace() {
   link_into_workspace "${cluster_monitoring_constants_path}" "${workspace}/constants.tf"
   link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/k8s_net_constants.tf"
   link_into_workspace "${cluster_ceph_constants_path}" "${workspace}/ceph_constants.tf"
+  link_into_workspace "${cluster_credentials_path}" "${workspace}/credentials.json"
   link_into_workspace "${cluster_certs_dir}" "${workspace}/certs"
   link_into_workspace "${repo_root}/monitoring/namespace.yaml" "${workspace}/namespace.yaml"
   link_into_workspace "${repo_root}/monitoring/prometheus.yaml" "${workspace}/prometheus.yaml"
@@ -458,6 +612,7 @@ prepare_identity_workspace() {
   require_cluster_file "${cluster_identity_constants_path}" "identity constants"
   require_cluster_file "${cluster_k8s_net_constants_path}" "k8s-net constants"
   require_cluster_file "${cluster_ceph_constants_path}" "ceph constants"
+  require_cluster_file "${cluster_credentials_path}" "cluster credentials"
   mkdir -p "${workspace}" "${cluster_certs_dir}"
   if [[ -d "${repo_root}/identity/.terraform" ]]; then
     link_into_workspace "${repo_root}/identity/.terraform" "${workspace}/.terraform"
@@ -467,6 +622,7 @@ prepare_identity_workspace() {
   link_into_workspace "${cluster_identity_constants_path}" "${workspace}/constants.tf"
   link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/k8s_net_constants.tf"
   link_into_workspace "${cluster_ceph_constants_path}" "${workspace}/ceph_constants.tf"
+  link_into_workspace "${cluster_credentials_path}" "${workspace}/credentials.json"
   link_into_workspace "${cluster_certs_dir}" "${workspace}/certs"
   if [[ -r "${repo_root}/identity/.terraform.lock.hcl" ]]; then
     link_into_workspace "${repo_root}/identity/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
@@ -492,6 +648,7 @@ prepare_platform_workspace() {
 
   require_cluster_file "${cluster_platform_constants_path}" "platform constants"
   require_cluster_file "${cluster_ceph_constants_path}" "ceph constants"
+  require_cluster_file "${cluster_credentials_path}" "cluster credentials"
   mkdir -p "${workspace}" "${cluster_certs_dir}"
   if [[ -d "${repo_root}/platform/.terraform" ]]; then
     link_into_workspace "${repo_root}/platform/.terraform" "${workspace}/.terraform"
@@ -500,6 +657,7 @@ prepare_platform_workspace() {
   link_into_workspace "${cluster_platform_constants_path}" "${workspace}/constants.tf"
   link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/k8s_net_constants.tf"
   link_into_workspace "${cluster_ceph_constants_path}" "${workspace}/ceph_constants.tf"
+  link_into_workspace "${cluster_credentials_path}" "${workspace}/credentials.json"
   link_into_workspace "${cluster_certs_dir}" "${workspace}/certs"
   link_into_workspace "${repo_root}/platform/portainer.yaml" "${workspace}/portainer.yaml"
   link_into_workspace "${repo_root}/platform/configure-portainer-oauth.sh.tftpl" "${workspace}/configure-portainer-oauth.sh.tftpl"
@@ -514,6 +672,7 @@ prepare_s3_storage_workspace() {
 
   require_cluster_file "${cluster_s3_storage_constants_path}" "S3 storage constants"
   require_cluster_file "${cluster_k8s_net_constants_path}" "k8s-net constants"
+  require_cluster_file "${cluster_credentials_path}" "cluster credentials"
   mkdir -p "${workspace}" "${cluster_certs_dir}"
   if [[ -d "${repo_root}/s3-storage/.terraform" ]]; then
     link_into_workspace "${repo_root}/s3-storage/.terraform" "${workspace}/.terraform"
@@ -523,6 +682,7 @@ prepare_s3_storage_workspace() {
   link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/k8s_net_constants.tf"
   link_into_workspace "${cluster_vms_path}" "${workspace}/vms.auto.tfvars"
   link_into_workspace "${cluster_resources_path}" "${workspace}/resources.auto.tfvars"
+  link_into_workspace "${cluster_credentials_path}" "${workspace}/credentials.json"
   link_into_workspace "${cluster_certs_dir}" "${workspace}/certs"
   if [[ -r "${repo_root}/s3-storage/.terraform.lock.hcl" ]]; then
     link_into_workspace "${repo_root}/s3-storage/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
@@ -534,6 +694,7 @@ prepare_kafka_workspace() {
 
   require_cluster_file "${cluster_kafka_constants_path}" "Kafka constants"
   require_cluster_file "${cluster_k8s_net_constants_path}" "k8s-net constants"
+  require_cluster_file "${cluster_credentials_path}" "cluster credentials"
   mkdir -p "${workspace}" "${cluster_certs_dir}"
   if [[ -d "${repo_root}/kafka/.terraform" ]]; then
     link_into_workspace "${repo_root}/kafka/.terraform" "${workspace}/.terraform"
@@ -543,6 +704,7 @@ prepare_kafka_workspace() {
   link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/k8s_net_constants.tf"
   link_into_workspace "${cluster_vms_path}" "${workspace}/vms.auto.tfvars"
   link_into_workspace "${cluster_resources_path}" "${workspace}/resources.auto.tfvars"
+  link_into_workspace "${cluster_credentials_path}" "${workspace}/credentials.json"
   link_into_workspace "${cluster_certs_dir}" "${workspace}/certs"
   if [[ -r "${repo_root}/kafka/.terraform.lock.hcl" ]]; then
     link_into_workspace "${repo_root}/kafka/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
@@ -1076,6 +1238,56 @@ first_controlplane_ip() {
   ' "${vms_file}"
 }
 
+cluster_node_ips() {
+  local vms_file="${1:-${cluster_vms_path}}"
+
+  awk '
+    /^[[:space:]]*#/ { next }
+    match($0, /ip[[:space:]]*=[[:space:]]*"[^"]+"/) {
+      ip = $0
+      sub(/^[^"]*"/, "", ip)
+      sub(/".*/, "", ip)
+      print ip
+    }
+  ' "${vms_file}"
+}
+
+append_no_proxy_entry() {
+  local entry="$1"
+  local current
+
+  if [[ -z "${entry}" ]]; then
+    return 0
+  fi
+
+  current="${NO_PROXY:-${no_proxy:-}}"
+  case ",${current}," in
+    *",${entry},"*)
+      ;;
+    *)
+      if [[ -z "${current}" ]]; then
+        current="${entry}"
+      else
+        current="${current},${entry}"
+      fi
+      export NO_PROXY="${current}"
+      export no_proxy="${current}"
+      ;;
+  esac
+}
+
+configure_local_cluster_no_proxy() {
+  local ip
+
+  append_no_proxy_entry "localhost"
+  append_no_proxy_entry "127.0.0.1"
+  append_no_proxy_entry "::1"
+  append_no_proxy_entry "${controlplane_vip}"
+  while IFS= read -r ip; do
+    append_no_proxy_entry "${ip}"
+  done < <(cluster_node_ips)
+}
+
 wait_for_k8s_api_ready() {
   local endpoint_ip="$1"
   local timeout_seconds="${2:-120}"
@@ -1316,6 +1528,7 @@ ceph_mode_from_constants() {
 }
 
 deploy_start="$(start_timer)"
+trap report_current_section_failure ERR
 message "Provider upgrades are disabled by default. Update manually when needed: tofu -chdir=<workspace> init -upgrade"
 if [[ "${purge_external_ceph}" == "true" ]]; then
   if [[ "$(ceph_mode_from_constants "${cluster_ceph_constants_path}")" != "external" ]]; then
@@ -1323,6 +1536,14 @@ if [[ "${purge_external_ceph}" == "true" ]]; then
     exit 1
   fi
 fi
+
+start_deploy_section "credentials"
+run_ensure_credentials
+finish_deploy_section "credentials"
+
+configure_local_cluster_no_proxy
+
+start_deploy_section "Talos/Kubernetes"
 if [[ "${services_only}" == "true" ]]; then
   message "Services-only requested; skipping Talos VM/root OpenTofu apply."
   require_cluster_file "${cluster_talosconfig_path}" "generated talosconfig"
@@ -1349,13 +1570,20 @@ else
         --ceph-constants "${cluster_ceph_constants_path}"
     fi
 
+    if [[ "${purge_credentials}" == "true" ]]; then
+      purge_cluster_credentials
+    fi
+
     message "Removing generated cluster runtime workspace at ${cluster_out_dir}..."
     purge_cluster_out_dir
 
     if [[ "${destroy_only}" == "true" ]]; then
+      finish_deploy_section "Talos/Kubernetes" "destroyed"
       message "Destroy-only requested; exiting without deploying."
       exit 0
     fi
+
+    run_ensure_credentials
   fi
 
   message "Deploying the Talos cluster ${cluster_name} (PVE VMs creation, Talos cluster initialization, k8s bootstrapping)..."
@@ -1404,6 +1632,7 @@ fi
 export KUBECONFIG="${active_kubeconfig_path}"
 if [[ "${services_only}" == "true" ]]; then
   message "Services-only requested; skipping Talos disk, version, and kubelet settings preflight checks."
+  finish_deploy_section "Talos/Kubernetes" "skipped"
 else
   worker_ip="$(first_worker_ip)"
   if [[ -z "${worker_ip}" ]]; then
@@ -1424,10 +1653,13 @@ else
   reboot_nodes_with_pending_kubelet_max_pods "${cluster_constants_path}"
   message "k8s cluster is up and running. Current nodes:"
   "${script_dir}/render-k8s-nodes.sh" --kubeconfig "${active_kubeconfig_path}"
+  finish_deploy_section "Talos/Kubernetes"
 fi
 
+start_deploy_section "k8s-net"
 if [[ "${skip_k8s_net}" == "true" ]]; then
   message "Skipping k8s networking and ingress (k8s-net) steps."
+  finish_deploy_section "k8s-net" "skipped"
 else
   prepare_k8s_net_workspace
   message "Deploying k8s networking and ingress (k8s-net)..."
@@ -1441,10 +1673,13 @@ else
   tofu -chdir="${cluster_k8s_net_workspace}" apply -auto-approve \
     -var="skip_ceph=${skip_ceph}" 1>/dev/null
 
+  finish_deploy_section "k8s-net"
 fi
 
+start_deploy_section "Rook Ceph"
 if [[ "${skip_ceph}" == "true" ]]; then
   message "Skipping Rook Ceph steps."
+  finish_deploy_section "Rook Ceph" "skipped"
 else
   prepare_rook_workspaces
   ceph_mode_value="$(ceph_mode_from_constants "${cluster_ceph_constants_path}")"
@@ -1460,7 +1695,10 @@ else
 
     message "Deploying Rook Ceph cluster..."
     run_tofu_init "${cluster_rook_02_workspace}"
-    run tofu -chdir="${cluster_rook_02_workspace}" apply -auto-approve
+    # External Ceph convergence uses imperative SSH/CLI calls against the same
+    # Proxmox/Ceph management host; keep them serialized to avoid transient SSH
+    # disconnects while multiple CephFS/pool operations run in parallel.
+    run tofu -chdir="${cluster_rook_02_workspace}" apply -auto-approve -parallelism=1
     wait_for_cephcluster_ready "rook-ceph" "rook-ceph" "${ceph_mode_value}" "900"
   fi
 
@@ -1490,10 +1728,13 @@ else
       --ignore-not-found 1>/dev/null
   fi
   kubectl -n rook-ceph get storageclasses.storage.k8s.io
+  finish_deploy_section "Rook Ceph"
 fi
 
+start_deploy_section "identity"
 if [[ "${skip_identity}" == "true" ]]; then
   message "Skipping identity services."
+  finish_deploy_section "identity" "skipped"
 else
   prepare_identity_workspace
   prepare_identity_config_workspace
@@ -1522,10 +1763,13 @@ else
       message_keycloak_realm_console_line "${keycloak_realm_console_line}"
     done <<< "${keycloak_realm_console_summary}"
   fi
+  finish_deploy_section "identity"
 fi
 
+start_deploy_section "S3 storage"
 if [[ "${skip_s3_storage}" == "true" ]]; then
   message "Skipping S3-compatible storage services."
+  finish_deploy_section "S3 storage" "skipped"
 else
   prepare_s3_storage_workspace
   message "Deploying S3-compatible storage services (Garage)..."
@@ -1559,10 +1803,13 @@ else
   message "S3 region: ${DATA_FMT_START}${garage_s3_region}${DATA_FMT_END}"
   message "S3 Console URL: ${URL_FMT_START}${garage_console_url}${URL_FMT_END}"
   message "Garage admin token: ${DATA_FMT_START}${garage_admin_token}${DATA_FMT_END}"
+  finish_deploy_section "S3 storage"
 fi
 
+start_deploy_section "monitoring"
 if [[ "${skip_monitoring}" == "true" ]]; then
   message "Skipping monitoring stack."
+  finish_deploy_section "monitoring" "skipped"
 else
   prepare_monitoring_workspace
   message "Deploying monitoring stack..."
@@ -1649,10 +1896,13 @@ else
   message "Prometheus API password: ${DATA_FMT_START}${prometheus_api_password}${DATA_FMT_END}"
   message "Grafana admin user: ${DATA_FMT_START}${grafana_user}${DATA_FMT_END}"
   message "Grafana admin password: ${DATA_FMT_START}${grafana_password}${DATA_FMT_END}"
+  finish_deploy_section "monitoring"
 fi
 
+start_deploy_section "platform"
 if [[ "${skip_platform}" == "true" ]]; then
   message "Skipping platform services."
+  finish_deploy_section "platform" "skipped"
 else
   prepare_platform_workspace
   message "Deploying platform services..."
@@ -1665,7 +1915,7 @@ else
   portainer_url="$(tofu -chdir="${cluster_platform_workspace}" output -raw portainer_url)"
   portainer_admin_password="$(tofu -chdir="${cluster_platform_workspace}" output -raw portainer_admin_password)"
   message "Portainer URL: ${URL_FMT_START}${portainer_url}${URL_FMT_END}"
-  message "Portainer generated bootstrap admin password: ${DATA_FMT_START}${portainer_admin_password}${DATA_FMT_END}"
+  message "Portainer bootstrap admin password: ${DATA_FMT_START}${portainer_admin_password}${DATA_FMT_END}"
   rancher_enabled="$(tofu -chdir="${cluster_platform_workspace}" output -raw rancher_enabled)"
   if [[ "${rancher_enabled}" == "true" ]]; then
     message "Waiting for Rancher workload and endpoints to become ready..."
@@ -1676,10 +1926,13 @@ else
     message "Rancher URL: ${URL_FMT_START}${rancher_url}${URL_FMT_END}"
     message "Rancher bootstrap password: ${DATA_FMT_START}${rancher_bootstrap_password}${DATA_FMT_END}"
   fi
+  finish_deploy_section "platform"
 fi
 
+start_deploy_section "Kafka/Redpanda"
 if [[ "${skip_kafka}" == "true" ]]; then
   message "Skipping Kafka/Redpanda services."
+  finish_deploy_section "Kafka/Redpanda" "skipped"
 else
   prepare_kafka_workspace
   message "Deploying Kafka/Redpanda services..."
@@ -1704,10 +1957,13 @@ else
   fi
   redpanda_console_url="$(tofu -chdir="${cluster_kafka_workspace}" output -raw redpanda_console_url)"
   message "Redpanda Console URL: ${URL_FMT_START}${redpanda_console_url}${URL_FMT_END}"
+  finish_deploy_section "Kafka/Redpanda"
 fi
 
+start_deploy_section "benchmark"
 if [[ "${skip_benchmark}" == "true" ]]; then
   message "Skipping benchmark workloads."
+  finish_deploy_section "benchmark" "skipped"
 else
   prepare_benchmark_workspace
   message "Deploying benchmark workloads at zero replicas..."
@@ -1723,13 +1979,16 @@ else
   if [[ -n "${benchmark_disk_workloads}" ]]; then
     message "Disk benchmarks: ${DATA_FMT_START}${benchmark_disk_workloads}${DATA_FMT_END}"
   fi
+  finish_deploy_section "benchmark"
 fi
 
+start_deploy_section "Rook Ceph dashboard"
 ceph_mode_value="$(ceph_mode_from_constants "${cluster_ceph_constants_path}")"
 if [[ "${skip_ceph}" == "true" || "${skip_k8s_net}" == "true" || "${ceph_mode_value}" == "external" ]]; then
   if [[ "${ceph_mode_value}" == "external" && "${skip_ceph}" != "true" ]]; then
     message "Skipping Rook Ceph dashboard ingress for external Ceph mode."
   fi
+  finish_deploy_section "Rook Ceph dashboard" "skipped"
   :
 else
   message "Deploying Rook Ceph dashboard ingress..."
@@ -1755,7 +2014,12 @@ else
     error "Dashboard password secret not found yet. Retry: kubectl -n rook-ceph get secret rook-ceph-dashboard-password"
     exit 1
   fi
+  finish_deploy_section "Rook Ceph dashboard"
 fi
+
+start_deploy_section "credentials and URLs report"
+write_credentials_and_urls_report
+finish_deploy_section "credentials and URLs report"
 
 message "Cluster deployed successfully in $(render_elapsed "${deploy_start}")."
 message ""

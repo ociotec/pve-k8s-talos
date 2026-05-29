@@ -8,10 +8,6 @@ terraform {
       source  = "hashicorp/null"
       version = ">= 3.2.4, < 3.3.0"
     }
-    random = {
-      source  = "hashicorp/random"
-      version = ">= 3.8.1"
-    }
   }
 }
 
@@ -64,13 +60,19 @@ provider "kubernetes" {
 }
 
 locals {
-  s3_namespace_value          = try(local.s3_namespace, "s3")
-  garage_name_value           = try(local.garage_name, "garage")
-  garage_node_label_value     = try(local.garage_node_k8s_label, "s3")
-  garage_data_host_path_value = try(local.garage_data_host_path, "/var/lib/s3")
-  garage_storage_class_value  = try(local.garage_storage_class_name, "s3-local")
-  garage_image_value          = try(local.garage_image, "dxflrs/garage:v2.2.0")
-  garage_console_image_value  = try(local.garage_console_image, "khairul169/garage-webui:1.1.0")
+  cluster_credentials                      = try(jsondecode(file("${path.module}/credentials.json")), {})
+  s3_storage_credentials                   = try(local.cluster_credentials.s3_storage, {})
+  garage_rpc_secret_value                  = try(local.s3_storage_credentials.garage_rpc_secret, "")
+  garage_admin_token_value                 = try(local.s3_storage_credentials.garage_admin_token, "")
+  garage_metrics_token_value               = try(local.s3_storage_credentials.garage_metrics_token, "")
+  garage_console_oauth_cookie_secret_value = try(local.s3_storage_credentials.garage_console_oauth_cookie_secret, "")
+  s3_namespace_value                       = try(local.s3_namespace, "s3")
+  garage_name_value                        = try(local.garage_name, "garage")
+  garage_node_label_value                  = try(local.garage_node_k8s_label, "s3")
+  garage_data_host_path_value              = try(local.garage_data_host_path, "/var/lib/s3")
+  garage_storage_class_value               = try(local.garage_storage_class_name, "s3-local")
+  garage_image_value                       = try(local.garage_image, "dxflrs/garage:v2.2.0")
+  garage_console_image_value               = try(local.garage_console_image, "khairul169/garage-webui:1.1.0")
 
   garage_s3_hostname_value                 = try(local.garage_s3_hostname, "s3.${local.domain}")
   garage_console_hostname_value            = try(local.garage_console_hostname, "s3-console.${local.domain}")
@@ -245,11 +247,8 @@ locals {
     data.terraform_remote_state.identity[0].outputs.keycloak_oidc_client_metadata,
     {}
   ) : {}
-  identity_oidc_secrets = local.garage_console_auth_enabled ? try(
-    data.terraform_remote_state.identity[0].outputs.keycloak_oidc_client_secrets,
-    {}
-  ) : {}
-  available_identity_realms = keys(local.identity_oidc_metadata)
+  identity_oidc_client_secrets = try(local.cluster_credentials.identity.oidc_client_secrets, {})
+  available_identity_realms    = keys(local.identity_oidc_metadata)
   garage_console_oidc_issuer = local.garage_console_auth_enabled ? try(
     local.identity_oidc_metadata[local.garage_console_auth_realm_value].issuer_url,
     ""
@@ -259,7 +258,7 @@ locals {
     ""
   ) : ""
   garage_console_oidc_client_secret = local.garage_console_auth_enabled ? try(
-    local.identity_oidc_secrets[local.garage_console_auth_realm_value][local.garage_console_oauth_client_id],
+    local.identity_oidc_client_secrets[format("%s/%s", local.garage_console_auth_realm_value, local.garage_console_oauth_client_id)],
     ""
   ) : ""
   garage_console_oidc_end_session_url = local.garage_console_oidc_issuer != "" ? format("%s/protocol/openid-connect/logout", local.garage_console_oidc_issuer) : ""
@@ -349,24 +348,16 @@ check "garage_console_auth_groups" {
   }
 }
 
-resource "random_id" "garage_rpc_secret" {
-  byte_length = 32
-}
-
-resource "random_password" "garage_admin_token" {
-  length  = 48
-  special = false
-}
-
-resource "random_password" "garage_metrics_token" {
-  length  = 48
-  special = false
-}
-
-resource "random_password" "garage_console_oauth_cookie_secret" {
-  count   = local.garage_console_auth_enabled ? 1 : 0
-  length  = 32
-  special = false
+check "s3_storage_credentials" {
+  assert {
+    condition = (
+      trimspace(local.garage_rpc_secret_value) != "" &&
+      trimspace(local.garage_admin_token_value) != "" &&
+      trimspace(local.garage_metrics_token_value) != "" &&
+      (!local.garage_console_auth_enabled || trimspace(local.garage_console_oauth_cookie_secret_value) != "")
+    )
+    error_message = "credentials.json must define s3_storage.garage_rpc_secret, s3_storage.garage_admin_token, s3_storage.garage_metrics_token, and s3_storage.garage_console_oauth_cookie_secret when Garage Console OAuth is enabled."
+  }
 }
 
 resource "kubernetes_manifest" "namespace" {
@@ -450,9 +441,9 @@ resource "kubernetes_secret_v1" "garage_secrets" {
   }
 
   data = {
-    "rpc-secret"    = random_id.garage_rpc_secret.hex
-    "admin-token"   = random_password.garage_admin_token.result
-    "metrics-token" = random_password.garage_metrics_token.result
+    "rpc-secret"    = local.garage_rpc_secret_value
+    "admin-token"   = local.garage_admin_token_value
+    "metrics-token" = local.garage_metrics_token_value
   }
 
   type = "Opaque"
@@ -1126,7 +1117,7 @@ resource "kubernetes_secret_v1" "console_oauth" {
 
   data = {
     "client-secret" = local.garage_console_oidc_client_secret
-    "cookie-secret" = random_password.garage_console_oauth_cookie_secret[0].result
+    "cookie-secret" = local.garage_console_oauth_cookie_secret_value
   }
 
   type = "Opaque"
@@ -1638,7 +1629,7 @@ output "garage_console_url" {
 }
 
 output "garage_admin_token" {
-  value     = random_password.garage_admin_token.result
+  value     = local.garage_admin_token_value
   sensitive = true
 }
 

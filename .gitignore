@@ -46,5 +46,9 @@ monitoring/constants.tf
 /clusters/*
 !/clusters/sample/
 !/clusters/sample/**
+/infra-vms/*
+!/infra-vms/sample/
+!/infra-vms/sample/**
+!/infra-vms/sample/*.tfvars
 /docs/plans/**
 /docs/s3-storage-evaluation.pdf

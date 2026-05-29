@@ -1,0 +1,8 @@
+export PROXMOX_VE_ENDPOINT="https://pve.example.com:8006/"
+export PROXMOX_VE_API_TOKEN="user@example!token-id=token-secret"
+export PROXMOX_VE_INSECURE="false"
+
+# Required when the Proxmox provider uploads cloud-init snippets.
+export PROXMOX_VE_SSH_USERNAME="root"
+export PROXMOX_VE_SSH_AGENT="true"
+export INFRA_VM_PROXMOX_SSH_KEY_FILE="${HOME}/.ssh/id_ed25519"

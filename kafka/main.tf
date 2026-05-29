@@ -8,10 +8,6 @@ terraform {
       source  = "hashicorp/null"
       version = ">= 3.2.4, < 3.3.0"
     }
-    random = {
-      source  = "hashicorp/random"
-      version = ">= 3.8.1"
-    }
   }
 }
 
@@ -59,6 +55,9 @@ provider "kubernetes" {
 }
 
 locals {
+  cluster_credentials                        = try(jsondecode(file("${path.module}/credentials.json")), {})
+  kafka_credentials                          = try(local.cluster_credentials.kafka, {})
+  redpanda_console_oauth_cookie_secret_value = try(local.kafka_credentials.redpanda_console_oauth_cookie_secret, "")
   redpanda_namespace_value                   = try(local.redpanda_namespace, "kafka")
   redpanda_resource_name_value               = try(local.redpanda_resource_name, "redpanda")
   redpanda_cluster_id_value                  = try(local.redpanda_cluster_id, "GCS")
@@ -383,11 +382,8 @@ locals {
     data.terraform_remote_state.identity[0].outputs.keycloak_oidc_client_metadata,
     {}
   ) : {}
-  identity_oidc_secrets = local.redpanda_console_auth_enabled ? try(
-    data.terraform_remote_state.identity[0].outputs.keycloak_oidc_client_secrets,
-    {}
-  ) : {}
-  available_identity_realms = keys(local.identity_oidc_metadata)
+  identity_oidc_client_secrets = try(local.cluster_credentials.identity.oidc_client_secrets, {})
+  available_identity_realms    = keys(local.identity_oidc_metadata)
   redpanda_console_oidc_issuer = local.redpanda_console_auth_enabled ? try(
     local.identity_oidc_metadata[local.redpanda_console_auth_keycloak_realm_value].issuer_url,
     ""
@@ -397,7 +393,7 @@ locals {
     ""
   ) : ""
   redpanda_console_oidc_client_secret = local.redpanda_console_auth_enabled ? try(
-    local.identity_oidc_secrets[local.redpanda_console_auth_keycloak_realm_value][local.redpanda_console_oauth_client_id],
+    local.identity_oidc_client_secrets[format("%s/%s", local.redpanda_console_auth_keycloak_realm_value, local.redpanda_console_oauth_client_id)],
     ""
   ) : ""
   redpanda_console_auth_effective_allowed_groups = distinct(compact(concat(
@@ -505,6 +501,13 @@ check "redpanda_console_auth_groups" {
   assert {
     condition     = !local.redpanda_console_auth_enabled || (length(local.redpanda_console_auth_effective_allowed_groups) > 0 && length(local.missing_redpanda_console_auth_group_definitions) == 0)
     error_message = format("Redpanda Console auth groups must exist in the selected Keycloak realm. Missing logical groups: %s", join(", ", local.missing_redpanda_console_auth_group_definitions))
+  }
+}
+
+check "kafka_credentials" {
+  assert {
+    condition     = !local.redpanda_console_auth_enabled || trimspace(local.redpanda_console_oauth_cookie_secret_value) != ""
+    error_message = "credentials.json must define kafka.redpanda_console_oauth_cookie_secret when Redpanda Console OAuth is enabled."
   }
 }
 
@@ -1311,12 +1314,6 @@ resource "kubernetes_manifest" "console_certificate" {
   ]
 }
 
-resource "random_password" "redpanda_console_oauth_cookie_secret" {
-  count   = local.redpanda_console_auth_enabled ? 1 : 0
-  length  = 32
-  special = false
-}
-
 resource "kubernetes_secret_v1" "redpanda_console_oauth" {
   count = local.redpanda_console_auth_enabled ? 1 : 0
 
@@ -1327,7 +1324,7 @@ resource "kubernetes_secret_v1" "redpanda_console_oauth" {
 
   data = {
     "client-secret" = local.redpanda_console_oidc_client_secret
-    "cookie-secret" = random_password.redpanda_console_oauth_cookie_secret[0].result
+    "cookie-secret" = local.redpanda_console_oauth_cookie_secret_value
   }
 
   type = "Opaque"

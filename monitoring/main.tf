@@ -12,10 +12,6 @@ terraform {
       source  = "hashicorp/null"
       version = ">= 3.2.4"
     }
-    random = {
-      source  = "hashicorp/random"
-      version = ">= 3.8.1"
-    }
   }
 }
 
@@ -39,6 +35,13 @@ provider "kubernetes" {
 }
 
 locals {
+  cluster_credentials                             = try(jsondecode(file("${path.module}/credentials.json")), {})
+  monitoring_credentials                          = try(local.cluster_credentials.monitoring, {})
+  monitoring_grafana_admin_password               = try(local.monitoring_credentials.grafana_admin_password, "")
+  monitoring_grafana_postgres_password            = try(local.monitoring_credentials.grafana_postgres_password, "")
+  monitoring_prometheus_api_basic_auth_password   = try(local.monitoring_credentials.prometheus_api_basic_auth_password, "")
+  monitoring_prometheus_api_basic_auth_hash       = try(local.monitoring_credentials.prometheus_api_basic_auth_hash, "")
+  monitoring_prometheus_oauth_cookie_secret       = try(local.monitoring_credentials.prometheus_oauth_cookie_secret, "")
   prometheus_auth_keycloak_realm_value            = trimspace(try(local.prometheus_auth_keycloak_realm, ""))
   prometheus_auth_enabled                         = local.prometheus_auth_keycloak_realm_value != ""
   prometheus_auth_allowed_groups_value            = distinct(compact(try(local.prometheus_auth_allowed_groups, [])))
@@ -103,8 +106,8 @@ locals {
   grafana_mem_limit_mib = can(regex("^[0-9]+Gi$", local.grafana_mem_limit)) ? tonumber(trimsuffix(local.grafana_mem_limit, "Gi")) * 1024 : (
     can(regex("^[0-9]+Mi$", local.grafana_mem_limit)) ? tonumber(trimsuffix(local.grafana_mem_limit, "Mi")) : null
   )
-  grafana_go_mem_limit_mib = floor(local.grafana_mem_limit_mib * local.grafana_go_mem_limit_percent_value / 100)
-  grafana_go_mem_limit     = format("%dMiB", local.grafana_go_mem_limit_mib)
+  grafana_go_mem_limit_mib         = floor(local.grafana_mem_limit_mib * local.grafana_go_mem_limit_percent_value / 100)
+  grafana_go_mem_limit             = format("%dMiB", local.grafana_go_mem_limit_mib)
   monitoring_keycloak_auth_enabled = local.grafana_auth_enabled || local.prometheus_auth_enabled
   identity_realm_groups = local.monitoring_keycloak_auth_enabled ? try(
     data.terraform_remote_state.identity[0].outputs.keycloak_realm_groups,
@@ -114,10 +117,7 @@ locals {
     data.terraform_remote_state.identity[0].outputs.keycloak_oidc_client_metadata,
     {}
   ) : {}
-  identity_oidc_secrets = local.monitoring_keycloak_auth_enabled ? try(
-    data.terraform_remote_state.identity[0].outputs.keycloak_oidc_client_secrets,
-    {}
-  ) : {}
+  identity_oidc_client_secrets = try(local.cluster_credentials.identity.oidc_client_secrets, {})
   grafana_oidc_issuer = local.grafana_auth_enabled ? try(
     local.identity_oidc_metadata[local.grafana_auth_keycloak_realm_value].issuer_url,
     ""
@@ -127,7 +127,7 @@ locals {
     ""
   ) : ""
   grafana_oidc_client_secret = local.grafana_auth_enabled ? try(
-    local.identity_oidc_secrets[local.grafana_auth_keycloak_realm_value]["grafana"],
+    local.identity_oidc_client_secrets[format("%s/grafana", local.grafana_auth_keycloak_realm_value)],
     ""
   ) : ""
   prometheus_oidc_issuer = local.prometheus_auth_enabled ? try(
@@ -139,7 +139,7 @@ locals {
     ""
   ) : ""
   prometheus_oidc_client_secret = local.prometheus_auth_enabled ? try(
-    local.identity_oidc_secrets[local.prometheus_auth_keycloak_realm_value]["prometheus"],
+    local.identity_oidc_client_secrets[format("%s/prometheus", local.prometheus_auth_keycloak_realm_value)],
     ""
   ) : ""
   grafana_oidc_auth_url  = local.grafana_oidc_issuer != "" ? format("%s/protocol/openid-connect/auth", local.grafana_oidc_issuer) : ""
@@ -646,6 +646,19 @@ check "ceph_prometheus_scheme" {
   }
 }
 
+check "monitoring_credentials" {
+  assert {
+    condition = (
+      trimspace(local.monitoring_grafana_admin_password) != "" &&
+      trimspace(local.monitoring_grafana_postgres_password) != "" &&
+      trimspace(local.monitoring_prometheus_api_basic_auth_password) != "" &&
+      trimspace(local.monitoring_prometheus_api_basic_auth_hash) != "" &&
+      (!local.prometheus_auth_enabled || trimspace(local.monitoring_prometheus_oauth_cookie_secret) != "")
+    )
+    error_message = "credentials.json must define monitoring.grafana_admin_password, monitoring.grafana_postgres_password, monitoring.prometheus_api_basic_auth_password, monitoring.prometheus_api_basic_auth_hash, and monitoring.prometheus_oauth_cookie_secret when Prometheus OAuth is enabled."
+  }
+}
+
 resource "kubernetes_manifest" "monitoring_namespace" {
   manifest = local.monitoring_namespace
 }
@@ -653,16 +666,6 @@ resource "kubernetes_manifest" "monitoring_namespace" {
 resource "kubernetes_manifest" "extra_namespaces" {
   for_each = { for i, m in local.extra_namespaces : i => m }
   manifest = each.value
-}
-
-resource "random_password" "grafana_admin" {
-  length  = local.grafana_admin_password_length
-  special = false
-}
-
-resource "random_password" "grafana_postgres" {
-  length  = local.grafana_postgres_password_length_value
-  special = false
 }
 
 resource "kubernetes_secret_v1" "grafana_admin" {
@@ -673,7 +676,7 @@ resource "kubernetes_secret_v1" "grafana_admin" {
 
   data = {
     "admin-user"     = local.grafana_admin_user
-    "admin-password" = random_password.grafana_admin.result
+    "admin-password" = local.monitoring_grafana_admin_password
   }
 
   type       = "Opaque"
@@ -688,17 +691,12 @@ resource "kubernetes_secret_v1" "grafana_db" {
 
   data = {
     username = local.grafana_db_username_value
-    password = random_password.grafana_postgres.result
+    password = local.monitoring_grafana_postgres_password
     database = local.grafana_db_name_value
   }
 
   type       = "Opaque"
   depends_on = [kubernetes_manifest.monitoring_namespace]
-}
-
-resource "random_password" "prometheus_api_basic_auth" {
-  length  = local.prometheus_api_basic_auth_password_length_value
-  special = false
 }
 
 resource "kubernetes_secret_v1" "prometheus_api_basic_auth" {
@@ -708,7 +706,7 @@ resource "kubernetes_secret_v1" "prometheus_api_basic_auth" {
   }
 
   data = {
-    auth = format("%s:%s", local.prometheus_api_basic_auth_user, random_password.prometheus_api_basic_auth.bcrypt_hash)
+    auth = format("%s:%s", local.prometheus_api_basic_auth_user, local.monitoring_prometheus_api_basic_auth_hash)
   }
 
   type       = "Opaque"
@@ -747,12 +745,6 @@ resource "kubernetes_secret_v1" "grafana_oauth_ca" {
   depends_on = [kubernetes_manifest.monitoring_namespace]
 }
 
-resource "random_password" "prometheus_oauth_cookie_secret" {
-  count   = local.prometheus_auth_enabled ? 1 : 0
-  length  = 32
-  special = false
-}
-
 resource "kubernetes_secret_v1" "prometheus_oauth" {
   count = local.prometheus_auth_enabled ? 1 : 0
 
@@ -763,7 +755,7 @@ resource "kubernetes_secret_v1" "prometheus_oauth" {
 
   data = {
     "client-secret" = local.prometheus_oidc_client_secret
-    "cookie-secret" = random_password.prometheus_oauth_cookie_secret[0].result
+    "cookie-secret" = local.monitoring_prometheus_oauth_cookie_secret
   }
 
   type       = "Opaque"
@@ -959,7 +951,7 @@ output "prometheus_api_basic_auth_user" {
 }
 
 output "prometheus_api_basic_auth_password" {
-  value     = random_password.prometheus_api_basic_auth.result
+  value     = local.monitoring_prometheus_api_basic_auth_password
   sensitive = true
 }
 
@@ -968,6 +960,6 @@ output "grafana_admin_user" {
 }
 
 output "grafana_admin_password" {
-  value     = random_password.grafana_admin.result
+  value     = local.monitoring_grafana_admin_password
   sensitive = true
 }

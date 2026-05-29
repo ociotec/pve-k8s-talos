@@ -54,6 +54,7 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
   - Optional `network.proxy_url` to set Talos `http_proxy` and `https_proxy`.
   - Optional `network.no_proxy_extra` to append custom no-proxy entries after the auto-generated localhost, local subnet, node IPs/hostnames, Kubernetes service names, and ingress hostnames.
   - Optional `network.cert_files` for extra PEM certificates appended to Talos trust roots, for example proxy interception CAs.
+  - Optional `network.extra_host_entries` for temporary Talos `/etc/hosts` entries, formatted as comma-separated `IP hostname [alias...]` entries.
   - Talos version and factory image ID (used to render `patches/qemu.yaml`).
   - Optional `talos.max_pods` (kubelet `maxPods`) to override per-node pod density. Leave empty to keep Kubernetes default (`110`).
   - Optional `talos.discovery_service_disabled` toggle (`"true"` by default) to disable Talos public discovery service.
@@ -74,6 +75,12 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
     - Optional `k8s_labels` map per resource type (middle precedence).
     - Disks in GB with optional Talos mount points (first disk is used as root).
     - Mount points must live under `/var` (for example `/var/mnt/kafka` or `/var/lib/kafka`).
+- `secrets/credentials.json`
+  - Persistent cleartext cluster credentials consumed by service modules.
+  - `scripts/deploy.sh` runs `scripts/ensure-credentials.sh` before deploying, migrates missing values from existing local `out/*/terraform.tfstate` when possible, creates any remaining missing values, and keeps this file outside `out/` so deleting generated workspaces does not rotate service passwords or OIDC client secrets.
+  - To migrate only from existing local state without generating new values, run `../../scripts/extract-credentials-from-state.sh` from `clusters/<cluster>`. It preserves existing `secrets/credentials.json` values by default; pass `--overwrite` only when intentionally replacing the file from state.
+  - For custom confidential Keycloak clients, add the secret under `identity.oidc_client_secrets` using the key `<realm>/<client-id>`.
+  - Use `clusters/sample/secrets/credentials.json` as the expected shape, but do not deploy the sample placeholder values.
 - `k8s_net_constants.tf`
   - Domain, TLS mode, root CA path, MetalLB range, and ingress fixed IP.
   - Certificate catalog (`available_certificates`) and default certificate entry.
@@ -118,8 +125,44 @@ For the Rancher/Portainer/Grafana + Keycloak authentication split of responsibil
   - Defines block and file storage profiles, storage class names, pool/filesystem naming, and all external Ceph connection/CSI credentials in a single file.
 - `certs/`
   - Cluster-specific CA and certificate files used by `k8s_net_constants.tf`.
+  - When `tls_source = "ca_issuer"` and `root_ca_crt` / `root_ca_key` are set, `scripts/ensure-credentials.sh` generates a missing internal root CA here before Talos asset generation.
 
 Shortcut: for a one-command install, jump to [Easy deployment](#easy-deployment) to run the helper script; or continue reading for the detailed, step-by-step walkthrough below.
+
+### Bootstrap infra VMs
+
+Bootstrap services that must exist before a Talos cluster starts live under `infra-vms/<name>/`.
+Use this for shared, non-Kubernetes prerequisites such as a private Talos discovery service or, later, an image registry mirror.
+
+Create one from the versioned sample:
+
+```bash
+cp -R infra-vms/sample infra-vms/<name>
+cd infra-vms/<name>
+cp envrc.sample .envrc
+```
+
+Then edit:
+
+- `constants.auto.tfvars`
+  - Proxmox VM placement (`vm.node_name`, `vm.vm_id`, pool, datastore IDs).
+  - Debian cloud image file/import ID already available to Proxmox.
+  - VM resources (`vm.vcpus`, `vm.memory`, `vm.disks`).
+  - Static network settings.
+  - OS provisioning settings, including username, optional fixed `user_uid`/`user_gid`, package update/upgrade, trusted CA files, mandatory reboot after provisioning, and extra packages.
+- `services.auto.tfvars`
+  - Docker installation toggle/package list.
+  - Optional Docker daemon registry mirrors, insecure registries, auth entries, and daemon options.
+  - Talos discovery service image, ports, TLS certificate/key paths, and optional environment variables.
+
+Plan or deploy from the infra VM directory:
+
+```bash
+direnv exec . ../../scripts/deploy-infra-vm.sh --plan
+direnv exec . ../../scripts/deploy-infra-vm.sh
+```
+
+The infra VM flow expects a Debian cloud image, not an interactive Debian installer ISO. If the discovery service uses an internal CA, add that CA to each dependent cluster through `constants["network"]["cert_files"]` before generating Talos assets.
 
 ### Generate Talos assets
 
@@ -171,14 +214,31 @@ The asset generator renders that value into Talos `machine.env.http_proxy` and `
 - platform ingress hostnames from `platform_constants.tf` when present
 - any extra entries from `network.no_proxy_extra`
 
+For temporary private DNS workarounds, set `network.extra_host_entries`, for example:
+
+```hcl
+"extra_host_entries" = "192.0.2.10 infra.example.com"
+```
+
+This renders Talos `machine.network.extraHostEntries`; use DNS instead once available.
+
 When `network.proxy_url` is set, the generator also adds Talos kernel arguments for:
 
 - `talos.environment=http_proxy=...`
 - `talos.environment=https_proxy=...`
 
-The environment root CA should be declared with `root_ca_crt` in `k8s_net_constants.tf`; `gen-talos-assets.sh` will convert it into a Talos `TrustedRootsConfig` patch applied to every node. If you leave `root_ca_crt` empty in `ca_issuer` mode, Talos cannot trust an autogenerated CA during asset generation time and the script will skip that patch with a warning. If your environment also needs extra trusted certificates, set `network.cert_files` to one or more comma-separated PEM paths. This is useful for TLS-intercepting proxy CAs and other secondary trust anchors.
+The environment root CA should be declared with `root_ca_crt` in `k8s_net_constants.tf`; `gen-talos-assets.sh` will convert it into a Talos `TrustedRootsConfig` patch applied to every node. If `tls_source = "ca_issuer"` and both `root_ca_crt` and `root_ca_key` are set, `scripts/ensure-credentials.sh` creates the internal root CA in `certs/` when it is missing. If you leave `root_ca_crt` empty in `ca_issuer` mode, Talos cannot trust an autogenerated CA during asset generation time and the script will skip that patch with a warning. If your environment also needs extra trusted certificates, set `network.cert_files` to one or more comma-separated PEM paths. This is useful for TLS-intercepting proxy CAs and other secondary trust anchors.
 
-The generated machine patch disables Talos' external service discovery registry by default via `talos.discovery_service_disabled = "true"`, which avoids proxy-related `cluster.DiscoveryServiceController` errors in environments that don't need the public discovery service. Set it to `"false"` if you intentionally need Talos public discovery.
+The generated machine patch disables Talos' external service discovery registry by default via `talos.discovery_service_disabled = "true"`, which avoids proxy-related `cluster.DiscoveryServiceController` errors in environments that don't need the public discovery service. Set it to `"false"` if you intentionally need Talos public discovery or a private discovery endpoint.
+
+For a private discovery endpoint, set both:
+
+```hcl
+"discovery_service_disabled" = "false"
+"discovery_service_endpoint" = "https://talos-discovery.example.com"
+```
+
+The endpoint must be HTTPS. If the endpoint uses a private CA, include the issuing CA in `constants["network"]["cert_files"]` so Talos trusts it during first boot.
 
 When the public discovery service is disabled, the generated root workspace applies an early `system:talos-nodes` RBAC patch that grants Talos node identities `get`, `list`, and `watch` on Kubernetes `Node` resources. This keeps Talos' Kubernetes-backed discovery usable on modern Kubernetes releases where `system:node:*` identities are otherwise restricted from listing all nodes. The patch is applied immediately after the root workspace obtains `kubeconfig`, before the Talos cluster health gate.
 
@@ -511,7 +571,7 @@ When `grafana_auth_keycloak_realm` is set in `monitoring_constants.tf`, OpenTofu
 
 When `prometheus_auth_keycloak_realm` is set in `monitoring_constants.tf`, OpenTofu deploys an `oauth2-proxy` instance for Prometheus and protects the Prometheus ingress with ingress-nginx external auth annotations. The selected Keycloak realm must expose a confidential `prometheus` OIDC client with redirect URI `https://<prometheus-host>/oauth2/callback`. Use `prometheus_auth_allowed_groups` to restrict access.
 
-OpenTofu also exposes a separate Prometheus API ingress at `prometheus_api_hostname`, intended for external Grafana instances and other non-interactive clients. It reuses `prometheus_api_tls_secret_name` (by default the same TLS secret as the browser Prometheus ingress) and protects the endpoint with ingress-nginx Basic Auth. The generated service username is `prometheus-external`; the password is generated by OpenTofu and stored in the monitoring state.
+OpenTofu also exposes a separate Prometheus API ingress at `prometheus_api_hostname`, intended for external Grafana instances and other non-interactive clients. It reuses `prometheus_api_tls_secret_name` (by default the same TLS secret as the browser Prometheus ingress) and protects the endpoint with ingress-nginx Basic Auth. The service username is `prometheus-external`; the password and htpasswd hash are persisted in `secrets/credentials.json`.
 
 To deploy the monitoring stack:
 
@@ -528,7 +588,7 @@ https://prometheus.home.arpa
 https://prometheus-api.home.arpa
 ```
 
-Grafana admin and Prometheus API credentials are generated by OpenTofu. Retrieve them with:
+Grafana admin and Prometheus API credentials are persisted in `secrets/credentials.json` and exposed as sensitive outputs after deployment. Retrieve the applied values with:
 
 ```bash
 tofu -chdir=monitoring output -raw grafana_admin_user
@@ -538,7 +598,7 @@ tofu -chdir=monitoring output -raw prometheus_api_basic_auth_user
 tofu -chdir=monitoring output -raw prometheus_api_basic_auth_password
 ```
 
-Configure an external Grafana Prometheus datasource with URL `prometheus_api_url`, server-side/proxy access, Basic Auth enabled, user `prometheus-external`, and the generated password.
+Configure an external Grafana Prometheus datasource with URL `prometheus_api_url`, server-side/proxy access, Basic Auth enabled, user `prometheus-external`, and the persisted password.
 
 Grafana dashboards are provisioned from `monitoring/grafana/dashboards/*.json`. After adding or editing a dashboard, re-run the monitoring apply; the deployment script runs the dashboard sync job without restarting Grafana unless datasource or provisioning configuration changes require it.
 
@@ -589,7 +649,9 @@ Run with `-h` or `--help` to see help documentation. Common options:
 
 ```text
 --help            Show usage help.
---destroy         Destroy the cluster first and purge local state files.
+--destroy         Destroy the cluster first and purge local runtime workspaces under out/.
+--purge-credentials
+                  Also delete secrets/credentials.json and the generated internal root CA.
 --skip-ceph       Skip Rook Ceph operator/cluster/dashboard/CSI.
 --skip-k8s-net    Skip MetalLB, ingress-nginx, and cert-manager.
 --skip-identity   Skip Keycloak and its PostgreSQL database.
@@ -601,6 +663,8 @@ Run with `-h` or `--help` to see help documentation. Common options:
 --services-only   Skip Talos VM/root apply and deploy Kubernetes services only.
 ```
 
+Before deleting `out/` during a destroy flow, `deploy.sh` extracts reusable service credentials from existing local state into `secrets/credentials.json`. The file is kept unless `--purge-credentials` is passed.
+
 For faster iterative deploys after the Talos VMs and kubeconfig already exist, use:
 
 ```bash
@@ -609,12 +673,14 @@ For faster iterative deploys after the Talos VMs and kubeconfig already exist, u
 
 ### Inspect service URLs and credentials
 
-After deploying a cluster, use [`scripts/urls-and-credentials.sh`](scripts/urls-and-credentials.sh) to print the URLs and generated access credentials for installed services:
+After deploying a cluster, use [`scripts/urls-and-credentials.sh`](scripts/urls-and-credentials.sh) to print the URLs and access credentials for installed services:
 
 ```bash
 cd clusters/<cluster>
 ../../scripts/urls-and-credentials.sh
 ```
+
+`scripts/deploy.sh` also writes the same information after each successful deployment to `clusters/<cluster>/secrets/credentials_and_urls.md` in Markdown format, including the generation timestamp. The file contains sensitive values and is created with owner-only permissions.
 
 The script reports services that have local OpenTofu state under `out/*`, including Keycloak, Grafana, Prometheus, the Prometheus API endpoint credentials, Portainer, Rancher, Redpanda Console, and the Rook Ceph dashboard when installed. For Keycloak, it also prints each configured realm admin console URL, account URL, and whether enabled LDAP federations exist for that realm.
 
@@ -624,12 +690,18 @@ To show URLs and usernames without printing passwords:
 ../../scripts/urls-and-credentials.sh --hide-secrets
 ```
 
+To render Markdown manually:
+
+```bash
+../../scripts/urls-and-credentials.sh --markdown
+```
+
 Limitations:
 
 - Run it from `clusters/<cluster>`, not from the repository root or `clusters/sample`.
-- It reads generated values from local `out/*/terraform.tfstate`; services deployed outside this repository or without local state are skipped.
+- It reads reported values from local `out/*/terraform.tfstate`; persistent service credentials are sourced from `secrets/credentials.json` during deployment, but services deployed outside this repository or without local state are skipped.
 - The Rook Ceph dashboard NodePort URL and password require a readable `out/kubeconfig` and a reachable Kubernetes API.
-- The command prints sensitive values by default; use a trusted terminal or `--hide-secrets`.
+- The command prints sensitive values by default; use a trusted terminal or `--hide-secrets`. The generated `secrets/credentials_and_urls.md` file is sensitive for the same reason.
 
 ## References
 

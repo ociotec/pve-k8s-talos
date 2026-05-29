@@ -8,10 +8,6 @@ terraform {
       source  = "hashicorp/null"
       version = ">= 3.2.4"
     }
-    random = {
-      source  = "hashicorp/random"
-      version = ">= 3.8.1"
-    }
   }
 }
 
@@ -32,7 +28,12 @@ provider "kubernetes" {
 }
 
 locals {
-  configured_keycloak_realms = try(local.keycloak_realms, [])
+  cluster_credentials              = try(jsondecode(file("${path.module}/credentials.json")), {})
+  identity_credentials             = try(local.cluster_credentials.identity, {})
+  identity_oidc_client_secrets     = try(local.identity_credentials.oidc_client_secrets, {})
+  identity_postgres_password       = try(local.identity_credentials.postgres_password, "")
+  identity_keycloak_admin_password = try(local.identity_credentials.keycloak_admin_password, "")
+  configured_keycloak_realms       = try(local.keycloak_realms, [])
   keycloak_master_realm_settings = {
     save_user_events         = try(local.keycloak_master_realm_config.save_user_events, false)
     save_admin_events        = try(local.keycloak_master_realm_config.save_admin_events, false)
@@ -217,12 +218,16 @@ locals {
       }
     ]...
   )
+  missing_oidc_client_secret_keys = [
+    for key in keys(local.oidc_client_secret_requests) : key
+    if trimspace(try(local.identity_oidc_client_secrets[key], "")) == ""
+  ]
   keycloak_realm_definitions = [
     for realm in local.keycloak_realm_base_definitions : merge(realm, {
       oidc_clients = [
         for client in realm.oidc_clients : merge(client, {
           client_secret = client.access_type == "confidential" ? (
-            trimspace(client.client_secret) != "" ? client.client_secret : random_password.oidc_client_secret[format("%s/%s", realm.name, client.client_id)].result
+            trimspace(client.client_secret) != "" ? client.client_secret : try(local.identity_oidc_client_secrets[format("%s/%s", realm.name, client.client_id)], "")
           ) : ""
         })
       ]
@@ -378,28 +383,20 @@ check "oidc_client_login_groups" {
   }
 }
 
+check "identity_credentials" {
+  assert {
+    condition = var.skip_identity || !local.keycloak_enabled || (
+      trimspace(local.identity_postgres_password) != "" &&
+      trimspace(local.identity_keycloak_admin_password) != "" &&
+      length(local.missing_oidc_client_secret_keys) == 0
+    )
+    error_message = format("credentials.json must define identity.postgres_password, identity.keycloak_admin_password, and all generated OIDC client secrets. Missing OIDC secrets: %s", join(", ", local.missing_oidc_client_secret_keys))
+  }
+}
+
 resource "kubernetes_manifest" "identity_namespaces" {
   for_each = !var.skip_identity ? local.identity_namespaces_by_id : tomap({})
   manifest = each.value
-}
-
-resource "random_password" "postgres_password" {
-  count   = !var.skip_identity && local.keycloak_enabled ? 1 : 0
-  length  = local.postgres_password_length
-  special = false
-}
-
-resource "random_password" "keycloak_admin_password" {
-  count   = !var.skip_identity && local.keycloak_enabled ? 1 : 0
-  length  = local.keycloak_admin_password_length
-  special = false
-}
-
-resource "random_password" "oidc_client_secret" {
-  for_each = !var.skip_identity && local.keycloak_enabled ? local.oidc_client_secret_requests : tomap({})
-
-  length  = each.value.client_secret_length
-  special = false
 }
 
 resource "kubernetes_secret_v1" "keycloak_db" {
@@ -412,7 +409,7 @@ resource "kubernetes_secret_v1" "keycloak_db" {
 
   data = {
     username = local.keycloak_db_username
-    password = random_password.postgres_password[0].result
+    password = local.identity_postgres_password
     database = local.keycloak_db_name
   }
 
@@ -430,7 +427,7 @@ resource "kubernetes_secret_v1" "keycloak_admin" {
 
   data = {
     username = local.keycloak_admin_username
-    password = random_password.keycloak_admin_password[0].result
+    password = local.identity_keycloak_admin_password
   }
 
   type       = "Opaque"
@@ -521,7 +518,7 @@ output "keycloak_admin_user" {
 }
 
 output "keycloak_admin_password" {
-  value     = local.keycloak_enabled && !var.skip_identity ? random_password.keycloak_admin_password[0].result : null
+  value     = local.keycloak_enabled && !var.skip_identity ? local.identity_keycloak_admin_password : null
   sensitive = true
 }
 
@@ -556,18 +553,6 @@ output "keycloak_oidc_client_metadata" {
       }
     }
   } : {}
-}
-
-output "keycloak_oidc_client_secrets" {
-  value = local.keycloak_enabled && !var.skip_identity ? {
-    for realm in local.keycloak_realm_definitions :
-    realm.name => {
-      for client in realm.oidc_clients :
-      client.client_id => client.client_secret
-      if client.access_type == "confidential"
-    }
-  } : {}
-  sensitive = true
 }
 
 output "keycloak_realm_groups" {

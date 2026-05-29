@@ -1,0 +1,176 @@
+#cloud-config
+hostname: ${hostname}
+fqdn: ${fqdn}
+timezone: ${timezone}
+manage_etc_hosts: true
+package_update: ${package_update}
+package_upgrade: ${package_upgrade}
+apt:
+  conf: |
+%{ if apt_proxy != "" ~}
+    Acquire::http::Proxy "${apt_proxy}";
+    Acquire::https::Proxy "${apt_proxy}";
+%{ endif ~}
+%{ if user_gid != "" ~}
+bootcmd:
+  - [ sh, -c, 'if getent group ${username} >/dev/null; then gid="$(getent group ${username} | cut -d: -f3)"; [ "$gid" = "${user_gid}" ] || { echo "Group ${username} exists with gid $gid, expected ${user_gid}" >&2; exit 1; }; elif getent group ${user_gid} >/dev/null; then echo "GID ${user_gid} is already used by group $(getent group ${user_gid} | cut -d: -f1)" >&2; exit 1; else groupadd -g ${user_gid} ${username}; fi' ]
+%{ endif ~}
+packages:
+%{ for package in packages ~}
+  - ${package}
+%{ endfor ~}
+users:
+  - default
+  - name: ${username}
+%{ if user_uid != "" ~}
+    uid: ${user_uid}
+%{ endif ~}
+%{ if user_gid != "" ~}
+    primary_group: ${username}
+%{ endif ~}
+    groups:
+      - sudo
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+%{ if length(ssh_public_keys) > 0 ~}
+    ssh_authorized_keys:
+%{ for key in ssh_public_keys ~}
+      - ${key}
+%{ endfor ~}
+%{ endif ~}
+%{ if password_hash != "" ~}
+    lock_passwd: false
+    passwd: "${password_hash}"
+%{ else ~}
+    lock_passwd: true
+%{ endif ~}
+write_files:
+%{ for ca in trusted_ca_certificates ~}
+  - path: /usr/local/share/ca-certificates/${ca.name}
+    owner: root:root
+    permissions: "0644"
+    encoding: b64
+    content: ${base64encode(ca.content)}
+%{ endfor ~}
+%{ if docker_enabled && docker_daemon_json != "" ~}
+  - path: /tmp/pve-k8s-talos-docker-daemon.json
+    owner: root:root
+    permissions: "0644"
+    content: |
+      ${docker_daemon_json}
+%{ endif ~}
+%{ if docker_enabled && docker_auth_config_json != "" ~}
+  - path: /tmp/pve-k8s-talos-docker-config.json
+    owner: root:root
+    permissions: "0600"
+    content: |
+      ${docker_auth_config_json}
+%{ endif ~}
+%{ if discovery_enabled ~}
+  - path: /etc/bootstrap-services/talos-discovery/discovery.env
+    owner: root:root
+    permissions: "0600"
+    content: |
+%{ if discovery_env_file_content != "" ~}
+%{ for line in split("\n", discovery_env_file_content) ~}
+      ${line}
+%{ endfor ~}
+%{ endif ~}
+  - path: /etc/systemd/system/talos-discovery.service
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Talos discovery service
+      After=network-online.target docker.service
+      Wants=network-online.target docker.service
+
+      [Service]
+      Type=simple
+      Restart=always
+      RestartSec=5
+      ExecStartPre=-/usr/bin/docker rm -f talos-discovery
+      ExecStart=/usr/bin/docker run --rm --name talos-discovery --network host --pull=${discovery_pull_policy} --env-file /etc/bootstrap-services/talos-discovery/discovery.env -v /var/lib/talos-discovery:/var/discovery-service ${discovery_image}
+      ExecStop=/usr/bin/docker stop talos-discovery
+
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/nginx/sites-available/talos-discovery.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      server {
+        listen ${discovery_public_port} ssl http2;
+        server_name ${discovery_server_name};
+
+        ssl_certificate /etc/bootstrap-services/talos-discovery/tls.crt;
+        ssl_certificate_key /etc/bootstrap-services/talos-discovery/tls.key;
+        ssl_protocols TLSv1.2 TLSv1.3;
+
+        location / {
+          grpc_pass grpc://127.0.0.1:${discovery_grpc_port};
+          grpc_set_header Host $host;
+          grpc_set_header X-Real-IP $remote_addr;
+          grpc_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          grpc_set_header X-Forwarded-Proto https;
+        }
+      }
+%{ if discovery_tls_cert != "" ~}
+  - path: /etc/bootstrap-services/talos-discovery/tls.crt
+    owner: root:root
+    permissions: "0644"
+    encoding: b64
+    content: ${base64encode(discovery_tls_cert)}
+%{ endif ~}
+%{ if discovery_tls_key != "" ~}
+  - path: /etc/bootstrap-services/talos-discovery/tls.key
+    owner: root:root
+    permissions: "0600"
+    encoding: b64
+    content: ${base64encode(discovery_tls_key)}
+%{ endif ~}
+%{ endif ~}
+runcmd:
+%{ if length(trusted_ca_certificates) > 0 ~}
+  - update-ca-certificates
+%{ endif ~}
+  - systemctl enable --now qemu-guest-agent
+%{ if docker_enabled ~}
+  - mkdir -p /etc/docker /root/.docker
+%{ if docker_daemon_json != "" ~}
+  - install -m 0644 /tmp/pve-k8s-talos-docker-daemon.json /etc/docker/daemon.json
+%{ endif ~}
+%{ if docker_auth_config_json != "" ~}
+  - install -m 0600 /tmp/pve-k8s-talos-docker-config.json /root/.docker/config.json
+%{ endif ~}
+  - systemctl enable --now docker
+  - usermod -aG docker ${username}
+%{ if docker_daemon_json != "" ~}
+  - systemctl restart docker
+%{ endif ~}
+%{ endif ~}
+%{ if discovery_enabled ~}
+  - mkdir -p /etc/bootstrap-services/talos-discovery /var/lib/talos-discovery
+  - |
+    if [ ! -s /etc/bootstrap-services/talos-discovery/tls.crt ] || [ ! -s /etc/bootstrap-services/talos-discovery/tls.key ]; then
+      openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+        -keyout /etc/bootstrap-services/talos-discovery/tls.key \
+        -out /etc/bootstrap-services/talos-discovery/tls.crt \
+        -subj "/CN=${discovery_server_name}" \
+        -addext "subjectAltName=DNS:${discovery_server_name}"
+      chmod 600 /etc/bootstrap-services/talos-discovery/tls.key
+    fi
+  - rm -f /etc/nginx/sites-enabled/default
+  - ln -sfn /etc/nginx/sites-available/talos-discovery.conf /etc/nginx/sites-enabled/talos-discovery.conf
+  - nginx -t
+  - systemctl enable --now nginx
+  - systemctl enable --now talos-discovery
+%{ endif ~}
+  - touch /var/lib/cloud/instance/pve-k8s-talos-infra-vm.done
+%{ if reboot_after_provisioning ~}
+power_state:
+  mode: reboot
+  message: Rebooting after bootstrap VM provisioning
+  timeout: 60
+  condition: true
+%{ endif ~}

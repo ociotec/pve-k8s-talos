@@ -19,6 +19,7 @@ ${vip_section}
           - network: 0.0.0.0/0
             gateway: ${gateway}
     nameservers: [${dns_servers_section}]
+${extra_host_entries_section}
   time:
     servers: [${ntp_servers_section}]
   kubelet:
@@ -28,5 +29,7 @@ ${machine_registries_section}
 cluster:
   discovery:
     registries:
+      kubernetes:
+        disabled: false
       service:
-        disabled: ${talos_discovery_service_disabled}
+${talos_discovery_service_section}

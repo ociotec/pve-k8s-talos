@@ -204,12 +204,14 @@ disable_ipv6="$(awk -F'"' '/"disable_ipv6"/ { print $4; exit }' "${constants_pat
 talos_version="$(awk -F'"' '/"version"/ { print $4; exit }' "${constants_path}")"
 talos_factory_image_id="$(awk -F'"' '/"factory_image_id"/ { print $4; exit }' "${constants_path}")"
 talos_discovery_service_disabled="$(awk -F'"' '/"discovery_service_disabled"/ { print $4; exit }' "${constants_path}")"
+talos_discovery_service_endpoint="$(awk -F'"' '/"discovery_service_endpoint"/ { print $4; exit }' "${constants_path}")"
 talos_max_pods="$(awk -F'"' '/"max_pods"/ { print $4; exit }' "${constants_path}")"
 controlplane_vip="$(awk -F'"' '/"controlplane_vip"/ { print $4; exit }' "${constants_path}")"
 disk_by_id_prefix="$(awk -F'"' '/"disk_by_id_prefix"/ { print $4; exit }' "${constants_path}")"
 proxy_url="$(awk -F'"' '/"proxy_url"/ { print $4; exit }' "${constants_path}")"
 no_proxy_extra="$(awk -F'"' '/"no_proxy_extra"/ { print $4; exit }' "${constants_path}")"
 cert_files_raw="$(awk -F'"' '/"cert_files"/ { print $4; exit }' "${constants_path}")"
+extra_host_entries_raw="$(awk -F'"' '/"extra_host_entries"/ { print $4; exit }' "${constants_path}")"
 legacy_proxy_ca_path="$(awk -F'"' '/"proxy_ca_path"/ { print $4; exit }' "${constants_path}")"
 
 if [[ -z "${net_size}" || -z "${gateway}" || -z "${dns_servers}" ]]; then
@@ -461,8 +463,10 @@ network_cidr_from_ip() {
 proxy_url="$(trim "${proxy_url}")"
 no_proxy_extra="$(trim "${no_proxy_extra}")"
 cert_files_raw="$(trim "${cert_files_raw}")"
+extra_host_entries_raw="$(trim "${extra_host_entries_raw}")"
 legacy_proxy_ca_path="$(trim "${legacy_proxy_ca_path}")"
 talos_discovery_service_disabled="$(trim "${talos_discovery_service_disabled}")"
+talos_discovery_service_endpoint="$(trim "${talos_discovery_service_endpoint}")"
 talos_max_pods="$(trim "${talos_max_pods}")"
 
 if [[ -n "${proxy_url}" && ! "${proxy_url}" =~ ^https?:// ]]; then
@@ -480,6 +484,19 @@ case "${talos_discovery_service_disabled,,}" in
     exit 1
     ;;
 esac
+
+if [[ -n "${talos_discovery_service_endpoint}" ]]; then
+  if [[ ! "${talos_discovery_service_endpoint}" =~ ^https:// ]]; then
+    echo "Error: talos.discovery_service_endpoint must start with https:// (got ${talos_discovery_service_endpoint})." >&2
+    echo "Fix: set discovery_service_endpoint to the private HTTPS discovery URL, or leave it empty." >&2
+    exit 1
+  fi
+  if [[ "${talos_discovery_service_disabled,,}" == "true" ]]; then
+    echo "Error: talos.discovery_service_endpoint is set while talos.discovery_service_disabled is true." >&2
+    echo "Fix: set discovery_service_disabled to \"false\" when using a private discovery endpoint." >&2
+    exit 1
+  fi
+fi
 
 if [[ -n "${talos_max_pods}" ]]; then
   if [[ ! "${talos_max_pods}" =~ ^[0-9]+$ ]]; then
@@ -499,6 +516,48 @@ fi
 
 if [[ -z "${cert_files_raw}" && -n "${legacy_proxy_ca_path}" ]]; then
   cert_files_raw="${legacy_proxy_ca_path}"
+fi
+
+extra_host_entries_section=""
+if [[ -n "${extra_host_entries_raw}" ]]; then
+  IFS=',' read -ra extra_host_entries <<< "${extra_host_entries_raw}"
+  for entry in "${extra_host_entries[@]}"; do
+    entry="$(trim "${entry}")"
+    if [[ -z "${entry}" ]]; then
+      continue
+    fi
+    read -ra entry_parts <<< "${entry}"
+    if [[ ${#entry_parts[@]} -lt 2 ]]; then
+      echo "Error: network.extra_host_entries entry must be 'IP hostname [alias...]' (got ${entry})." >&2
+      echo "Fix: set entries like \"10.122.41.223 infra.beta.gcs.gmv.es\" separated by commas." >&2
+      exit 1
+    fi
+    host_ip="${entry_parts[0]}"
+    if ! ipv4_to_int "${host_ip}" >/dev/null 2>&1; then
+      echo "Error: network.extra_host_entries has invalid IPv4 address: ${host_ip}" >&2
+      echo "Fix: use a valid IPv4 address followed by one or more hostnames." >&2
+      exit 1
+    fi
+    extra_host_entries_section+=$'\n    - ip: "'"$(yaml_escape "${host_ip}")"$'"'
+    extra_host_entries_section+=$'\n      aliases:'
+    for ((idx = 1; idx < ${#entry_parts[@]}; idx++)); do
+      alias="${entry_parts[${idx}]}"
+      if [[ ! "${alias}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+        echo "Error: network.extra_host_entries has invalid hostname/alias: ${alias}" >&2
+        echo "Fix: use DNS-like hostnames without spaces or URL schemes." >&2
+        exit 1
+      fi
+      extra_host_entries_section+=$'\n        - "'"$(yaml_escape "${alias}")"$'"'
+    done
+  done
+  if [[ -n "${extra_host_entries_section}" ]]; then
+    extra_host_entries_section=$'\n    extraHostEntries:'"${extra_host_entries_section}"
+  fi
+fi
+
+talos_discovery_service_section="        disabled: ${talos_discovery_service_disabled,,}"
+if [[ -n "${talos_discovery_service_endpoint}" ]]; then
+  talos_discovery_service_section+=$'\n        endpoint: "'"$(yaml_escape "${talos_discovery_service_endpoint}")"$'"'
 fi
 
 registry_skip_fallback="true"
@@ -617,8 +676,8 @@ fi
 template="$(cat "${template_path}")"
 
 # Basic template sanity check.
-if [[ "${template}" != *'${ip}'* || "${template}" != *'${cidr}'* || "${template}" != *'${vip_section}'* || "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${kubelet_extra_args_section}'* || "${template}" != *'${machine_registries_section}'* || "${template}" != *'${k8s_node_labels_section}'* || "${template}" != *'${proxy_env_section}'* || "${template}" != *'${cert_files_section}'* || "${template}" != *'${grub_use_uki_cmdline_section}'* || "${template}" != *'${talos_discovery_service_disabled}'* ]]; then
-  echo "Error: template is missing required placeholders (\${ip}, \${cidr}, \${vip_section}, \${machine_disks_section}, \${kubelet_extra_mounts_section}, \${kubelet_extra_args_section}, \${machine_registries_section}, \${k8s_node_labels_section}, \${proxy_env_section}, \${cert_files_section}, \${grub_use_uki_cmdline_section}, \${talos_discovery_service_disabled})." >&2
+if [[ "${template}" != *'${ip}'* || "${template}" != *'${cidr}'* || "${template}" != *'${vip_section}'* || "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${kubelet_extra_args_section}'* || "${template}" != *'${machine_registries_section}'* || "${template}" != *'${k8s_node_labels_section}'* || "${template}" != *'${proxy_env_section}'* || "${template}" != *'${cert_files_section}'* || "${template}" != *'${grub_use_uki_cmdline_section}'* || "${template}" != *'${talos_discovery_service_section}'* || "${template}" != *'${extra_host_entries_section}'* ]]; then
+  echo "Error: template is missing required placeholders (\${ip}, \${cidr}, \${vip_section}, \${machine_disks_section}, \${kubelet_extra_mounts_section}, \${kubelet_extra_args_section}, \${machine_registries_section}, \${k8s_node_labels_section}, \${proxy_env_section}, \${cert_files_section}, \${grub_use_uki_cmdline_section}, \${talos_discovery_service_section}, \${extra_host_entries_section})." >&2
   echo "Fix: restore patches/machine.template.yaml or add the missing placeholders." >&2
   exit 1
 fi
@@ -832,8 +891,13 @@ if [[ -n "${proxy_url}" ]]; then
 
   add_no_proxy_entry "localhost"
   add_no_proxy_entry "127.0.0.1"
+  add_no_proxy_entry "0.0.0.0"
   add_no_proxy_entry "::1"
   add_no_proxy_entry "${gateway}"
+  add_no_proxy_entry "${controlplane_vip}"
+  if [[ -n "${talos_discovery_service_endpoint}" ]]; then
+    add_no_proxy_entry "$(registry_host_from_url "${talos_discovery_service_endpoint}")"
+  fi
   add_no_proxy_entry "${local_network_cidr}"
 
   while IFS= read -r value; do
@@ -952,6 +1016,8 @@ if [[ -n "${proxy_url}" ]]; then
     fi
     no_proxy_value+="${value}"
   done
+
+  kernel_args+=("talos.environment=no_proxy=${no_proxy_value}")
 
   proxy_env_section=$'\n'
   proxy_env_section+=$'    http_proxy: "'"$(yaml_escape "${proxy_url}")"$'"\n'
@@ -1411,6 +1477,7 @@ for name in "${!vm_ips[@]}"; do
   rendered="${rendered//'${vip_section}'/${vip_section}}"
   rendered="${rendered//'${gateway}'/${gateway}}"
   rendered="${rendered//'${dns_servers_section}'/${dns_servers_section}}"
+  rendered="${rendered//'${extra_host_entries_section}'/${extra_host_entries_section}}"
   rendered="${rendered//'${ntp_servers_section}'/${ntp_servers_section}}"
   rendered="${rendered//'${grub_use_uki_cmdline_section}'/${grub_use_uki_cmdline_section}}"
   rendered="${rendered//'${extra_kernel_args_section}'/${extra_kernel_args_section}}"
@@ -1421,7 +1488,7 @@ for name in "${!vm_ips[@]}"; do
   rendered="${rendered//'${k8s_node_labels_section}'/${k8s_node_labels_section}}"
   rendered="${rendered//'${proxy_env_section}'/${proxy_env_section}}"
   rendered="${rendered//'${cert_files_section}'/${cert_files_section}}"
-  rendered="${rendered//'${talos_discovery_service_disabled}'/${talos_discovery_service_disabled,,}}"
+  rendered="${rendered//'${talos_discovery_service_section}'/${talos_discovery_service_section}}"
   out_path="${patch_dir}/machine-${name}.yaml"
   printf "%s\n" "${rendered}" > "${out_path}"
   echo "wrote ${out_path}"

@@ -12,10 +12,6 @@ terraform {
       source  = "hashicorp/null"
       version = ">= 3.2.4"
     }
-    random = {
-      source  = "hashicorp/random"
-      version = ">= 3.8.1"
-    }
   }
 }
 
@@ -48,6 +44,10 @@ provider "kubernetes" {
 }
 
 locals {
+  cluster_credentials                    = try(jsondecode(file("${path.module}/credentials.json")), {})
+  platform_credentials                   = try(local.cluster_credentials.platform, {})
+  platform_portainer_admin_password      = try(local.platform_credentials.portainer_admin_password, "")
+  platform_rancher_bootstrap_password    = try(local.platform_credentials.rancher_bootstrap_password, "")
   rancher_enabled                        = trimspace(local.rancher_hostname) != ""
   rancher_hostname_value                 = local.rancher_hostname
   rancher_tls_secret_name_value          = local.rancher_tls_secret_name
@@ -87,11 +87,8 @@ locals {
     data.terraform_remote_state.identity[0].outputs.keycloak_oidc_client_metadata,
     {}
   ) : {}
-  identity_oidc_secrets = local.identity_auth_enabled ? try(
-    data.terraform_remote_state.identity[0].outputs.keycloak_oidc_client_secrets,
-    {}
-  ) : {}
-  available_identity_realms = keys(local.identity_oidc_metadata)
+  identity_oidc_client_secrets = try(local.cluster_credentials.identity.oidc_client_secrets, {})
+  available_identity_realms    = keys(local.identity_oidc_metadata)
   rancher_oidc_issuer = local.rancher_auth_enabled ? try(
     local.identity_oidc_metadata[local.rancher_auth_keycloak_realm_value].issuer_url,
     ""
@@ -101,7 +98,7 @@ locals {
     ""
   ) : ""
   rancher_oidc_client_secret = local.rancher_auth_enabled ? try(
-    local.identity_oidc_secrets[local.rancher_auth_keycloak_realm_value]["rancher"],
+    local.identity_oidc_client_secrets[format("%s/rancher", local.rancher_auth_keycloak_realm_value)],
     ""
   ) : ""
   rancher_oidc_auth_endpoint        = local.rancher_oidc_issuer != "" ? format("%s/protocol/openid-connect/auth", local.rancher_oidc_issuer) : ""
@@ -132,7 +129,7 @@ locals {
     ""
   ) : ""
   portainer_oidc_client_secret = local.portainer_auth_enabled ? try(
-    local.identity_oidc_secrets[local.portainer_auth_keycloak_realm_value]["portainer"],
+    local.identity_oidc_client_secrets[format("%s/portainer", local.portainer_auth_keycloak_realm_value)],
     ""
   ) : ""
   portainer_oidc_auth_endpoint        = local.portainer_oidc_issuer != "" ? format("%s/protocol/openid-connect/auth", local.portainer_oidc_issuer) : ""
@@ -775,6 +772,16 @@ check "portainer_auth_identity_outputs" {
   }
 }
 
+check "platform_credentials" {
+  assert {
+    condition = var.skip_platform || (
+      trimspace(local.platform_portainer_admin_password) != "" &&
+      (!local.rancher_enabled || trimspace(local.platform_rancher_bootstrap_password) != "")
+    )
+    error_message = "credentials.json must define platform.portainer_admin_password and platform.rancher_bootstrap_password when Rancher is enabled."
+  }
+}
+
 resource "kubernetes_manifest" "platform_namespaces" {
   for_each = { for i, m in local.platform_namespaces : i => m }
   manifest = each.value
@@ -827,12 +834,6 @@ resource "kubernetes_secret_v1" "preissued_tls" {
   depends_on = [kubernetes_manifest.platform_namespaces]
 }
 
-resource "random_password" "portainer_admin" {
-  count   = !var.skip_platform ? 1 : 0
-  length  = local.portainer_admin_password_length_value
-  special = false
-}
-
 resource "kubernetes_secret_v1" "portainer_admin" {
   count = !var.skip_platform ? 1 : 0
 
@@ -842,7 +843,7 @@ resource "kubernetes_secret_v1" "portainer_admin" {
   }
 
   data = {
-    password = random_password.portainer_admin[0].result
+    password = local.platform_portainer_admin_password
   }
 
   type       = "Opaque"
@@ -963,7 +964,7 @@ resource "local_sensitive_file" "portainer_oauth_configure" {
   file_permission = "0700"
   content = templatefile("${path.module}/configure-portainer-oauth.sh.tftpl", {
     kubeconfig_path                       = abspath("${path.module}/${var.kubeconfig_path}")
-    portainer_auth_body                   = jsonencode({ username = "admin", password = random_password.portainer_admin[0].result })
+    portainer_auth_body                   = jsonencode({ username = "admin", password = local.platform_portainer_admin_password })
     portainer_oauth_payload               = jsonencode(local.portainer_oauth_payload)
     portainer_default_team_name_json      = jsonencode(local.portainer_auth_default_team_name_value)
     portainer_default_team_role_id_string = tostring(local.portainer_auth_default_team_role_id_value)
@@ -988,12 +989,6 @@ resource "null_resource" "portainer_oauth_configure" {
   ]
 }
 
-resource "random_password" "rancher_bootstrap" {
-  count   = !var.skip_platform && local.rancher_enabled ? 1 : 0
-  length  = local.rancher_bootstrap_length_value
-  special = false
-}
-
 resource "kubernetes_secret_v1" "rancher_bootstrap" {
   count = !var.skip_platform && local.rancher_enabled ? 1 : 0
 
@@ -1003,7 +998,7 @@ resource "kubernetes_secret_v1" "rancher_bootstrap" {
   }
 
   data = {
-    bootstrapPassword = random_password.rancher_bootstrap[0].result
+    bootstrapPassword = local.platform_rancher_bootstrap_password
   }
 
   type       = "Opaque"
@@ -1046,7 +1041,7 @@ output "portainer_url" {
 }
 
 output "portainer_admin_password" {
-  value     = var.skip_platform ? null : random_password.portainer_admin[0].result
+  value     = var.skip_platform ? null : local.platform_portainer_admin_password
   sensitive = true
 }
 
@@ -1059,6 +1054,6 @@ output "rancher_url" {
 }
 
 output "rancher_bootstrap_password" {
-  value     = local.rancher_enabled && !var.skip_platform ? random_password.rancher_bootstrap[0].result : null
+  value     = local.rancher_enabled && !var.skip_platform ? local.platform_rancher_bootstrap_password : null
   sensitive = true
 }

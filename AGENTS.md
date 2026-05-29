@@ -7,7 +7,7 @@ It complements `README.md` and focuses on execution behavior, change safety, and
 
 - Treat this as an infrastructure repository for Talos + Kubernetes + Rook Ceph + monitoring on Proxmox VE.
 - Prefer safe, incremental changes over broad refactors.
-- Keep cluster-specific data under `clusters/<cluster>/` and reusable logic in top-level modules/scripts.
+- Keep cluster-specific data under `clusters/<cluster>/`, shared bootstrap VM targets under `infra-vms/<name>/`, and reusable logic in top-level modules/scripts.
 
 ## Repository Mental Model
 
@@ -148,7 +148,9 @@ For any non-trivial change:
 
 - Never commit real secrets or private keys.
 - Keep cert files under `clusters/<cluster>/certs/` and out of version control unless explicitly intended.
-- Do not use real private URLs, private domains, internal hostnames, or private IPs in documentation, `clusters/sample`, shared modules, scripts, templates, or any other versioned repository content. Use reserved/example values instead (`example.com`, `example.net`, `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`). Real private endpoints are only allowed in ignored files under real cluster directories such as `clusters/<cluster>/`.
+- Real cluster service credentials live in `clusters/<cluster>/secrets/credentials.json` and are intentionally outside `out/` so purging generated workspaces does not rotate passwords or OIDC client secrets. Use `scripts/extract-credentials-from-state.sh` to recover this file from existing local state before deleting `out/`. Do not print secret values. Do not delete this file or generated internal root CA files under `certs/` unless the user explicitly requests credential rotation or uses `scripts/deploy.sh --purge-credentials` with a destroy flow.
+- `clusters/<cluster>/secrets/credentials_and_urls.md` is generated after deployment and contains service URLs plus credentials. Treat it as sensitive and do not print its secret values.
+- Do not use real private URLs, private domains, internal hostnames, or private IPs in documentation, `clusters/sample`, `infra-vms/sample`, shared modules, scripts, templates, or any other versioned repository content. Use reserved/example values instead (`example.com`, `example.net`, `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`). Real private endpoints are only allowed in ignored files under real cluster or infra VM directories such as `clusters/<cluster>/` and `infra-vms/<name>/`.
 - Do not edit `clusters/sample` as if it were an active cluster runtime; use it as template/reference.
 - Prefer additive, reversible edits; call out destructive implications explicitly.
 
@@ -192,7 +194,8 @@ For any non-trivial change:
 ## Cluster Directory Hygiene
 
 - Each real cluster must have its own dedicated directory under `clusters/<cluster>/`.
-- Real cluster directories are local runtime data and should not be committed to Git.
+- Real cluster directories and real infra VM directories are local runtime data and should not be committed to Git.
+- Keep `infra-vms/sample/` as the versioned reference for bootstrap VMs.
 - Keep per-cluster constants files as small as possible:
   - only cluster-specific values
   - no duplicated defaults that already exist in shared modules/templates

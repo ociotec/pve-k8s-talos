@@ -29,6 +29,10 @@ constants = {
     # The main cluster root CA should be set with root_ca_crt in k8s_net_constants.tf.
     # Example: "./certs/company-proxy-ca.pem,./certs/internal-root-ca.pem"
     "cert_files" = ""
+    # Optional comma-separated static host entries rendered into Talos
+    # machine.network.extraHostEntries. Each entry is "IP hostname [alias...]".
+    # Example: "192.0.2.10 infra.example.com"
+    "extra_host_entries" = ""
     # Proxmox bridge device name (example: vmbr0).
     "bridge_device" = "vmbr0"
     # Leave empty to disable
@@ -70,8 +74,11 @@ constants = {
     #   "password"         = ""
     # }
     # Disable Talos public discovery service by default. Set to "false" if you
-    # explicitly want the external discovery registry (for example with KubeSpan).
+    # explicitly want the external discovery registry or a private endpoint.
     "discovery_service_disabled" = "true"
+    # Optional private Talos discovery service endpoint. When set, this must be
+    # HTTPS and discovery_service_disabled must be "false".
+    "discovery_service_endpoint" = ""
   }
   "k8s" = {
     "labels" = {}
