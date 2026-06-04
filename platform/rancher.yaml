@@ -6,7 +6,7 @@ metadata:
   name: rancher-critical
   labels: 
     app: rancher
-    chart: rancher-2.14.1
+    chart: rancher-${rancher_version}
     heritage: Helm
     release: rancher
 value: 1000000000
@@ -21,7 +21,7 @@ metadata:
   labels:
     app: rancher
     app.kubernetes.io/part-of: rancher
-    chart: rancher-2.14.1
+    chart: rancher-${rancher_version}
     heritage: Helm
     release: rancher
 ---
@@ -32,7 +32,7 @@ metadata:
   name: rancher-config
   labels: 
     app: rancher
-    chart: rancher-2.14.1
+    chart: rancher-${rancher_version}
     heritage: Helm
     release: rancher
     app.kubernetes.io/part-of: "rancher"
@@ -46,7 +46,7 @@ metadata:
   name: rancher
   labels:
     app: rancher
-    chart: rancher-2.14.1
+    chart: rancher-${rancher_version}
     heritage: Helm
     release: rancher
 subjects:
@@ -65,7 +65,7 @@ metadata:
   name: rancher
   labels:
     app: rancher
-    chart: rancher-2.14.1
+    chart: rancher-${rancher_version}
     heritage: Helm
     release: rancher
     app.kubernetes.io/part-of: rancher
@@ -89,7 +89,7 @@ metadata:
   name: rancher-internal
   labels:
     app: rancher
-    chart: rancher-2.14.1
+    chart: rancher-${rancher_version}
     heritage: Helm
     release: rancher
     app.kubernetes.io/part-of: rancher
@@ -111,7 +111,7 @@ metadata:
   annotations:
   labels:
     app: rancher
-    chart: rancher-2.14.1
+    chart: rancher-${rancher_version}
     heritage: Helm
     release: rancher
     app.kubernetes.io/part-of: rancher
@@ -160,7 +160,7 @@ spec:
           effect: "NoSchedule"
           operator: "Equal"
       containers:
-      - image: "rancher/rancher:v2.14.1"
+      - image: "rancher/rancher:v${rancher_version}"
         imagePullPolicy: IfNotPresent
         name: rancher
         ports:
@@ -238,7 +238,7 @@ metadata:
   name: rancher
   labels:
     app: rancher
-    chart: rancher-2.14.1
+    chart: rancher-${rancher_version}
     heritage: Helm
     release: rancher
   annotations:

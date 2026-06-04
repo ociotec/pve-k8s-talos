@@ -52,6 +52,7 @@ locals {
   rancher_hostname_value                 = local.rancher_hostname
   rancher_tls_secret_name_value          = local.rancher_tls_secret_name
   rancher_replicas_value                 = local.rancher_replicas
+  rancher_version_value                  = try(local.rancher_version, "2.14.1")
   rancher_cpu_request_value              = try(local.rancher_cpu_request, "200m")
   rancher_cpu_limit_value                = try(local.rancher_cpu_limit, "1")
   rancher_mem_request_value              = try(local.rancher_mem_request, "2560Mi")
@@ -202,6 +203,7 @@ locals {
     for doc in split("\n---\n", templatefile("${path.module}/rancher.yaml", {
       rancher_hostname    = local.rancher_hostname_value
       rancher_replicas    = tostring(local.rancher_replicas_value)
+      rancher_version     = tostring(local.rancher_version_value)
       rancher_cpu_request = local.rancher_cpu_request_value
       rancher_cpu_limit   = local.rancher_cpu_limit_value
       rancher_mem_request = local.rancher_mem_request_value
