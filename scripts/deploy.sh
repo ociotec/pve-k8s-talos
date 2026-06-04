@@ -700,6 +700,7 @@ prepare_kafka_workspace() {
     link_into_workspace "${repo_root}/kafka/.terraform" "${workspace}/.terraform"
   fi
   link_into_workspace "${repo_root}/kafka/main.tf" "${workspace}/main.tf"
+  link_into_workspace "${repo_root}/kafka/redpanda.yaml" "${workspace}/redpanda.yaml"
   link_into_workspace "${cluster_kafka_constants_path}" "${workspace}/constants.tf"
   link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/k8s_net_constants.tf"
   link_into_workspace "${cluster_vms_path}" "${workspace}/vms.auto.tfvars"

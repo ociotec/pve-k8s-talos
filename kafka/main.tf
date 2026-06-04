@@ -408,6 +408,392 @@ locals {
     for group_name in local.redpanda_console_auth_allowed_groups_value : group_name
     if !contains(keys(try(local.identity_realm_groups[local.redpanda_console_auth_keycloak_realm_value], {})), group_name)
   ] : []
+  broker_seed_servers_script_block = join("\n", [
+    for line in split("\n", chomp(local.broker_seed_servers_yaml)) : "                ${line}"
+  ])
+  broker_bootstrap_yaml_block = join("\n", [
+    for line in split("\n", local.broker_bootstrap_yaml) : "                ${line}"
+  ])
+  console_config_yaml_block = join("\n", [
+    for line in split("\n", local.console_config) : "    ${line}"
+  ])
+  console_ingress_auth_annotations_yaml = local.redpanda_console_auth_enabled ? join("\n", [
+    "    nginx.ingress.kubernetes.io/auth-url: http://${local.redpanda_resource_name_value}-console-oauth2-proxy.${local.redpanda_namespace_value}.svc.cluster.local:4180/oauth2/auth",
+    "    nginx.ingress.kubernetes.io/auth-signin: https://$host/oauth2/start?rd=$escaped_request_uri",
+    "    nginx.ingress.kubernetes.io/auth-response-headers: Authorization,X-Auth-Request-Access-Token,X-Auth-Request-User,X-Auth-Request-Email,X-Auth-Request-Groups",
+  ]) : ""
+  broker_persistent_volumes_section = join("\n---\n", [
+    for broker_id in local.broker_ids : yamlencode({
+      apiVersion = "v1"
+      kind       = "PersistentVolume"
+      metadata = {
+        name = format("%s-data-%d", local.redpanda_resource_name_value, broker_id)
+        labels = {
+          app                                          = local.redpanda_resource_name_value
+          (local.redpanda_broker_k8s_annotation_value) = tostring(broker_id)
+        }
+      }
+      spec = {
+        capacity = {
+          storage = local.broker_data_disk_capacity_by_id[tostring(broker_id)]
+        }
+        accessModes                   = ["ReadWriteOnce"]
+        persistentVolumeReclaimPolicy = "Retain"
+        storageClassName              = local.redpanda_storage_class_name_value
+        volumeMode                    = "Filesystem"
+        local = {
+          path = local.redpanda_broker_data_host_path_value
+        }
+        claimRef = {
+          namespace = local.redpanda_namespace_value
+          name      = format("datadir-%s-%d", local.redpanda_resource_name_value, broker_id)
+        }
+        nodeAffinity = {
+          required = {
+            nodeSelectorTerms = [
+              {
+                matchExpressions = [
+                  {
+                    key      = "kubernetes.io/hostname"
+                    operator = "In"
+                    values   = [local.broker_vms_by_id[tostring(broker_id)].name]
+                  },
+                ]
+              },
+            ]
+          }
+        }
+      }
+    })
+  ])
+  console_certificate_section = local.tls_source_value == "ca_issuer" ? yamlencode({
+    apiVersion = "cert-manager.io/v1"
+    kind       = "Certificate"
+    metadata = {
+      name      = "${local.redpanda_resource_name_value}-console-ingress-cert"
+      namespace = local.redpanda_namespace_value
+    }
+    spec = {
+      secretName = local.redpanda_console_tls_secret_name_value
+      issuerRef = {
+        name = "root-ca"
+        kind = "ClusterIssuer"
+      }
+      dnsNames = [
+        local.redpanda_console_hostname_value,
+      ]
+    }
+  }) : ""
+  console_oauth2_proxy_section = local.redpanda_console_auth_enabled ? join("\n---\n", [
+    yamlencode({
+      apiVersion = "apps/v1"
+      kind       = "Deployment"
+      metadata = {
+        name      = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+        namespace = local.redpanda_namespace_value
+        labels = {
+          app                         = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+          "app.kubernetes.io/part-of" = "redpanda"
+        }
+      }
+      spec = {
+        replicas = 1
+        selector = {
+          matchLabels = {
+            app = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+          }
+        }
+        template = {
+          metadata = {
+            labels = {
+              app                         = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+              "app.kubernetes.io/part-of" = "redpanda"
+            }
+          }
+          spec = {
+            priorityClassName = local.redpanda_console_oauth2_proxy_priority_class_name_value
+            securityContext = {
+              runAsNonRoot = true
+              runAsUser    = 65532
+              runAsGroup   = 65532
+              seccompProfile = {
+                type = "RuntimeDefault"
+              }
+            }
+            containers = [
+              {
+                name            = "oauth2-proxy"
+                image           = "quay.io/oauth2-proxy/oauth2-proxy:${local.redpanda_console_oauth2_proxy_image_tag_value}"
+                imagePullPolicy = "IfNotPresent"
+                args = concat([
+                  "--http-address=0.0.0.0:4180",
+                  "--provider=keycloak-oidc",
+                  "--oidc-issuer-url=${local.redpanda_console_oidc_issuer}",
+                  "--client-id=${local.redpanda_console_oidc_client_id}",
+                  "--redirect-url=${local.redpanda_console_oauth_redirect_uri}",
+                  "--email-domain=*",
+                  "--scope=openid profile email",
+                  "--code-challenge-method=S256",
+                  "--reverse-proxy=true",
+                  "--set-xauthrequest=true",
+                  "--skip-provider-button=true",
+                  "--cookie-name=${local.redpanda_console_oauth2_proxy_cookie_name_value}",
+                  "--cookie-secure=true",
+                  "--cookie-samesite=lax",
+                  "--upstream=static://202",
+                  "--backend-logout-url=${local.redpanda_console_oauth_backend_logout_url}",
+                ], [
+                  for group_name in local.redpanda_console_auth_effective_allowed_groups : "--allowed-group=${group_name}"
+                ], [
+                  for trusted_proxy_ip in local.redpanda_console_oauth2_proxy_trusted_proxy_ips_value : "--trusted-proxy-ip=${trusted_proxy_ip}"
+                ], local.redpanda_console_auth_ca_enabled ? [
+                  "--provider-ca-file=/run/secrets/redpanda-console-oauth-ca/ca.crt",
+                  "--use-system-trust-store=true",
+                ] : [])
+                env = [
+                  {
+                    name = "OAUTH2_PROXY_CLIENT_SECRET"
+                    valueFrom = {
+                      secretKeyRef = {
+                        name = local.redpanda_console_oauth_secret_name_value
+                        key  = "client-secret"
+                      }
+                    }
+                  },
+                  {
+                    name = "OAUTH2_PROXY_COOKIE_SECRET"
+                    valueFrom = {
+                      secretKeyRef = {
+                        name = local.redpanda_console_oauth_secret_name_value
+                        key  = "cookie-secret"
+                      }
+                    }
+                  },
+                ]
+                ports = [
+                  {
+                    name          = "http"
+                    containerPort = 4180
+                  },
+                ]
+                resources = {
+                  requests = {
+                    cpu    = local.redpanda_console_oauth2_proxy_cpu_request_value
+                    memory = local.redpanda_console_oauth2_proxy_mem_request_value
+                  }
+                  limits = {
+                    cpu    = local.redpanda_console_oauth2_proxy_cpu_limit_value
+                    memory = local.redpanda_console_oauth2_proxy_mem_limit_value
+                  }
+                }
+                securityContext = {
+                  allowPrivilegeEscalation = false
+                  capabilities = {
+                    drop = ["ALL"]
+                  }
+                }
+                startupProbe = {
+                  httpGet = {
+                    path   = "/ping"
+                    port   = "http"
+                    scheme = "HTTP"
+                  }
+                  periodSeconds    = 5
+                  timeoutSeconds   = 1
+                  successThreshold = 1
+                  failureThreshold = 30
+                }
+                readinessProbe = {
+                  httpGet = {
+                    path   = "/ping"
+                    port   = "http"
+                    scheme = "HTTP"
+                  }
+                  periodSeconds    = 10
+                  timeoutSeconds   = 1
+                  successThreshold = 1
+                  failureThreshold = 3
+                }
+                livenessProbe = {
+                  httpGet = {
+                    path   = "/ping"
+                    port   = "http"
+                    scheme = "HTTP"
+                  }
+                  periodSeconds    = 30
+                  timeoutSeconds   = 1
+                  successThreshold = 1
+                  failureThreshold = 3
+                }
+                volumeMounts = local.redpanda_console_auth_ca_enabled ? [
+                  {
+                    name      = "redpanda-console-oauth-ca"
+                    mountPath = "/run/secrets/redpanda-console-oauth-ca"
+                    readOnly  = true
+                  },
+                ] : []
+              },
+            ]
+            volumes = local.redpanda_console_auth_ca_enabled ? [
+              {
+                name = "redpanda-console-oauth-ca"
+                secret = {
+                  secretName = local.redpanda_console_auth_ca_secret_name_value
+                }
+              },
+            ] : []
+          }
+        }
+      }
+    }),
+    yamlencode({
+      apiVersion = "v1"
+      kind       = "Service"
+      metadata = {
+        name      = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+        namespace = local.redpanda_namespace_value
+        labels = {
+          app = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+        }
+      }
+      spec = {
+        selector = {
+          app = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+        }
+        ports = [
+          {
+            name       = "http"
+            port       = 4180
+            targetPort = "http"
+          },
+        ]
+      }
+    }),
+    yamlencode({
+      apiVersion = "networking.k8s.io/v1"
+      kind       = "Ingress"
+      metadata = {
+        name      = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+        namespace = local.redpanda_namespace_value
+        annotations = {
+          "nginx.ingress.kubernetes.io/ssl-redirect"      = "true"
+          "nginx.ingress.kubernetes.io/proxy-buffer-size" = "128k"
+        }
+      }
+      spec = {
+        ingressClassName = "nginx"
+        tls = [
+          {
+            hosts      = [local.redpanda_console_hostname_value]
+            secretName = local.redpanda_console_tls_secret_name_value
+          },
+        ]
+        rules = [
+          {
+            host = local.redpanda_console_hostname_value
+            http = {
+              paths = [
+                {
+                  path     = "/oauth2"
+                  pathType = "Prefix"
+                  backend = {
+                    service = {
+                      name = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
+                      port = {
+                        number = 4180
+                      }
+                    }
+                  }
+                },
+              ]
+            }
+          },
+        ]
+      }
+    }),
+  ]) : ""
+  redpanda_resources = [
+    for doc in split("\n---\n", templatefile("${path.module}/redpanda.yaml", {
+      redpanda_namespace                     = local.redpanda_namespace_value
+      redpanda_storage_class_name           = local.redpanda_storage_class_name_value
+      redpanda_resource_name                = local.redpanda_resource_name_value
+      schema_registry_service_name          = local.schema_registry_service_name
+      redpanda_admin_service_name           = local.redpanda_admin_service_name
+      pandaproxy_service_name               = local.pandaproxy_service_name
+      broker_count                          = local.broker_count
+      redpanda_broker_priority_class_name   = local.redpanda_broker_priority_class_name_value
+      redpanda_image                        = local.redpanda_image_value
+      broker_seed_servers_script_block      = local.broker_seed_servers_script_block
+      broker_bootstrap_yaml_block           = local.broker_bootstrap_yaml_block
+      redpanda_config_renderer_cpu_request  = local.redpanda_config_renderer_cpu_request_value
+      redpanda_config_renderer_cpu_limit    = local.redpanda_config_renderer_cpu_limit_value
+      redpanda_config_renderer_mem_request  = local.redpanda_config_renderer_mem_request_value
+      redpanda_config_renderer_mem_limit    = local.redpanda_config_renderer_mem_limit_value
+      redpanda_smp_cores                    = tostring(local.redpanda_smp_cores_value)
+      redpanda_memory                       = local.redpanda_memory_value
+      redpanda_reserve_memory               = local.redpanda_reserve_memory_value
+      redpanda_broker_cpu_request           = local.redpanda_broker_cpu_request_value
+      redpanda_broker_cpu_limit             = local.redpanda_broker_cpu_limit_value
+      redpanda_broker_mem_request           = local.redpanda_broker_mem_request_value
+      redpanda_broker_mem_limit             = local.redpanda_broker_mem_limit_value
+      broker_data_disk_size                 = format("%dGi", local.broker_data_disk_sizes[0])
+      redpanda_broker_pdb_min_available     = local.redpanda_broker_pdb_min_available_value
+      console_config_yaml_block             = local.console_config_yaml_block
+      redpanda_console_image                = local.redpanda_console_image_value
+      redpanda_console_priority_class_name  = local.redpanda_console_priority_class_name_value
+      redpanda_console_cpu_request          = local.redpanda_console_cpu_request_value
+      redpanda_console_cpu_limit            = local.redpanda_console_cpu_limit_value
+      redpanda_console_mem_request          = local.redpanda_console_mem_request_value
+      redpanda_console_mem_limit            = local.redpanda_console_mem_limit_value
+      redpanda_console_hostname             = local.redpanda_console_hostname_value
+      redpanda_console_tls_secret_name      = local.redpanda_console_tls_secret_name_value
+      console_ingress_auth_annotations_yaml = local.console_ingress_auth_annotations_yaml
+      broker_persistent_volumes_section     = local.broker_persistent_volumes_section
+      console_certificate_section           = local.console_certificate_section
+      console_oauth2_proxy_section          = local.console_oauth2_proxy_section
+    })) : yamldecode(doc)
+    if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
+  ]
+  redpanda_namespaces_by_name = {
+    for manifest in local.redpanda_resources : manifest.metadata.name => manifest
+    if try(manifest.kind, "") == "Namespace"
+  }
+  redpanda_storage_classes_by_name = {
+    for manifest in local.redpanda_resources : manifest.metadata.name => manifest
+    if try(manifest.kind, "") == "StorageClass"
+  }
+  redpanda_persistent_volumes_by_name = {
+    for manifest in local.redpanda_resources : manifest.metadata.name => manifest
+    if try(manifest.kind, "") == "PersistentVolume"
+  }
+  redpanda_services_by_name = {
+    for manifest in local.redpanda_resources : manifest.metadata.name => manifest
+    if try(manifest.kind, "") == "Service"
+  }
+  redpanda_statefulsets_by_name = {
+    for manifest in local.redpanda_resources : manifest.metadata.name => manifest
+    if try(manifest.kind, "") == "StatefulSet"
+  }
+  redpanda_pdbs_by_name = {
+    for manifest in local.redpanda_resources : manifest.metadata.name => manifest
+    if try(manifest.kind, "") == "PodDisruptionBudget"
+  }
+  redpanda_configmaps_by_name = {
+    for manifest in local.redpanda_resources : manifest.metadata.name => manifest
+    if try(manifest.kind, "") == "ConfigMap"
+  }
+  redpanda_deployments_by_name = {
+    for manifest in local.redpanda_resources : manifest.metadata.name => manifest
+    if try(manifest.kind, "") == "Deployment"
+  }
+  redpanda_certificates_by_name = {
+    for manifest in local.redpanda_resources : manifest.metadata.name => manifest
+    if try(manifest.kind, "") == "Certificate"
+  }
+  redpanda_ingresses_by_name = {
+    for manifest in local.redpanda_resources : manifest.metadata.name => manifest
+    if try(manifest.kind, "") == "Ingress"
+  }
 }
 
 check "broker_labels_numeric" {
@@ -571,79 +957,17 @@ resource "terraform_data" "redpanda_resource_settings_validation" {
 }
 
 resource "kubernetes_manifest" "namespace" {
-  manifest = {
-    apiVersion = "v1"
-    kind       = "Namespace"
-    metadata = {
-      name = local.redpanda_namespace_value
-      labels = {
-        "pod-security.kubernetes.io/enforce" = "privileged"
-        "pod-security.kubernetes.io/audit"   = "privileged"
-        "pod-security.kubernetes.io/warn"    = "privileged"
-      }
-    }
-  }
+  manifest = local.redpanda_namespaces_by_name[local.redpanda_namespace_value]
 }
 
 resource "kubernetes_manifest" "storage_class" {
-  manifest = {
-    apiVersion = "storage.k8s.io/v1"
-    kind       = "StorageClass"
-    metadata = {
-      name = local.redpanda_storage_class_name_value
-    }
-    provisioner          = "kubernetes.io/no-provisioner"
-    volumeBindingMode    = "WaitForFirstConsumer"
-    reclaimPolicy        = "Retain"
-    allowVolumeExpansion = false
-  }
+  manifest = local.redpanda_storage_classes_by_name[local.redpanda_storage_class_name_value]
 }
 
 resource "kubernetes_manifest" "broker_pv" {
   for_each = local.broker_vms_by_id
 
-  manifest = {
-    apiVersion = "v1"
-    kind       = "PersistentVolume"
-    metadata = {
-      name = format("%s-data-%s", local.redpanda_resource_name_value, each.key)
-      labels = {
-        app                                          = local.redpanda_resource_name_value
-        (local.redpanda_broker_k8s_annotation_value) = each.key
-      }
-    }
-    spec = {
-      capacity = {
-        storage = local.broker_data_disk_capacity_by_id[each.key]
-      }
-      accessModes                   = ["ReadWriteOnce"]
-      persistentVolumeReclaimPolicy = "Retain"
-      storageClassName              = local.redpanda_storage_class_name_value
-      volumeMode                    = "Filesystem"
-      local = {
-        path = local.redpanda_broker_data_host_path_value
-      }
-      claimRef = {
-        namespace = local.redpanda_namespace_value
-        name      = format("datadir-%s-%s", local.redpanda_resource_name_value, each.key)
-      }
-      nodeAffinity = {
-        required = {
-          nodeSelectorTerms = [
-            {
-              matchExpressions = [
-                {
-                  key      = "kubernetes.io/hostname"
-                  operator = "In"
-                  values   = [each.value.name]
-                },
-              ]
-            },
-          ]
-        }
-      }
-    }
-  }
+  manifest = local.redpanda_persistent_volumes_by_name[format("%s-data-%s", local.redpanda_resource_name_value, each.key)]
 
   depends_on = [
     kubernetes_manifest.storage_class,
@@ -651,32 +975,7 @@ resource "kubernetes_manifest" "broker_pv" {
 }
 
 resource "kubernetes_manifest" "headless_service" {
-  manifest = {
-    apiVersion = "v1"
-    kind       = "Service"
-    metadata = {
-      name      = local.redpanda_resource_name_value
-      namespace = local.redpanda_namespace_value
-      labels = {
-        app                         = local.redpanda_resource_name_value
-        "app.kubernetes.io/part-of" = "redpanda"
-      }
-    }
-    spec = {
-      clusterIP                = "None"
-      publishNotReadyAddresses = true
-      selector = {
-        app = local.redpanda_resource_name_value
-      }
-      ports = [
-        { name = "kafka", port = 9092, targetPort = 9092 },
-        { name = "rpc", port = 33145, targetPort = 33145 },
-        { name = "admin", port = 9644, targetPort = 9644 },
-        { name = "schema-registry", port = 8081, targetPort = 8081 },
-        { name = "proxy", port = 8082, targetPort = 8082 },
-      ]
-    }
-  }
+  manifest = local.redpanda_services_by_name[local.redpanda_resource_name_value]
 
   depends_on = [
     kubernetes_manifest.namespace,
@@ -684,29 +983,7 @@ resource "kubernetes_manifest" "headless_service" {
 }
 
 resource "kubernetes_manifest" "schema_registry_service" {
-  manifest = {
-    apiVersion = "v1"
-    kind       = "Service"
-    metadata = {
-      name      = local.schema_registry_service_name
-      namespace = local.redpanda_namespace_value
-      labels = {
-        app = local.redpanda_resource_name_value
-      }
-    }
-    spec = {
-      selector = {
-        app = local.redpanda_resource_name_value
-      }
-      ports = [
-        {
-          name       = "http"
-          port       = 8081
-          targetPort = 8081
-        },
-      ]
-    }
-  }
+  manifest = local.redpanda_services_by_name[local.schema_registry_service_name]
 
   depends_on = [
     kubernetes_manifest.namespace,
@@ -714,29 +991,7 @@ resource "kubernetes_manifest" "schema_registry_service" {
 }
 
 resource "kubernetes_manifest" "admin_service" {
-  manifest = {
-    apiVersion = "v1"
-    kind       = "Service"
-    metadata = {
-      name      = local.redpanda_admin_service_name
-      namespace = local.redpanda_namespace_value
-      labels = {
-        app = local.redpanda_resource_name_value
-      }
-    }
-    spec = {
-      selector = {
-        app = local.redpanda_resource_name_value
-      }
-      ports = [
-        {
-          name       = "http"
-          port       = 9644
-          targetPort = 9644
-        },
-      ]
-    }
-  }
+  manifest = local.redpanda_services_by_name[local.redpanda_admin_service_name]
 
   depends_on = [
     kubernetes_manifest.namespace,
@@ -744,29 +999,7 @@ resource "kubernetes_manifest" "admin_service" {
 }
 
 resource "kubernetes_manifest" "http_proxy_service" {
-  manifest = {
-    apiVersion = "v1"
-    kind       = "Service"
-    metadata = {
-      name      = local.pandaproxy_service_name
-      namespace = local.redpanda_namespace_value
-      labels = {
-        app = local.redpanda_resource_name_value
-      }
-    }
-    spec = {
-      selector = {
-        app = local.redpanda_resource_name_value
-      }
-      ports = [
-        {
-          name       = "http"
-          port       = 8082
-          targetPort = 8082
-        },
-      ]
-    }
-  }
+  manifest = local.redpanda_services_by_name[local.pandaproxy_service_name]
 
   depends_on = [
     kubernetes_manifest.namespace,
@@ -774,239 +1007,7 @@ resource "kubernetes_manifest" "http_proxy_service" {
 }
 
 resource "kubernetes_manifest" "statefulset" {
-  manifest = {
-    apiVersion = "apps/v1"
-    kind       = "StatefulSet"
-    metadata = {
-      name      = local.redpanda_resource_name_value
-      namespace = local.redpanda_namespace_value
-      labels = {
-        app                         = local.redpanda_resource_name_value
-        "app.kubernetes.io/part-of" = "redpanda"
-      }
-    }
-    spec = {
-      serviceName         = local.redpanda_resource_name_value
-      replicas            = local.broker_count
-      podManagementPolicy = "Parallel"
-      selector = {
-        matchLabels = {
-          app = local.redpanda_resource_name_value
-        }
-      }
-      template = {
-        metadata = {
-          labels = {
-            app                         = local.redpanda_resource_name_value
-            "app.kubernetes.io/part-of" = "redpanda"
-          }
-          annotations = {
-            "prometheus.io/scrape" = "true"
-            "prometheus.io/port"   = "9644"
-            "prometheus.io/path"   = "/public_metrics"
-          }
-        }
-        spec = {
-          terminationGracePeriodSeconds = 120
-          priorityClassName             = local.redpanda_broker_priority_class_name_value
-          affinity = {
-            podAntiAffinity = {
-              requiredDuringSchedulingIgnoredDuringExecution = [
-                {
-                  labelSelector = {
-                    matchLabels = {
-                      app = local.redpanda_resource_name_value
-                    }
-                  }
-                  topologyKey = "kubernetes.io/hostname"
-                },
-              ]
-            }
-          }
-          initContainers = [
-            {
-              name            = "config-renderer"
-              image           = local.redpanda_image_value
-              imagePullPolicy = "IfNotPresent"
-              command         = ["/bin/sh", "-ec"]
-              args = [
-                <<-EOT
-                mkdir -p /var/lib/redpanda/data
-                chown -R 101:101 /var/lib/redpanda/data
-                chmod 750 /var/lib/redpanda/data
-
-                POD_FQDN="$${POD_NAME}.${local.redpanda_resource_name_value}.${local.redpanda_namespace_value}.svc.cluster.local"
-                cat > /etc/redpanda/redpanda.yaml <<EOF
-                redpanda:
-                  data_directory: /var/lib/redpanda/data
-                  empty_seed_starts_cluster: false
-                  seed_servers:
-                ${local.broker_seed_servers_yaml}
-                  rpc_server:
-                    address: 0.0.0.0
-                    port: 33145
-                  advertised_rpc_api:
-                    address: $${POD_FQDN}
-                    port: 33145
-                  kafka_api:
-                    - name: internal
-                      address: 0.0.0.0
-                      port: 9092
-                  advertised_kafka_api:
-                    - name: internal
-                      address: $${POD_FQDN}
-                      port: 9092
-                  admin:
-                    - address: 0.0.0.0
-                      port: 9644
-                schema_registry:
-                  schema_registry_api:
-                    - name: internal
-                      address: 0.0.0.0
-                      port: 8081
-                pandaproxy:
-                  pandaproxy_api:
-                    - name: internal
-                      address: 0.0.0.0
-                      port: 8082
-                EOF
-                cat > /etc/redpanda/.bootstrap.yaml <<EOF
-                ${local.broker_bootstrap_yaml}
-                EOF
-                EOT
-              ]
-              env = [
-                {
-                  name = "POD_NAME"
-                  valueFrom = {
-                    fieldRef = {
-                      fieldPath = "metadata.name"
-                    }
-                  }
-                },
-              ]
-              resources = {
-                requests = {
-                  cpu    = local.redpanda_config_renderer_cpu_request_value
-                  memory = local.redpanda_config_renderer_mem_request_value
-                }
-                limits = {
-                  cpu    = local.redpanda_config_renderer_cpu_limit_value
-                  memory = local.redpanda_config_renderer_mem_limit_value
-                }
-              }
-              securityContext = {
-                runAsUser  = 0
-                runAsGroup = 0
-              }
-              volumeMounts = [
-                {
-                  name      = "config"
-                  mountPath = "/etc/redpanda"
-                },
-                {
-                  name      = "datadir"
-                  mountPath = "/var/lib/redpanda/data"
-                },
-              ]
-            },
-          ]
-          containers = [
-            {
-              name            = "redpanda"
-              image           = local.redpanda_image_value
-              imagePullPolicy = "IfNotPresent"
-              command         = concat(["rpk", "redpanda", "start", "--check=false"], local.broker_start_flags)
-              ports = [
-                { name = "kafka", containerPort = 9092 },
-                { name = "rpc", containerPort = 33145 },
-                { name = "admin", containerPort = 9644 },
-                { name = "schema", containerPort = 8081 },
-                { name = "proxy", containerPort = 8082 },
-              ]
-              resources = {
-                requests = {
-                  cpu    = local.redpanda_broker_cpu_request_value
-                  memory = local.redpanda_broker_mem_request_value
-                }
-                limits = {
-                  cpu    = local.redpanda_broker_cpu_limit_value
-                  memory = local.redpanda_broker_mem_limit_value
-                }
-              }
-              readinessProbe = {
-                httpGet = {
-                  path   = "/v1/status/ready"
-                  port   = 9644
-                  scheme = "HTTP"
-                }
-                initialDelaySeconds = 10
-                periodSeconds       = 10
-                timeoutSeconds      = 1
-                successThreshold    = 1
-                failureThreshold    = 12
-              }
-              livenessProbe = {
-                httpGet = {
-                  path   = "/v1/status/ready"
-                  port   = 9644
-                  scheme = "HTTP"
-                }
-                initialDelaySeconds = 30
-                periodSeconds       = 20
-                timeoutSeconds      = 1
-                successThreshold    = 1
-                failureThreshold    = 6
-              }
-              startupProbe = {
-                httpGet = {
-                  path   = "/v1/status/ready"
-                  port   = 9644
-                  scheme = "HTTP"
-                }
-                periodSeconds    = 10
-                timeoutSeconds   = 1
-                successThreshold = 1
-                failureThreshold = 90
-              }
-              volumeMounts = [
-                {
-                  name      = "config"
-                  mountPath = "/etc/redpanda"
-                },
-                {
-                  name      = "datadir"
-                  mountPath = "/var/lib/redpanda/data"
-                },
-              ]
-            },
-          ]
-          volumes = [
-            {
-              name     = "config"
-              emptyDir = {}
-            },
-          ]
-        }
-      }
-      volumeClaimTemplates = [
-        {
-          metadata = {
-            name = "datadir"
-          }
-          spec = {
-            accessModes      = ["ReadWriteOnce"]
-            storageClassName = local.redpanda_storage_class_name_value
-            resources = {
-              requests = {
-                storage = format("%dGi", local.broker_data_disk_sizes[0])
-              }
-            }
-          }
-        },
-      ]
-    }
-  }
+  manifest = local.redpanda_statefulsets_by_name[local.redpanda_resource_name_value]
 
   computed_fields = [
     "spec.volumeClaimTemplates[0].metadata.creationTimestamp",
@@ -1049,25 +1050,7 @@ resource "kubernetes_labels" "broker_data_pvc" {
 }
 
 resource "kubernetes_manifest" "broker_pdb" {
-  manifest = {
-    apiVersion = "policy/v1"
-    kind       = "PodDisruptionBudget"
-    metadata = {
-      name      = "${local.redpanda_resource_name_value}-brokers"
-      namespace = local.redpanda_namespace_value
-      labels = {
-        app = local.redpanda_resource_name_value
-      }
-    }
-    spec = {
-      minAvailable = local.redpanda_broker_pdb_min_available_value
-      selector = {
-        matchLabels = {
-          app = local.redpanda_resource_name_value
-        }
-      }
-    }
-  }
+  manifest = local.redpanda_pdbs_by_name["${local.redpanda_resource_name_value}-brokers"]
 
   depends_on = [
     kubernetes_manifest.namespace,
@@ -1101,21 +1084,7 @@ resource "null_resource" "community_feature_config" {
 }
 
 resource "kubernetes_manifest" "console_config" {
-  manifest = {
-    apiVersion = "v1"
-    kind       = "ConfigMap"
-    metadata = {
-      name      = "${local.redpanda_resource_name_value}-console-config"
-      namespace = local.redpanda_namespace_value
-      labels = {
-        app                         = "${local.redpanda_resource_name_value}-console"
-        "app.kubernetes.io/part-of" = "redpanda"
-      }
-    }
-    data = {
-      "config.yaml" = local.console_config
-    }
-  }
+  manifest = local.redpanda_configmaps_by_name["${local.redpanda_resource_name_value}-console-config"]
 
   depends_on = [
     kubernetes_manifest.namespace,
@@ -1123,30 +1092,7 @@ resource "kubernetes_manifest" "console_config" {
 }
 
 resource "kubernetes_manifest" "console_service" {
-  manifest = {
-    apiVersion = "v1"
-    kind       = "Service"
-    metadata = {
-      name      = "${local.redpanda_resource_name_value}-console"
-      namespace = local.redpanda_namespace_value
-      labels = {
-        app                         = "${local.redpanda_resource_name_value}-console"
-        "app.kubernetes.io/part-of" = "redpanda"
-      }
-    }
-    spec = {
-      selector = {
-        app = "${local.redpanda_resource_name_value}-console"
-      }
-      ports = [
-        {
-          name       = "http"
-          port       = 8080
-          targetPort = 8080
-        },
-      ]
-    }
-  }
+  manifest = local.redpanda_services_by_name["${local.redpanda_resource_name_value}-console"]
 
   depends_on = [
     kubernetes_manifest.namespace,
@@ -1154,116 +1100,7 @@ resource "kubernetes_manifest" "console_service" {
 }
 
 resource "kubernetes_manifest" "console_deployment" {
-  manifest = {
-    apiVersion = "apps/v1"
-    kind       = "Deployment"
-    metadata = {
-      name      = "${local.redpanda_resource_name_value}-console"
-      namespace = local.redpanda_namespace_value
-      labels = {
-        app                         = "${local.redpanda_resource_name_value}-console"
-        "app.kubernetes.io/part-of" = "redpanda"
-      }
-    }
-    spec = {
-      replicas = 1
-      selector = {
-        matchLabels = {
-          app = "${local.redpanda_resource_name_value}-console"
-        }
-      }
-      template = {
-        metadata = {
-          labels = {
-            app                         = "${local.redpanda_resource_name_value}-console"
-            "app.kubernetes.io/part-of" = "redpanda"
-          }
-        }
-        spec = {
-          priorityClassName = local.redpanda_console_priority_class_name_value
-          containers = [
-            {
-              name            = "console"
-              image           = local.redpanda_console_image_value
-              imagePullPolicy = "IfNotPresent"
-              env = [
-                {
-                  name  = "CONFIG_FILEPATH"
-                  value = "/etc/redpanda-console/config.yaml"
-                },
-              ]
-              ports = [
-                {
-                  name          = "http"
-                  containerPort = 8080
-                },
-              ]
-              resources = {
-                requests = {
-                  cpu    = local.redpanda_console_cpu_request_value
-                  memory = local.redpanda_console_mem_request_value
-                }
-                limits = {
-                  cpu    = local.redpanda_console_cpu_limit_value
-                  memory = local.redpanda_console_mem_limit_value
-                }
-              }
-              startupProbe = {
-                httpGet = {
-                  path   = "/health"
-                  port   = 8080
-                  scheme = "HTTP"
-                }
-                periodSeconds    = 5
-                timeoutSeconds   = 1
-                successThreshold = 1
-                failureThreshold = 30
-              }
-              readinessProbe = {
-                httpGet = {
-                  path   = "/health"
-                  port   = 8080
-                  scheme = "HTTP"
-                }
-                initialDelaySeconds = 5
-                periodSeconds       = 10
-                timeoutSeconds      = 1
-                successThreshold    = 1
-                failureThreshold    = 6
-              }
-              livenessProbe = {
-                httpGet = {
-                  path   = "/health"
-                  port   = 8080
-                  scheme = "HTTP"
-                }
-                initialDelaySeconds = 30
-                periodSeconds       = 20
-                timeoutSeconds      = 1
-                successThreshold    = 1
-                failureThreshold    = 6
-              }
-              volumeMounts = [
-                {
-                  name      = "config"
-                  mountPath = "/etc/redpanda-console"
-                  readOnly  = true
-                },
-              ]
-            },
-          ]
-          volumes = [
-            {
-              name = "config"
-              configMap = {
-                name = "${local.redpanda_resource_name_value}-console-config"
-              }
-            },
-          ]
-        }
-      }
-    }
-  }
+  manifest = local.redpanda_deployments_by_name["${local.redpanda_resource_name_value}-console"]
 
   computed_fields = [
     "object.spec.template.metadata.annotations",
@@ -1306,7 +1143,7 @@ resource "null_resource" "cert_manager_webhook_ready" {
 
 resource "kubernetes_manifest" "console_certificate" {
   for_each = local.console_certificate_manifests
-  manifest = each.value
+  manifest = local.redpanda_certificates_by_name["${local.redpanda_resource_name_value}-console-ingress-cert"]
 
   depends_on = [
     kubernetes_manifest.namespace,
@@ -1356,171 +1193,11 @@ resource "kubernetes_secret_v1" "redpanda_console_oauth_ca" {
 resource "kubernetes_manifest" "console_oauth2_proxy_deployment" {
   count = local.redpanda_console_auth_enabled ? 1 : 0
 
-  manifest = {
-    apiVersion = "apps/v1"
-    kind       = "Deployment"
-    metadata = {
-      name      = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
-      namespace = local.redpanda_namespace_value
-      labels = {
-        app                         = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
-        "app.kubernetes.io/part-of" = "redpanda"
-      }
-    }
-    spec = {
-      replicas = 1
-      selector = {
-        matchLabels = {
-          app = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
-        }
-      }
-      template = {
-        metadata = {
-          labels = {
-            app                         = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
-            "app.kubernetes.io/part-of" = "redpanda"
-          }
-        }
-        spec = {
-          priorityClassName = local.redpanda_console_oauth2_proxy_priority_class_name_value
-          securityContext = {
-            runAsNonRoot = true
-            runAsUser    = 65532
-            runAsGroup   = 65532
-            seccompProfile = {
-              type = "RuntimeDefault"
-            }
-          }
-          containers = [
-            {
-              name            = "oauth2-proxy"
-              image           = "quay.io/oauth2-proxy/oauth2-proxy:${local.redpanda_console_oauth2_proxy_image_tag_value}"
-              imagePullPolicy = "IfNotPresent"
-              args = concat([
-                "--http-address=0.0.0.0:4180",
-                "--provider=keycloak-oidc",
-                "--oidc-issuer-url=${local.redpanda_console_oidc_issuer}",
-                "--client-id=${local.redpanda_console_oidc_client_id}",
-                "--redirect-url=${local.redpanda_console_oauth_redirect_uri}",
-                "--email-domain=*",
-                "--scope=openid profile email",
-                "--code-challenge-method=S256",
-                "--reverse-proxy=true",
-                "--set-xauthrequest=true",
-                "--skip-provider-button=true",
-                "--cookie-name=${local.redpanda_console_oauth2_proxy_cookie_name_value}",
-                "--cookie-secure=true",
-                "--cookie-samesite=lax",
-                "--upstream=static://202",
-                "--backend-logout-url=${local.redpanda_console_oauth_backend_logout_url}",
-                ],
-                [
-                  for group_name in local.redpanda_console_auth_effective_allowed_groups : "--allowed-group=${group_name}"
-                ],
-                [
-                  for trusted_proxy_ip in local.redpanda_console_oauth2_proxy_trusted_proxy_ips_value : "--trusted-proxy-ip=${trusted_proxy_ip}"
-                ],
-                local.redpanda_console_auth_ca_enabled ? [
-                  "--provider-ca-file=/run/secrets/redpanda-console-oauth-ca/ca.crt",
-                  "--use-system-trust-store=true",
-                ] : []
-              )
-              env = [
-                {
-                  name = "OAUTH2_PROXY_CLIENT_SECRET"
-                  valueFrom = {
-                    secretKeyRef = {
-                      name = local.redpanda_console_oauth_secret_name_value
-                      key  = "client-secret"
-                    }
-                  }
-                },
-                {
-                  name = "OAUTH2_PROXY_COOKIE_SECRET"
-                  valueFrom = {
-                    secretKeyRef = {
-                      name = local.redpanda_console_oauth_secret_name_value
-                      key  = "cookie-secret"
-                    }
-                  }
-                },
-              ]
-              ports = [
-                {
-                  name          = "http"
-                  containerPort = 4180
-                },
-              ]
-              resources = {
-                requests = {
-                  cpu    = local.redpanda_console_oauth2_proxy_cpu_request_value
-                  memory = local.redpanda_console_oauth2_proxy_mem_request_value
-                }
-                limits = {
-                  cpu    = local.redpanda_console_oauth2_proxy_cpu_limit_value
-                  memory = local.redpanda_console_oauth2_proxy_mem_limit_value
-                }
-              }
-              securityContext = {
-                allowPrivilegeEscalation = false
-                capabilities = {
-                  drop = ["ALL"]
-                }
-              }
-              startupProbe = {
-                httpGet = {
-                  path   = "/ping"
-                  port   = "http"
-                  scheme = "HTTP"
-                }
-                periodSeconds    = 5
-                timeoutSeconds   = 1
-                successThreshold = 1
-                failureThreshold = 30
-              }
-              readinessProbe = {
-                httpGet = {
-                  path   = "/ping"
-                  port   = "http"
-                  scheme = "HTTP"
-                }
-                periodSeconds    = 10
-                timeoutSeconds   = 1
-                successThreshold = 1
-                failureThreshold = 3
-              }
-              livenessProbe = {
-                httpGet = {
-                  path   = "/ping"
-                  port   = "http"
-                  scheme = "HTTP"
-                }
-                periodSeconds    = 30
-                timeoutSeconds   = 1
-                successThreshold = 1
-                failureThreshold = 3
-              }
-              volumeMounts = local.redpanda_console_auth_ca_enabled ? [
-                {
-                  name      = "redpanda-console-oauth-ca"
-                  mountPath = "/run/secrets/redpanda-console-oauth-ca"
-                  readOnly  = true
-                },
-              ] : []
-            },
-          ]
-          volumes = local.redpanda_console_auth_ca_enabled ? [
-            {
-              name = "redpanda-console-oauth-ca"
-              secret = {
-                secretName = local.redpanda_console_auth_ca_secret_name_value
-              }
-            },
-          ] : []
-        }
-      }
-    }
-  }
+  manifest = local.redpanda_deployments_by_name["${local.redpanda_resource_name_value}-console-oauth2-proxy"]
+  computed_fields = [
+    "object.metadata.annotations",
+    "object.spec.template.metadata.annotations",
+  ]
 
   depends_on = [
     kubernetes_secret_v1.redpanda_console_oauth,
@@ -1531,29 +1208,7 @@ resource "kubernetes_manifest" "console_oauth2_proxy_deployment" {
 resource "kubernetes_manifest" "console_oauth2_proxy_service" {
   count = local.redpanda_console_auth_enabled ? 1 : 0
 
-  manifest = {
-    apiVersion = "v1"
-    kind       = "Service"
-    metadata = {
-      name      = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
-      namespace = local.redpanda_namespace_value
-      labels = {
-        app = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
-      }
-    }
-    spec = {
-      selector = {
-        app = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
-      }
-      ports = [
-        {
-          name       = "http"
-          port       = 4180
-          targetPort = "http"
-        },
-      ]
-    }
-  }
+  manifest = local.redpanda_services_by_name["${local.redpanda_resource_name_value}-console-oauth2-proxy"]
 
   depends_on = [
     kubernetes_manifest.namespace,
@@ -1569,107 +1224,18 @@ resource "null_resource" "ingress_nginx_webhook_ready" {
 resource "kubernetes_manifest" "console_oauth2_proxy_ingress" {
   count = local.redpanda_console_auth_enabled ? 1 : 0
 
-  manifest = {
-    apiVersion = "networking.k8s.io/v1"
-    kind       = "Ingress"
-    metadata = {
-      name      = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
-      namespace = local.redpanda_namespace_value
-      annotations = {
-        "nginx.ingress.kubernetes.io/ssl-redirect"      = "true"
-        "nginx.ingress.kubernetes.io/proxy-buffer-size" = "128k"
-      }
-    }
-    spec = {
-      ingressClassName = "nginx"
-      tls = [
-        {
-          hosts      = [local.redpanda_console_hostname_value]
-          secretName = local.redpanda_console_tls_secret_name_value
-        },
-      ]
-      rules = [
-        {
-          host = local.redpanda_console_hostname_value
-          http = {
-            paths = [
-              {
-                path     = "/oauth2"
-                pathType = "Prefix"
-                backend = {
-                  service = {
-                    name = "${local.redpanda_resource_name_value}-console-oauth2-proxy"
-                    port = {
-                      number = 4180
-                    }
-                  }
-                }
-              },
-            ]
-          }
-        },
-      ]
-    }
-  }
+  manifest = local.redpanda_ingresses_by_name["${local.redpanda_resource_name_value}-console-oauth2-proxy"]
 
   depends_on = [
     kubernetes_manifest.console_oauth2_proxy_service,
     kubernetes_manifest.console_certificate,
     kubernetes_secret_v1.preissued_tls,
-    kubernetes_manifest.console_oauth2_proxy_ingress,
     null_resource.ingress_nginx_webhook_ready,
   ]
 }
 
 resource "kubernetes_manifest" "console_ingress" {
-  manifest = {
-    apiVersion = "networking.k8s.io/v1"
-    kind       = "Ingress"
-    metadata = {
-      name      = "${local.redpanda_resource_name_value}-console"
-      namespace = local.redpanda_namespace_value
-      annotations = merge(
-        {
-          "nginx.ingress.kubernetes.io/backend-protocol" = "HTTP"
-        },
-        local.redpanda_console_auth_enabled ? {
-          "nginx.ingress.kubernetes.io/auth-url"              = "http://${local.redpanda_resource_name_value}-console-oauth2-proxy.${local.redpanda_namespace_value}.svc.cluster.local:4180/oauth2/auth"
-          "nginx.ingress.kubernetes.io/auth-signin"           = "https://$host/oauth2/start?rd=$escaped_request_uri"
-          "nginx.ingress.kubernetes.io/auth-response-headers" = "Authorization,X-Auth-Request-Access-Token,X-Auth-Request-User,X-Auth-Request-Email,X-Auth-Request-Groups"
-        } : {}
-      )
-    }
-    spec = {
-      ingressClassName = "nginx"
-      tls = [
-        {
-          hosts      = [local.redpanda_console_hostname_value]
-          secretName = local.redpanda_console_tls_secret_name_value
-        },
-      ]
-      rules = [
-        {
-          host = local.redpanda_console_hostname_value
-          http = {
-            paths = [
-              {
-                path     = "/"
-                pathType = "Prefix"
-                backend = {
-                  service = {
-                    name = "${local.redpanda_resource_name_value}-console"
-                    port = {
-                      number = 8080
-                    }
-                  }
-                }
-              },
-            ]
-          }
-        },
-      ]
-    }
-  }
+  manifest = local.redpanda_ingresses_by_name["${local.redpanda_resource_name_value}-console"]
 
   depends_on = [
     kubernetes_manifest.console_service,

@@ -1,0 +1,423 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${redpanda_namespace}
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ${redpanda_storage_class_name}
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+allowVolumeExpansion: false
+---
+${broker_persistent_volumes_section}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${redpanda_resource_name}
+  namespace: ${redpanda_namespace}
+  labels:
+    app: ${redpanda_resource_name}
+    app.kubernetes.io/part-of: redpanda
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: ${redpanda_resource_name}
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: 9092
+    - name: rpc
+      port: 33145
+      targetPort: 33145
+    - name: admin
+      port: 9644
+      targetPort: 9644
+    - name: schema-registry
+      port: 8081
+      targetPort: 8081
+    - name: proxy
+      port: 8082
+      targetPort: 8082
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${schema_registry_service_name}
+  namespace: ${redpanda_namespace}
+  labels:
+    app: ${redpanda_resource_name}
+spec:
+  selector:
+    app: ${redpanda_resource_name}
+  ports:
+    - name: http
+      port: 8081
+      targetPort: 8081
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${redpanda_admin_service_name}
+  namespace: ${redpanda_namespace}
+  labels:
+    app: ${redpanda_resource_name}
+spec:
+  selector:
+    app: ${redpanda_resource_name}
+  ports:
+    - name: http
+      port: 9644
+      targetPort: 9644
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${pandaproxy_service_name}
+  namespace: ${redpanda_namespace}
+  labels:
+    app: ${redpanda_resource_name}
+spec:
+  selector:
+    app: ${redpanda_resource_name}
+  ports:
+    - name: http
+      port: 8082
+      targetPort: 8082
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ${redpanda_resource_name}
+  namespace: ${redpanda_namespace}
+  labels:
+    app: ${redpanda_resource_name}
+    app.kubernetes.io/part-of: redpanda
+spec:
+  serviceName: ${redpanda_resource_name}
+  replicas: ${broker_count}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: ${redpanda_resource_name}
+  template:
+    metadata:
+      labels:
+        app: ${redpanda_resource_name}
+        app.kubernetes.io/part-of: redpanda
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9644"
+        prometheus.io/path: /public_metrics
+    spec:
+      terminationGracePeriodSeconds: 120
+      priorityClassName: ${redpanda_broker_priority_class_name}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: ${redpanda_resource_name}
+              topologyKey: kubernetes.io/hostname
+      initContainers:
+        - name: config-renderer
+          image: ${redpanda_image}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -ec
+          args:
+            - |
+                mkdir -p /var/lib/redpanda/data
+                chown -R 101:101 /var/lib/redpanda/data
+                chmod 750 /var/lib/redpanda/data
+
+                POD_FQDN="$${POD_NAME}.${redpanda_resource_name}.${redpanda_namespace}.svc.cluster.local"
+                cat > /etc/redpanda/redpanda.yaml <<EOF
+                redpanda:
+                  data_directory: /var/lib/redpanda/data
+                  empty_seed_starts_cluster: false
+                  seed_servers:
+${broker_seed_servers_script_block}
+                  rpc_server:
+                    address: 0.0.0.0
+                    port: 33145
+                  advertised_rpc_api:
+                    address: $${POD_FQDN}
+                    port: 33145
+                  kafka_api:
+                    - name: internal
+                      address: 0.0.0.0
+                      port: 9092
+                  advertised_kafka_api:
+                    - name: internal
+                      address: $${POD_FQDN}
+                      port: 9092
+                  admin:
+                    - address: 0.0.0.0
+                      port: 9644
+                schema_registry:
+                  schema_registry_api:
+                    - name: internal
+                      address: 0.0.0.0
+                      port: 8081
+                pandaproxy:
+                  pandaproxy_api:
+                    - name: internal
+                      address: 0.0.0.0
+                      port: 8082
+                EOF
+                cat > /etc/redpanda/.bootstrap.yaml <<EOF
+${broker_bootstrap_yaml_block}
+                EOF
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: ${redpanda_config_renderer_cpu_request}
+              memory: ${redpanda_config_renderer_mem_request}
+            limits:
+              cpu: ${redpanda_config_renderer_cpu_limit}
+              memory: ${redpanda_config_renderer_mem_limit}
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          volumeMounts:
+            - name: config
+              mountPath: /etc/redpanda
+            - name: datadir
+              mountPath: /var/lib/redpanda/data
+      containers:
+        - name: redpanda
+          image: ${redpanda_image}
+          imagePullPolicy: IfNotPresent
+          command:
+            - rpk
+            - redpanda
+            - start
+            - --check=false
+            - --smp=${redpanda_smp_cores}
+            - --memory=${redpanda_memory}
+            - --reserve-memory=${redpanda_reserve_memory}
+          ports:
+            - name: kafka
+              containerPort: 9092
+            - name: rpc
+              containerPort: 33145
+            - name: admin
+              containerPort: 9644
+            - name: schema
+              containerPort: 8081
+            - name: proxy
+              containerPort: 8082
+          resources:
+            requests:
+              cpu: "${redpanda_broker_cpu_request}"
+              memory: ${redpanda_broker_mem_request}
+            limits:
+              cpu: "${redpanda_broker_cpu_limit}"
+              memory: ${redpanda_broker_mem_limit}
+          readinessProbe:
+            httpGet:
+              path: /v1/status/ready
+              port: 9644
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /v1/status/ready
+              port: 9644
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 6
+          startupProbe:
+            httpGet:
+              path: /v1/status/ready
+              port: 9644
+              scheme: HTTP
+            periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 90
+          volumeMounts:
+            - name: config
+              mountPath: /etc/redpanda
+            - name: datadir
+              mountPath: /var/lib/redpanda/data
+      volumes:
+        - name: config
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: datadir
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: ${redpanda_storage_class_name}
+        resources:
+          requests:
+            storage: ${broker_data_disk_size}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ${redpanda_resource_name}-brokers
+  namespace: ${redpanda_namespace}
+  labels:
+    app: ${redpanda_resource_name}
+spec:
+  minAvailable: ${redpanda_broker_pdb_min_available}
+  selector:
+    matchLabels:
+      app: ${redpanda_resource_name}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${redpanda_resource_name}-console-config
+  namespace: ${redpanda_namespace}
+  labels:
+    app: ${redpanda_resource_name}-console
+    app.kubernetes.io/part-of: redpanda
+data:
+  config.yaml: |
+${console_config_yaml_block}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${redpanda_resource_name}-console
+  namespace: ${redpanda_namespace}
+  labels:
+    app: ${redpanda_resource_name}-console
+    app.kubernetes.io/part-of: redpanda
+spec:
+  selector:
+    app: ${redpanda_resource_name}-console
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${redpanda_resource_name}-console
+  namespace: ${redpanda_namespace}
+  labels:
+    app: ${redpanda_resource_name}-console
+    app.kubernetes.io/part-of: redpanda
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ${redpanda_resource_name}-console
+  template:
+    metadata:
+      labels:
+        app: ${redpanda_resource_name}-console
+        app.kubernetes.io/part-of: redpanda
+    spec:
+      priorityClassName: ${redpanda_console_priority_class_name}
+      containers:
+        - name: console
+          image: ${redpanda_console_image}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: CONFIG_FILEPATH
+              value: /etc/redpanda-console/config.yaml
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: ${redpanda_console_cpu_request}
+              memory: ${redpanda_console_mem_request}
+            limits:
+              cpu: ${redpanda_console_cpu_limit}
+              memory: ${redpanda_console_mem_limit}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+              scheme: HTTP
+            periodSeconds: 5
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 6
+          volumeMounts:
+            - name: config
+              mountPath: /etc/redpanda-console
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: ${redpanda_resource_name}-console-config
+---
+${console_certificate_section}
+---
+${console_oauth2_proxy_section}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ${redpanda_resource_name}-console
+  namespace: ${redpanda_namespace}
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: HTTP
+${console_ingress_auth_annotations_yaml}
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - ${redpanda_console_hostname}
+      secretName: ${redpanda_console_tls_secret_name}
+  rules:
+    - host: ${redpanda_console_hostname}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ${redpanda_resource_name}-console
+                port:
+                  number: 8080
