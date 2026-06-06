@@ -235,9 +235,9 @@ ${broker_bootstrap_yaml_block}
               scheme: HTTP
             initialDelaySeconds: 10
             periodSeconds: 10
-            timeoutSeconds: 1
+            timeoutSeconds: 5
             successThreshold: 1
-            failureThreshold: 12
+            failureThreshold: 18
           livenessProbe:
             httpGet:
               path: /v1/status/ready
@@ -245,18 +245,18 @@ ${broker_bootstrap_yaml_block}
               scheme: HTTP
             initialDelaySeconds: 30
             periodSeconds: 20
-            timeoutSeconds: 1
+            timeoutSeconds: 5
             successThreshold: 1
-            failureThreshold: 6
+            failureThreshold: 10
           startupProbe:
             httpGet:
               path: /v1/status/ready
               port: 9644
               scheme: HTTP
             periodSeconds: 10
-            timeoutSeconds: 1
+            timeoutSeconds: 5
             successThreshold: 1
-            failureThreshold: 90
+            failureThreshold: 180
           volumeMounts:
             - name: config
               mountPath: /etc/redpanda
