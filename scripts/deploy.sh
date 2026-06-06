@@ -1712,7 +1712,7 @@ else
     kubectl -n rook-ceph rollout restart deploy/csi-rbdplugin-provisioner 1>/dev/null
     kubectl -n rook-ceph rollout restart daemonset/csi-cephfsplugin 1>/dev/null
     kubectl -n rook-ceph rollout restart daemonset/csi-rbdplugin 1>/dev/null
-    wait_for_rollout_ready "rook-ceph" "deploy/csi-cephfsplugin-provisioner" "180s"
+    wait_for_rollout_ready "rook-ceph" "deploy/csi-cephfsplugin-provisioner" "300s"
     wait_for_rollout_ready "rook-ceph" "deploy/csi-rbdplugin-provisioner" "180s"
     wait_for_rollout_ready "rook-ceph" "daemonset/csi-cephfsplugin" "300s"
     wait_for_rollout_ready "rook-ceph" "daemonset/csi-rbdplugin" "300s"
