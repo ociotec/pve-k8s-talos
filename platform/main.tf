@@ -53,6 +53,7 @@ locals {
   rancher_tls_secret_name_value          = local.rancher_tls_secret_name
   rancher_replicas_value                 = local.rancher_replicas
   rancher_version_value                  = try(local.rancher_version, "2.14.1")
+  rancher_debug_value                    = try(local.rancher_debug, false)
   rancher_cpu_request_value              = try(local.rancher_cpu_request, "200m")
   rancher_cpu_limit_value                = try(local.rancher_cpu_limit, "1")
   rancher_mem_request_value              = try(local.rancher_mem_request, "2560Mi")
@@ -201,13 +202,15 @@ locals {
   ])
   rancher_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/rancher.yaml", {
-      rancher_hostname    = local.rancher_hostname_value
-      rancher_replicas    = tostring(local.rancher_replicas_value)
-      rancher_version     = tostring(local.rancher_version_value)
-      rancher_cpu_request = local.rancher_cpu_request_value
-      rancher_cpu_limit   = local.rancher_cpu_limit_value
-      rancher_mem_request = local.rancher_mem_request_value
-      rancher_mem_limit   = local.rancher_mem_limit_value
+      rancher_hostname           = local.rancher_hostname_value
+      rancher_replicas           = tostring(local.rancher_replicas_value)
+      rancher_version            = tostring(local.rancher_version_value)
+      rancher_debug              = local.rancher_debug_value
+      rancher_cpu_request        = local.rancher_cpu_request_value
+      rancher_cpu_limit          = local.rancher_cpu_limit_value
+      rancher_mem_request        = local.rancher_mem_request_value
+      rancher_mem_limit          = local.rancher_mem_limit_value
+      rancher_imperative_api_enabled = local.rancher_version_is_v214plus
     })) :
     merge(
       yamldecode(doc),
@@ -341,9 +344,23 @@ locals {
       groupPrincipalName = principal_id
     }
   } : {}
-  rancher_managed_resource_patches = {
-    "cattle-capi-system/capi-controller-manager" = {
-      namespace = "cattle-capi-system"
+  # Rancher version for patch compatibility (extract major.minor)
+  rancher_version_major_minor = replace(
+    substr(local.rancher_version_value, 0, regex("(\\d+\\.\\d+)", local.rancher_version_value) != null ? length(regex("(\\d+\\.\\d+)", local.rancher_version_value)) : 0),
+    "/^v/",
+    ""
+  )
+
+  # Check if Rancher version is 2.14 or later (for imperative API features)
+  rancher_version_is_v214plus = (
+    can(regex("^[3-9]\\.", local.rancher_version_major_minor)) ||
+    can(regex("^2\\.(1[4-9]|[2-9][0-9])", local.rancher_version_major_minor))
+  )
+
+  # Define patch definitions for Rancher 2.12.x
+  rancher_managed_resource_patches_v212 = {
+    "cattle-provisioning-capi-system/capi-controller-manager" = {
+      namespace = "cattle-provisioning-capi-system"
       resource  = "deployment"
       name      = "capi-controller-manager"
       patch = jsonencode({
@@ -378,10 +395,11 @@ locals {
         }
       })
     }
-    "cattle-turtles-system/rancher-turtles-controller-manager" = {
-      namespace = "cattle-turtles-system"
+
+    "cattle-fleet-system/fleet-controller" = {
+      namespace = "cattle-fleet-system"
       resource  = "deployment"
-      name      = "rancher-turtles-controller-manager"
+      name      = "fleet-controller"
       patch = jsonencode({
         metadata = {
           labels = {
@@ -397,43 +415,7 @@ locals {
             }
             spec = {
               containers = [{
-                name = "manager"
-                resources = {
-                  requests = {
-                    cpu    = "10m"
-                    memory = "256Mi"
-                  }
-                  limits = {
-                    cpu    = "500m"
-                    memory = "256Mi"
-                  }
-                }
-              }]
-            }
-          }
-        }
-      })
-    }
-    "cattle-fleet-local-system/fleet-agent" = {
-      namespace = "cattle-fleet-local-system"
-      resource  = "deployment"
-      name      = "fleet-agent"
-      patch = jsonencode({
-        metadata = {
-          labels = {
-            "app.kubernetes.io/part-of" = "rancher"
-          }
-        }
-        spec = {
-          template = {
-            metadata = {
-              labels = {
-                "app.kubernetes.io/part-of" = "rancher"
-              }
-            }
-            spec = {
-              containers = [{
-                name = "fleet-agent"
+                name = "fleet-controller"
                 resources = {
                   requests = {
                     cpu    = "25m"
@@ -450,6 +432,7 @@ locals {
         }
       })
     }
+
     "cattle-fleet-system/fleet-cleanup-gitrepo-jobs" = {
       namespace = "cattle-fleet-system"
       resource  = "cronjob"
@@ -490,70 +473,7 @@ locals {
         }
       })
     }
-    "cattle-fleet-system/fleet-controller" = {
-      namespace = "cattle-fleet-system"
-      resource  = "deployment"
-      name      = "fleet-controller"
-      patch = jsonencode({
-        metadata = {
-          labels = {
-            "app.kubernetes.io/part-of" = "rancher"
-          }
-        }
-        spec = {
-          template = {
-            metadata = {
-              labels = {
-                "app.kubernetes.io/part-of" = "rancher"
-              }
-            }
-            spec = {
-              containers = [
-                {
-                  name = "fleet-agentmanagement"
-                  resources = {
-                    requests = {
-                      cpu    = "25m"
-                      memory = "64Mi"
-                    }
-                    limits = {
-                      cpu    = "200m"
-                      memory = "64Mi"
-                    }
-                  }
-                },
-                {
-                  name = "fleet-cleanup"
-                  resources = {
-                    requests = {
-                      cpu    = "25m"
-                      memory = "64Mi"
-                    }
-                    limits = {
-                      cpu    = "200m"
-                      memory = "64Mi"
-                    }
-                  }
-                },
-                {
-                  name = "fleet-controller"
-                  resources = {
-                    requests = {
-                      cpu    = "25m"
-                      memory = "64Mi"
-                    }
-                    limits = {
-                      cpu    = "200m"
-                      memory = "64Mi"
-                    }
-                  }
-                },
-              ]
-            }
-          }
-        }
-      })
-    }
+
     "cattle-fleet-system/gitjob" = {
       namespace = "cattle-fleet-system"
       resource  = "deployment"
@@ -590,6 +510,7 @@ locals {
         }
       })
     }
+
     "cattle-fleet-system/helmops" = {
       namespace = "cattle-fleet-system"
       resource  = "deployment"
@@ -626,6 +547,7 @@ locals {
         }
       })
     }
+
     "cattle-system/rancher-webhook" = {
       namespace = "cattle-system"
       resource  = "deployment"
@@ -662,8 +584,9 @@ locals {
         }
       })
     }
-    "fleet-local/rke2-machineconfig-cleanup-cronjob" = {
-      namespace = "fleet-local"
+
+    "fleet-default/rke2-machineconfig-cleanup-cronjob" = {
+      namespace = "fleet-default"
       resource  = "cronjob"
       name      = "rke2-machineconfig-cleanup-cronjob"
       patch = jsonencode({
@@ -703,6 +626,84 @@ locals {
       })
     }
   }
+
+  # Define patch definitions for Rancher 2.14.x+ (includes turtles and additional fleet resources)
+  rancher_managed_resource_patches_v214plus = merge(
+    local.rancher_managed_resource_patches_v212,
+    {
+      "cattle-fleet-system/fleet-controller-multi" = {
+        namespace = "cattle-fleet-system"
+        resource  = "deployment"
+        name      = "fleet-controller"
+        patch = jsonencode({
+          metadata = {
+            labels = {
+              "app.kubernetes.io/part-of" = "rancher"
+            }
+          }
+          spec = {
+            template = {
+              metadata = {
+                labels = {
+                  "app.kubernetes.io/part-of" = "rancher"
+                }
+              }
+              spec = {
+                containers = [
+                  {
+                    name = "fleet-agentmanagement"
+                    resources = {
+                      requests = {
+                        cpu    = "25m"
+                        memory = "64Mi"
+                      }
+                      limits = {
+                        cpu    = "200m"
+                        memory = "64Mi"
+                      }
+                    }
+                  },
+                  {
+                    name = "fleet-cleanup"
+                    resources = {
+                      requests = {
+                        cpu    = "25m"
+                        memory = "64Mi"
+                      }
+                      limits = {
+                        cpu    = "200m"
+                        memory = "64Mi"
+                      }
+                    }
+                  },
+                  {
+                    name = "fleet-controller"
+                    resources = {
+                      requests = {
+                        cpu    = "25m"
+                        memory = "64Mi"
+                      }
+                      limits = {
+                        cpu    = "200m"
+                        memory = "64Mi"
+                      }
+                    }
+                  },
+                ]
+              }
+            }
+          }
+        })
+      }
+    }
+  )
+
+  # Select patch set based on Rancher version
+  rancher_managed_resource_patches = (
+    contains(["2.12", "2.13"], local.rancher_version_major_minor)
+    ? local.rancher_managed_resource_patches_v212
+    : local.rancher_managed_resource_patches_v214plus
+  )
 }
 
 check "tls_source_valid" {

@@ -187,10 +187,14 @@ spec:
             secretKeyRef:
               name: "bootstrap-secret"
               key: "bootstrapPassword"
+        # - name: CATTLE_DEBUG
+          value: "${rancher_debug}"
+%{ if rancher_imperative_api_enabled ~}
         - name: IMPERATIVE_API_DIRECT
           value: "true"
         - name: IMPERATIVE_API_APP_SELECTOR
           value: rancher
+%{ endif ~}
         startupProbe:
           httpGet:
             path: /healthz
