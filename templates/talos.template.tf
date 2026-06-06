@@ -146,8 +146,8 @@ resource "null_resource" "cluster_health" {
         fi
 
         now=$(date +%s)
-        if [ $((now-start_time)) -ge 300 ]; then
-          echo "Error: cluster did not become healthy within 300s. Missing:$missing" >&2
+        if [ $((now-start_time)) -ge 600 ]; then
+          echo "Error: cluster did not become healthy within 600s. Missing:$missing" >&2
           for cp_ip in ${join(" ", [for v in local.controlplane_vms : v.ip])}; do
             echo "Diagnostics for control plane $cp_ip:" >&2
             timeout 10s talosctl --talosconfig="$talosconfig" service etcd -n "$cp_ip" >&2 || true
@@ -208,8 +208,8 @@ resource "null_resource" "controlplane_etcd_members_ready" {
         fi
 
         now=$(date +%s)
-        if [ $((now-start_time)) -ge 300 ]; then
-          echo "Error: etcd did not include all control planes within 300s. Missing:$missing" >&2
+        if [ $((now-start_time)) -ge 600 ]; then
+          echo "Error: etcd did not include all control planes within 600s. Missing:$missing" >&2
           for cp_ip in ${join(" ", [for v in local.controlplane_vms : v.ip])}; do
             echo "Diagnostics for control plane $cp_ip:" >&2
             timeout 10s talosctl --talosconfig="$talosconfig" service etcd -n "$cp_ip" >&2 || true
