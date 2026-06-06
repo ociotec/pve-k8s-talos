@@ -1015,6 +1015,36 @@ wait_for_rollout_ready() {
   exit 1
 }
 
+wait_for_resource_existence() {
+  local namespace="$1"
+  local resource="$2"
+  local timeout_seconds="${3:-120}"
+  local start
+
+  start="$(date +%s)"
+  while true; do
+    if kubectl -n "${namespace}" get "${resource}" >/dev/null 2>&1; then
+      return 0
+    fi
+    if (( $(date +%s) - start >= timeout_seconds )); then
+      error "Timed out waiting for ${namespace}/${resource} to exist." >&2
+      return 1
+    fi
+    sleep 5
+  done
+}
+
+check_rollout_status() {
+  local namespace="$1"
+  local resource="$2"
+  local timeout="${3:-120s}"
+
+  if kubectl -n "${namespace}" rollout status "${resource}" --timeout="${timeout}" >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
 print_job_failure_context() {
   local namespace="$1"
   local job_name="$2"
@@ -1707,6 +1737,29 @@ else
   run_tofu_init "${cluster_rook_04_workspace}"
   run tofu -chdir="${cluster_rook_04_workspace}" apply -auto-approve
   if [[ "${ceph_mode_value}" == "external" ]]; then
+    message "Waiting for Rook Ceph CSI resources to appear before restart..."
+    wait_for_resource_existence "rook-ceph" "deploy/csi-cephfsplugin-provisioner" 120
+    wait_for_resource_existence "rook-ceph" "deploy/csi-rbdplugin-provisioner" 120
+    wait_for_resource_existence "rook-ceph" "daemonset/csi-cephfsplugin" 120
+    wait_for_resource_existence "rook-ceph" "daemonset/csi-rbdplugin" 120
+
+    message "Checking current Rook Ceph CSI rollout state before restart..."
+    if ! check_rollout_status "rook-ceph" "deploy/csi-cephfsplugin-provisioner" "120s"; then
+      message "CSI CephFS provisioner was not yet stable before restart; proceeding with restart."
+    fi
+    if ! check_rollout_status "rook-ceph" "deploy/csi-rbdplugin-provisioner" "120s"; then
+      message "CSI RBD provisioner was not yet stable before restart; proceeding with restart."
+    fi
+    if ! check_rollout_status "rook-ceph" "daemonset/csi-cephfsplugin" "120s"; then
+      message "CSI CephFS daemonset was not yet stable before restart; proceeding with restart."
+    fi
+    if ! check_rollout_status "rook-ceph" "daemonset/csi-rbdplugin" "120s"; then
+      message "CSI RBD daemonset was not yet stable before restart; proceeding with restart."
+    fi
+
+    message "Allowing a short stabilization window before restarting Rook Ceph CSI components..."
+    sleep 15
+
     message "Restarting Rook Ceph CSI components to reload external Ceph configuration..."
     kubectl -n rook-ceph rollout restart deploy/csi-cephfsplugin-provisioner 1>/dev/null
     kubectl -n rook-ceph rollout restart deploy/csi-rbdplugin-provisioner 1>/dev/null
