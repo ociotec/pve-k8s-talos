@@ -88,7 +88,7 @@ markdown_link() {
 
 if [[ "${output_format}" == "markdown" ]]; then
   printf '# Cluster URLs and Credentials\n\n'
-  printf -- '- Cluster: `%s`\n' "${cluster_name}"
+  printf -- '- Cluster: `%s`\n\n' "${cluster_name}"
 fi
 
 workspace_has_state() {
