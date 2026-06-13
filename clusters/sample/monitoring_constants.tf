@@ -73,6 +73,8 @@ locals {
   prometheus_cpu_limit   = "2"
   prometheus_mem_request = "4Gi"
   prometheus_mem_limit   = "4Gi"
+  prometheus_go_mem_limit_percent = 80
+  prometheus_go_gc_percent        = 50
 
   # Compresses Prometheus TSDB WAL segments to reduce WAL bytes that must be read after restarts.
   # Docs: https://prometheus.io/docs/prometheus/latest/storage/#operational-aspects

@@ -268,6 +268,12 @@ locals {
   prometheus_storage_class_value         = local.prometheus_storage_class
   prometheus_wal_compression_value       = try(local.prometheus_wal_compression, true)
   prometheus_query_max_concurrency_value = try(local.prometheus_query_max_concurrency, 10)
+  prometheus_go_mem_limit_percent_value = try(local.prometheus_go_mem_limit_percent, 80)
+  prometheus_mem_limit_mib = can(regex("^[0-9]+Gi$", local.prometheus_mem_limit)) ? tonumber(trimsuffix(local.prometheus_mem_limit, "Gi")) * 1024 : (
+    can(regex("^[0-9]+Mi$", local.prometheus_mem_limit)) ? tonumber(trimsuffix(local.prometheus_mem_limit, "Mi")) : null
+  )
+  prometheus_go_mem_limit_mib = floor(local.prometheus_mem_limit_mib * local.prometheus_go_mem_limit_percent_value / 100)
+  prometheus_go_mem_limit     = format("%dMiB", local.prometheus_go_mem_limit_mib)
   prometheus_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/prometheus.yaml", {
       storage_class                          = local.prometheus_storage_class_value
@@ -280,6 +286,8 @@ locals {
       prometheus_cpu_limit                   = local.prometheus_cpu_limit
       prometheus_mem_request                 = local.prometheus_mem_request
       prometheus_mem_limit                   = local.prometheus_mem_limit
+      prometheus_go_mem_limit                = local.prometheus_go_mem_limit
+      prometheus_go_gc_percent               = tostring(try(local.prometheus_go_gc_percent, 50))
       prometheus_wal_compression             = local.prometheus_wal_compression_value
       prometheus_query_max_concurrency       = local.prometheus_query_max_concurrency_value
       prometheus_tls_secret_name             = local.prometheus_tls_secret_name
@@ -598,6 +606,20 @@ check "grafana_go_mem_limit_percent_valid" {
   assert {
     condition     = local.grafana_go_mem_limit_percent_value > 0 && local.grafana_go_mem_limit_percent_value < 100
     error_message = format("grafana_go_mem_limit_percent must be greater than 0 and less than 100. Got %s.", tostring(local.grafana_go_mem_limit_percent_value))
+  }
+}
+
+check "prometheus_go_memory_limit_supported" {
+  assert {
+    condition     = local.prometheus_mem_limit_mib != null
+    error_message = format("prometheus_mem_limit must use a supported whole-number memory unit for GOMEMLIMIT derivation: Mi or Gi. Got %q.", local.prometheus_mem_limit)
+  }
+}
+
+check "prometheus_go_mem_limit_percent_valid" {
+  assert {
+    condition     = local.prometheus_go_mem_limit_percent_value > 0 && local.prometheus_go_mem_limit_percent_value < 100
+    error_message = format("prometheus_go_mem_limit_percent must be greater than 0 and less than 100. Got %s.", tostring(local.prometheus_go_mem_limit_percent_value))
   }
 }
 

@@ -496,6 +496,11 @@ spec:
             limits:
               cpu: ${prometheus_cpu_limit}
               memory: ${prometheus_mem_limit}
+          env:
+            - name: GOMEMLIMIT
+              value: "${prometheus_go_mem_limit}"
+            - name: GOGC
+              value: "${prometheus_go_gc_percent}"
           args:
             - --config.file=/etc/prometheus/prometheus.yml
             - --storage.tsdb.path=/prometheus
