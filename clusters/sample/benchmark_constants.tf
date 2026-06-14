@@ -28,6 +28,25 @@ locals {
   benchmark_disk_block_size    = "1M"
   benchmark_disk_runtime       = "60"
 
+  # Keep the Kafka benchmark disabled in sample clusters unless a real Redpanda
+  # section is present and the profile set is intentionally enabled.
+  benchmark_kafka_enabled = false
+
+  benchmark_kafka_metadata_topics     = 50
+  benchmark_kafka_metadata_partitions = 1
+  benchmark_kafka_metadata_producers  = 1
+  benchmark_kafka_metadata_consumers  = 1
+
+  benchmark_kafka_balanced_topics     = 20
+  benchmark_kafka_balanced_partitions = 4
+  benchmark_kafka_balanced_producers  = 2
+  benchmark_kafka_balanced_consumers  = 2
+
+  benchmark_kafka_throughput_topics     = 10
+  benchmark_kafka_throughput_partitions = 8
+  benchmark_kafka_throughput_producers  = 4
+  benchmark_kafka_throughput_consumers  = 4
+
   benchmark_disk_storage_classes = {
     rbd-replica = {
       enabled            = local.ceph_block_replicated.enabled
