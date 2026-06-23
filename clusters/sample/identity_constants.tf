@@ -368,8 +368,9 @@ locals {
 
           sync = {
             sync_registrations   = true
-            changed_sync_period  = -1
-            full_sync_period     = -1
+            # Keep LDAP membership changes flowing into Keycloak without waiting for a manual apply.
+            changed_sync_period  = 300
+            full_sync_period     = 3600
             remove_invalid_users = true
           }
 
