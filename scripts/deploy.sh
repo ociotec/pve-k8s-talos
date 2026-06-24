@@ -1715,8 +1715,11 @@ else
   prepare_rook_workspaces
   ceph_mode_value="$(ceph_mode_from_constants "${cluster_ceph_constants_path}")"
   ceph_phase="$(kubectl -n rook-ceph get cephcluster rook-ceph -o jsonpath='{.status.phase}' 2>/dev/null || true)"
-  if [[ "${ceph_phase}" == "Ready" ]]; then
-    message "Rook Ceph cluster already Ready; skipping operator/cluster apply."
+  if [[ "${ceph_phase}" == "Ready" || ("${ceph_mode_value}" == "external" && "${ceph_phase}" == "Connected") ]]; then
+    message "Rook Ceph cluster already healthy (phase=${ceph_phase}); reconciling cluster spec without operator bootstrap..."
+    run_tofu_init "${cluster_rook_02_workspace}"
+    run tofu -chdir="${cluster_rook_02_workspace}" apply -auto-approve -parallelism=1
+    wait_for_cephcluster_ready "rook-ceph" "rook-ceph" "${ceph_mode_value}" "180"
   else
     message "Deploying Rook Ceph operator..."
     clear_rook_operator_restart_annotation

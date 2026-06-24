@@ -52,3 +52,4 @@ monitoring/constants.tf
 !/infra-vms/sample/*.tfvars
 /docs/plans/**
 /docs/s3-storage-evaluation.pdf
+/.playwright-mcp

@@ -16,16 +16,23 @@ variable "kubeconfig_path" {
   default = "../../kubeconfig"
 }
 
+variable "cephfs_kernel_mount_options" {
+  type        = string
+  default     = "recover_session=clean"
+  description = "CephFS kernel client mount options applied by Rook CSI."
+}
+
 provider "kubernetes" {
   config_path = var.kubeconfig_path
 }
 
 locals {
-  effective_ceph_mode          = try(local.ceph_mode, "internal")
-  effective_ceph_namespace     = try(local.ceph_namespace, "rook-ceph")
-  effective_ceph_cluster_name  = try(local.ceph_cluster_name, "rook-ceph")
-  effective_ceph_cluster_image = try(local.ceph_cluster_image, "quay.io/ceph/ceph:v20.2.1")
-  effective_ceph_name_prefix   = try(local.ceph_name_prefix, "cluster")
+  effective_ceph_mode                   = try(local.ceph_mode, "internal")
+  effective_ceph_namespace              = try(local.ceph_namespace, "rook-ceph")
+  effective_ceph_cluster_name           = try(local.ceph_cluster_name, "rook-ceph")
+  effective_ceph_cluster_image          = try(local.ceph_cluster_image, "quay.io/ceph/ceph:v20.2.1")
+  effective_ceph_name_prefix            = try(local.ceph_name_prefix, "cluster")
+  effective_cephfs_kernel_mount_options = var.cephfs_kernel_mount_options
 
   external_ceph     = try(local.ceph_external, {})
   external_monitors = try(local.external_ceph.monitors, [])
@@ -195,6 +202,11 @@ locals {
       cephVersion = merge(try(local.internal_cluster.spec.cephVersion, {}), {
         image = local.effective_ceph_cluster_image
       })
+      csi = merge(try(local.internal_cluster.spec.csi, {}), {
+        cephfs = merge(try(local.internal_cluster.spec.csi.cephfs, {}), {
+          kernelMountOptions = local.effective_cephfs_kernel_mount_options
+        })
+      })
     })
   })
 
@@ -216,6 +228,14 @@ locals {
       monitoring = {
         enabled         = false
         metricsDisabled = false
+      }
+      csi = {
+        readAffinity = {
+          enabled = false
+        }
+        cephfs = {
+          kernelMountOptions = local.effective_cephfs_kernel_mount_options
+        }
       }
     }
   }
@@ -243,8 +263,13 @@ resource "null_resource" "external_rbd_pools" {
   for_each = local.external_block_pools
 
   triggers = {
-    pool_spec      = jsonencode(each.value)
-    converge_every = timestamp()
+    pool_spec = jsonencode(each.value)
+  }
+
+  lifecycle {
+    # Ignore the legacy timestamp trigger so existing state can converge without
+    # re-running external Ceph operations once.
+    ignore_changes = [triggers["converge_every"]]
   }
 
   provisioner "local-exec" {
@@ -267,7 +292,12 @@ resource "null_resource" "external_ceph_filesystems" {
 
   triggers = {
     filesystem_spec = jsonencode(each.value)
-    converge_every  = timestamp()
+  }
+
+  lifecycle {
+    # Ignore the legacy timestamp trigger so existing state can converge without
+    # re-running external Ceph operations once.
+    ignore_changes = [triggers["converge_every"]]
   }
 
   provisioner "local-exec" {
