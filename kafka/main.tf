@@ -444,10 +444,6 @@ locals {
         local = {
           path = local.redpanda_broker_data_host_path_value
         }
-        claimRef = {
-          namespace = local.redpanda_namespace_value
-          name      = format("datadir-%s-%d", local.redpanda_resource_name_value, broker_id)
-        }
         nodeAffinity = {
           required = {
             nodeSelectorTerms = [
@@ -968,6 +964,9 @@ resource "kubernetes_manifest" "broker_pv" {
   for_each = local.broker_vms_by_id
 
   manifest = local.redpanda_persistent_volumes_by_name[format("%s-data-%s", local.redpanda_resource_name_value, each.key)]
+  computed_fields = [
+    "spec.claimRef",
+  ]
 
   depends_on = [
     kubernetes_manifest.storage_class,
@@ -1010,6 +1009,7 @@ resource "kubernetes_manifest" "statefulset" {
   manifest = local.redpanda_statefulsets_by_name[local.redpanda_resource_name_value]
 
   computed_fields = [
+    "object.spec.template.metadata.annotations",
     "spec.volumeClaimTemplates[0].metadata.creationTimestamp",
   ]
 
