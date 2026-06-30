@@ -40,6 +40,13 @@ constants = {
     # Comma-separated list, leave empty to disable
     "ntp_servers" = ""
   }
+  "network2" = {
+    # Optional second VM network. Leave bridge_device empty to disable.
+    "net_size"      = ""
+    "bridge_device" = ""
+    # Leave empty to disable
+    "vlan_tag" = ""
+  }
   "talos" = {
     # Generate new ISO & Talos factory image IDs from https://factory.talos.dev/
     "version" = "v1.13.0"

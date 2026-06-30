@@ -25,6 +25,8 @@ vms = {
     vm_id     = 1011
     type      = "worker-kafka"
     ip        = "192.168.1.61"
+    # Optional second interface IP, required when constants["network2"].bridge_device is set.
+    # ip2       = "192.0.2.61"
     k8s_labels = {
       "kafka-node" = "0"
     }

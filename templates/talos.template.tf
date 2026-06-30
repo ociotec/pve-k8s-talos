@@ -16,6 +16,63 @@ locals {
   primary_controlplane_vms     = { "__CONTROLPLANE_PRIMARY__" = local.controlplane_vms["__CONTROLPLANE_PRIMARY__"] }
   secondary_controlplane_names = sort([for k, _ in local.controlplane_vms : k if k != "__CONTROLPLANE_PRIMARY__"])
   secondary_controlplane_vms   = { for k in local.secondary_controlplane_names : k => local.controlplane_vms[k] }
+  network2_enabled             = try(trimspace(var.constants["network2"]["bridge_device"]) != "", false)
+  secondary_network_worker_vms = local.cluster_already_bootstrapped && local.network2_enabled ? {
+    for name, vm in local.worker_vms : name => vm
+    if trimspace(try(vm.ip2 != null ? vm.ip2 : "", "")) != ""
+  } : {}
+  tofu_managed_worker_vms = local.cluster_already_bootstrapped ? {
+    for name, vm in local.worker_vms : name => vm
+    if !contains(keys(local.secondary_network_worker_vms), name)
+  } : local.worker_vms
+  machine_configuration_apply_modes = {
+    for name, vm in var.vms : name => (
+      local.network2_enabled &&
+      var.resources[vm.type].k8s_node == "worker" &&
+      trimspace(try(vm.ip2 != null ? vm.ip2 : "", "")) != "" ?
+      "staged_if_needing_reboot" :
+      "auto"
+    )
+  }
+  network_interface_patches = {
+    for name, vm in var.vms : name => yamlencode({
+      machine = {
+        network = {
+          interfaces = concat(
+            [
+              merge(
+                {
+                  deviceSelector = {
+                    hardwareAddr = lower(proxmox_virtual_environment_vm.create_pve_vms[name].network_device[0].mac_address)
+                  }
+                  addresses = ["${vm.ip}/${var.constants["network"]["net_size"]}"]
+                  routes = [
+                    {
+                      network = "0.0.0.0/0"
+                      gateway = var.constants["network"]["gateway"]
+                    }
+                  ]
+                },
+                var.resources[vm.type].k8s_node == "controlplane" && trimspace(try(var.constants["talos"]["controlplane_vip"], "")) != "" ? {
+                  vip = {
+                    ip = var.constants["talos"]["controlplane_vip"]
+                  }
+                } : {}
+              )
+            ],
+            local.network2_enabled && trimspace(try(vm.ip2 != null ? vm.ip2 : "", "")) != "" && try(proxmox_virtual_environment_vm.create_pve_vms[name].network_device[1].mac_address != null, false) ? [
+              {
+                deviceSelector = {
+                  hardwareAddr = lower(proxmox_virtual_environment_vm.create_pve_vms[name].network_device[1].mac_address)
+                }
+                addresses = ["${vm.ip2}/${var.constants["network2"]["net_size"]}"]
+              }
+            ] : []
+          )
+        }
+      }
+    })
+  }
 }
 
 # Generated from templates/controlplane-data.template.tf
@@ -24,6 +81,7 @@ __CONTROLPLANE_DATA__
 resource "talos_machine_configuration_apply" "controlplane_primary_config_apply" {
   for_each                    = local.primary_controlplane_vms
   depends_on                  = [null_resource.all_vms_ready]
+  apply_mode                  = local.machine_configuration_apply_modes[each.key]
   client_configuration        = talos_machine_secrets.machine_secrets.client_configuration
   machine_configuration_input = local.controlplane_machine_config[each.key]
   node                        = each.value.ip
@@ -32,6 +90,7 @@ resource "talos_machine_configuration_apply" "controlplane_primary_config_apply"
 resource "talos_machine_configuration_apply" "controlplane_secondary_config_apply" {
   for_each                    = local.secondary_controlplane_vms
   depends_on                  = [null_resource.all_vms_ready]
+  apply_mode                  = local.machine_configuration_apply_modes[each.key]
   client_configuration        = talos_machine_secrets.machine_secrets.client_configuration
   machine_configuration_input = local.controlplane_machine_config[each.key]
   node                        = each.value.ip
@@ -44,11 +103,19 @@ __WORKER_DATA__
 __MACHINE_CONFIG_LOCALS__
 
 resource "talos_machine_configuration_apply" "worker_config_apply" {
-  for_each                    = local.worker_vms
+  for_each                    = local.tofu_managed_worker_vms
   depends_on                  = [null_resource.controlplane_etcd_members_ready]
+  apply_mode                  = local.machine_configuration_apply_modes[each.key]
   client_configuration        = talos_machine_secrets.machine_secrets.client_configuration
   machine_configuration_input = local.worker_machine_config[each.key]
   node                        = each.value.ip
+}
+
+resource "local_sensitive_file" "secondary_network_worker_machine_config" {
+  for_each        = local.secondary_network_worker_vms
+  filename        = "${path.module}/machineconfig-${each.key}.yaml"
+  file_permission = "0600"
+  content         = local.worker_machine_config[each.key]
 }
 
 resource "null_resource" "controlplane_api_ready" {

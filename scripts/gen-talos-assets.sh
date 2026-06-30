@@ -195,12 +195,60 @@ if [[ ! -r "${machine_config_locals_template_path}" ]]; then
   exit 1
 fi
 
+read_constant_map_value() {
+  local map_name="$1"
+  local key_name="$2"
+
+  awk -v map_name="${map_name}" -v key_name="${key_name}" '
+    function brace_delta(line,   tmp, opens, closes) {
+      tmp = line
+      opens = gsub(/{/, "{", tmp)
+      tmp = line
+      closes = gsub(/}/, "}", tmp)
+      return opens - closes
+    }
+
+    /^[[:space:]]*#/ { next }
+
+    {
+      line = $0
+      if (!in_map && line ~ "^[[:space:]]*\"?" map_name "\"?[[:space:]]*=[[:space:]]*\\{") {
+        in_map = 1
+        map_depth = brace_delta(line)
+        if (map_depth <= 0) {
+          map_depth = 1
+        }
+        next
+      }
+
+      if (in_map) {
+        if (match(line, "\"?" key_name "\"?[[:space:]]*=[[:space:]]*\"[^\"]*\"")) {
+          value = substr(line, RSTART, RLENGTH)
+          sub(/^[^=]*=[[:space:]]*"/, "", value)
+          sub(/".*/, "", value)
+          print value
+          exit
+        }
+
+        map_depth += brace_delta(line)
+        if (map_depth <= 0) {
+          in_map = 0
+          map_depth = 0
+        }
+      }
+    }
+  ' "${constants_path}"
+}
+
 # Read network constants from constants.auto.tfvars.
-net_size="$(awk -F'"' '/"net_size"/ { print $4; exit }' "${constants_path}")"
-gateway="$(awk -F'"' '/"gateway"/ { print $4; exit }' "${constants_path}")"
-dns_servers="$(awk -F'"' '/"dns_servers"/ { print $4; exit }' "${constants_path}")"
-ntp_servers="$(awk -F'"' '/"ntp_servers"/ { print $4; exit }' "${constants_path}")"
-disable_ipv6="$(awk -F'"' '/"disable_ipv6"/ { print $4; exit }' "${constants_path}")"
+net_size="$(read_constant_map_value "network" "net_size")"
+gateway="$(read_constant_map_value "network" "gateway")"
+dns_servers="$(read_constant_map_value "network" "dns_servers")"
+ntp_servers="$(read_constant_map_value "network" "ntp_servers")"
+disable_ipv6="$(read_constant_map_value "network" "disable_ipv6")"
+network2_net_size="$(read_constant_map_value "network2" "net_size")"
+network2_bridge_device="$(read_constant_map_value "network2" "bridge_device")"
+network2_vlan_tag="$(read_constant_map_value "network2" "vlan_tag")"
 talos_version="$(awk -F'"' '/"version"/ { print $4; exit }' "${constants_path}")"
 talos_factory_image_id="$(awk -F'"' '/"factory_image_id"/ { print $4; exit }' "${constants_path}")"
 talos_discovery_service_disabled="$(awk -F'"' '/"discovery_service_disabled"/ { print $4; exit }' "${constants_path}")"
@@ -468,6 +516,24 @@ legacy_proxy_ca_path="$(trim "${legacy_proxy_ca_path}")"
 talos_discovery_service_disabled="$(trim "${talos_discovery_service_disabled}")"
 talos_discovery_service_endpoint="$(trim "${talos_discovery_service_endpoint}")"
 talos_max_pods="$(trim "${talos_max_pods}")"
+network2_net_size="$(trim "${network2_net_size}")"
+network2_bridge_device="$(trim "${network2_bridge_device}")"
+network2_vlan_tag="$(trim "${network2_vlan_tag}")"
+network2_enabled=false
+
+if [[ -n "${network2_bridge_device}" ]]; then
+  network2_enabled=true
+  if [[ -z "${network2_net_size}" ]]; then
+    echo "Error: network2.bridge_device is set, but network2.net_size is empty." >&2
+    echo "Fix: set constants[\"network2\"][\"net_size\"] to the prefix length for ip2 addresses." >&2
+    exit 1
+  fi
+  if [[ ! "${network2_net_size}" =~ ^[0-9]+$ ]] || (( network2_net_size < 0 || network2_net_size > 32 )); then
+    echo "Error: network2.net_size must be an IPv4 prefix length from 0 to 32 (got ${network2_net_size})." >&2
+    echo "Fix: set constants[\"network2\"][\"net_size\"] to a value such as 24." >&2
+    exit 1
+  fi
+fi
 
 if [[ -n "${proxy_url}" && ! "${proxy_url}" =~ ^https?:// ]]; then
   echo "Error: network.proxy_url must start with http:// or https:// (got ${proxy_url})." >&2
@@ -676,8 +742,8 @@ fi
 template="$(cat "${template_path}")"
 
 # Basic template sanity check.
-if [[ "${template}" != *'${ip}'* || "${template}" != *'${cidr}'* || "${template}" != *'${vip_section}'* || "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${kubelet_extra_args_section}'* || "${template}" != *'${machine_registries_section}'* || "${template}" != *'${k8s_node_labels_section}'* || "${template}" != *'${proxy_env_section}'* || "${template}" != *'${cert_files_section}'* || "${template}" != *'${grub_use_uki_cmdline_section}'* || "${template}" != *'${talos_discovery_service_section}'* || "${template}" != *'${extra_host_entries_section}'* ]]; then
-  echo "Error: template is missing required placeholders (\${ip}, \${cidr}, \${vip_section}, \${machine_disks_section}, \${kubelet_extra_mounts_section}, \${kubelet_extra_args_section}, \${machine_registries_section}, \${k8s_node_labels_section}, \${proxy_env_section}, \${cert_files_section}, \${grub_use_uki_cmdline_section}, \${talos_discovery_service_section}, \${extra_host_entries_section})." >&2
+if [[ "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${kubelet_extra_args_section}'* || "${template}" != *'${machine_registries_section}'* || "${template}" != *'${k8s_node_labels_section}'* || "${template}" != *'${proxy_env_section}'* || "${template}" != *'${cert_files_section}'* || "${template}" != *'${grub_use_uki_cmdline_section}'* || "${template}" != *'${talos_discovery_service_section}'* || "${template}" != *'${extra_host_entries_section}'* ]]; then
+  echo "Error: template is missing required placeholders (\${machine_disks_section}, \${kubelet_extra_mounts_section}, \${kubelet_extra_args_section}, \${machine_registries_section}, \${k8s_node_labels_section}, \${proxy_env_section}, \${cert_files_section}, \${grub_use_uki_cmdline_section}, \${talos_discovery_service_section}, \${extra_host_entries_section})." >&2
   echo "Fix: restore patches/machine.template.yaml or add the missing placeholders." >&2
   exit 1
 fi
@@ -802,6 +868,59 @@ if [[ ${#vm_ips[@]} -eq 0 ]]; then
   exit 1
 fi
 
+declare -A vm_ip2s
+while IFS='|' read -r name ip2; do
+  if [[ -z "${name}" || -z "${ip2}" ]]; then
+    continue
+  fi
+  vm_ip2s["${name}"]="${ip2}"
+done < <(
+  awk '
+    function brace_delta(line,   raw, opens, closes) {
+      raw = line
+      gsub(/#.*/, "", raw)
+      opens = gsub(/{/, "{", raw)
+      closes = gsub(/}/, "}", raw)
+      return opens - closes
+    }
+
+    /^[[:space:]]*#/ { next }
+    match($0, /"[^"]+"[[:space:]]*=[[:space:]]*{/) {
+      name = $0
+      sub(/^[^"]*"/, "", name)
+      sub(/".*/, "", name)
+      in_block = 1
+      block_depth = brace_delta($0)
+      if (block_depth <= 0) {
+        block_depth = 1
+      }
+      next
+    }
+    in_block && match($0, /ip2[[:space:]]*=[[:space:]]*"[^"]+"/) {
+      ip2 = $0
+      sub(/^[^"]*"/, "", ip2)
+      sub(/".*/, "", ip2)
+      print name "|" ip2
+      next
+    }
+    in_block {
+      block_depth += brace_delta($0)
+      if (block_depth <= 0) {
+        in_block = 0
+        block_depth = 0
+      }
+    }
+  ' "${vms_path}"
+)
+
+for name in "${!vm_ip2s[@]}"; do
+  if [[ ! "${vm_ip2s[${name}]}" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+    echo "Error: invalid ip2 format for ${name}: ${vm_ip2s[${name}]}" >&2
+    echo "Fix: set a valid IPv4 address in vms.auto.tfvars for ${name}." >&2
+    exit 1
+  fi
+done
+
 proxy_env_section="{}"
 cert_files_section="[]"
 machine_registries_section=""
@@ -907,6 +1026,12 @@ if [[ -n "${proxy_url}" ]]; then
   while IFS= read -r value; do
     add_no_proxy_entry "${value}"
   done < <(printf "%s\n" "${vm_ips[@]}" | sort -u)
+
+  if [[ "${network2_enabled}" == "true" ]]; then
+    while IFS= read -r value; do
+      add_no_proxy_entry "${value}"
+    done < <(printf "%s\n" "${vm_ip2s[@]}" | sort -u)
+  fi
 
   add_no_proxy_entry "kubernetes"
   add_no_proxy_entry "kubernetes.default"
@@ -1428,14 +1553,6 @@ for name in "${!vm_ips[@]}"; do
   else
     kubelet_extra_args_section=""
   fi
-  if [[ " ${controlplane_names[*]} " == *" ${name} "* && -n "${controlplane_vip}" ]]; then
-    vip_section=$'\n'
-    vip_section+=$'        vip:\n'
-    vip_section+=$'          ip: "'"${controlplane_vip}"'"'
-  else
-    vip_section=""
-  fi
-
   for key in "${!resource_labels[@]}"; do
     if [[ "${key}" == "${resource_type}|"* ]]; then
       label_key="${key#${resource_type}|}"
@@ -1472,10 +1589,6 @@ for name in "${!vm_ips[@]}"; do
   fi
 
   rendered="${template}"
-  rendered="${rendered//'${ip}'/${ip}}"
-  rendered="${rendered//'${cidr}'/${net_size}}"
-  rendered="${rendered//'${vip_section}'/${vip_section}}"
-  rendered="${rendered//'${gateway}'/${gateway}}"
   rendered="${rendered//'${dns_servers_section}'/${dns_servers_section}}"
   rendered="${rendered//'${extra_host_entries_section}'/${extra_host_entries_section}}"
   rendered="${rendered//'${ntp_servers_section}'/${ntp_servers_section}}"

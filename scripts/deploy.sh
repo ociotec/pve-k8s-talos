@@ -284,6 +284,52 @@ tf_string_value() {
   awk -v name="${name}" -F'"' '$0 ~ "^[[:space:]]*" name "[[:space:]]*=" { print $2; exit }' "${file}" 2>/dev/null || true
 }
 
+tf_map_string_value() {
+  local file="$1"
+  local map_name="$2"
+  local key_name="$3"
+
+  awk -v map_name="${map_name}" -v key_name="${key_name}" '
+    function brace_delta(line,   tmp, opens, closes) {
+      tmp = line
+      opens = gsub(/{/, "{", tmp)
+      tmp = line
+      closes = gsub(/}/, "}", tmp)
+      return opens - closes
+    }
+
+    /^[[:space:]]*#/ { next }
+
+    {
+      line = $0
+      if (!in_map && line ~ "^[[:space:]]*\"?" map_name "\"?[[:space:]]*=[[:space:]]*\\{") {
+        in_map = 1
+        map_depth = brace_delta(line)
+        if (map_depth <= 0) {
+          map_depth = 1
+        }
+        next
+      }
+
+      if (in_map) {
+        if (match(line, "\"?" key_name "\"?[[:space:]]*=[[:space:]]*\"[^\"]*\"")) {
+          value = substr(line, RSTART, RLENGTH)
+          sub(/^[^=]*=[[:space:]]*"/, "", value)
+          sub(/".*/, "", value)
+          print value
+          exit
+        }
+
+        map_depth += brace_delta(line)
+        if (map_depth <= 0) {
+          in_map = 0
+          map_depth = 0
+        }
+      }
+    }
+  ' "${file}" 2>/dev/null || true
+}
+
 resolve_cluster_path() {
   local raw_path="$1"
 
@@ -449,6 +495,381 @@ run_tofu_init() {
   cat "${init_log}" >&2
   rm -f "${init_log}"
   return 1
+}
+
+secondary_network_enabled() {
+  local bridge_device
+
+  bridge_device="$(tf_map_string_value "${cluster_constants_path}" "network2" "bridge_device")"
+  [[ -n "${bridge_device}" ]]
+}
+
+root_apply_args() {
+  if secondary_network_enabled; then
+    printf '%s\n' "-parallelism=1"
+  fi
+}
+
+collect_workers_with_secondary_network() {
+  awk '
+    function brace_delta(line,   raw, opens, closes) {
+      raw = line
+      gsub(/#.*/, "", raw)
+      opens = gsub(/{/, "{", raw)
+      closes = gsub(/}/, "}", raw)
+      return opens - closes
+    }
+
+    /^[[:space:]]*#/ { next }
+
+    match($0, /"[^"]+"[[:space:]]*=[[:space:]]*{/) {
+      name = $0
+      sub(/^[^"]*"/, "", name)
+      sub(/".*/, "", name)
+      in_block = 1
+      block_depth = brace_delta($0)
+      if (block_depth <= 0) {
+        block_depth = 1
+      }
+      node_name = ""
+      vm_id = ""
+      vm_type = ""
+      ip = ""
+      ip2 = ""
+      next
+    }
+
+    in_block && match($0, /node_name[[:space:]]*=[[:space:]]*"[^"]+"/) {
+      node_name = $0
+      sub(/^[^"]*"/, "", node_name)
+      sub(/".*/, "", node_name)
+      next
+    }
+
+    in_block && match($0, /vm_id[[:space:]]*=[[:space:]]*[0-9]+/) {
+      vm_id = $0
+      sub(/^[^=]*=[[:space:]]*/, "", vm_id)
+      gsub(/[[:space:]]/, "", vm_id)
+      next
+    }
+
+    in_block && match($0, /type[[:space:]]*=[[:space:]]*"[^"]+"/) {
+      vm_type = $0
+      sub(/^[^"]*"/, "", vm_type)
+      sub(/".*/, "", vm_type)
+      next
+    }
+
+    in_block && match($0, /ip[[:space:]]*=[[:space:]]*"[^"]+"/) {
+      ip = $0
+      sub(/^[^"]*"/, "", ip)
+      sub(/".*/, "", ip)
+      next
+    }
+
+    in_block && match($0, /ip2[[:space:]]*=[[:space:]]*"[^"]+"/) {
+      ip2 = $0
+      sub(/^[^"]*"/, "", ip2)
+      sub(/".*/, "", ip2)
+      next
+    }
+
+    in_block {
+      block_depth += brace_delta($0)
+      if (block_depth <= 0) {
+        if (vm_type ~ /^worker/ && node_name != "" && vm_id != "" && ip != "" && ip2 != "") {
+          print name "|" node_name "|" vm_id "|" ip "|" ip2
+        }
+        in_block = 0
+        block_depth = 0
+      }
+    }
+  ' "${cluster_vms_path}" | sort
+}
+
+proxmox_api_base() {
+  local base="${TF_VAR_proxmox_endpoint:-${PROXMOX_VE_ENDPOINT:-}}"
+
+  if [[ -z "${base}" ]]; then
+    error "Missing Proxmox API endpoint in environment." >&2
+    exit 1
+  fi
+
+  case "${base%/}" in
+    */api2/json)
+      printf '%s' "${base%/}"
+      ;;
+    *)
+      printf '%s/api2/json' "${base%/}"
+      ;;
+  esac
+}
+
+proxmox_api_request() {
+  local method="$1"
+  local path="$2"
+  local base
+  local insecure_flag="${TF_VAR_proxmox_insecure:-${PROXMOX_VE_INSECURE:-false}}"
+  local token="${TF_VAR_proxmox_api_token:-${PROXMOX_VE_API_TOKEN:-}}"
+  local -a curl_args
+
+  if [[ -z "${token}" ]]; then
+    error "Missing Proxmox API token in environment." >&2
+    exit 1
+  fi
+
+  base="$(proxmox_api_base)"
+  curl_args=(-sS -X "${method}" -H "Authorization: PVEAPIToken=${token}")
+  if [[ "${insecure_flag}" == "true" ]]; then
+    curl_args=(-sk -X "${method}" -H "Authorization: PVEAPIToken=${token}")
+  fi
+
+  curl "${curl_args[@]}" "${base}${path}"
+}
+
+wait_for_proxmox_task_completion() {
+  local node_name="$1"
+  local upid="$2"
+  local timeout_seconds="${3:-300}"
+  local start
+  local task_json
+  local status
+  local exitstatus
+
+  start="$(date +%s)"
+  while true; do
+    task_json="$(proxmox_api_request GET "/nodes/${node_name}/tasks/${upid}/status")"
+    status="$(printf '%s' "${task_json}" | jq -r '.data.status // empty')"
+    exitstatus="$(printf '%s' "${task_json}" | jq -r '.data.exitstatus // empty')"
+
+    if [[ "${status}" == "stopped" ]]; then
+      if [[ -n "${exitstatus}" && "${exitstatus}" != "OK" ]]; then
+        error "Proxmox task ${upid} on ${node_name} failed: ${exitstatus}" >&2
+        exit 1
+      fi
+      return 0
+    fi
+
+    if (( $(date +%s) - start >= timeout_seconds )); then
+      error "Timed out waiting for Proxmox task ${upid} on ${node_name}." >&2
+      exit 1
+    fi
+    sleep 5
+  done
+}
+
+talos_boot_id() {
+  local node_ip="$1"
+
+  talosctl --talosconfig "${cluster_talosconfig_path}" -n "${node_ip}" read /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n'
+}
+
+node_has_persistent_machineconfig() {
+  local node_ip="$1"
+  talosctl --talosconfig "${cluster_talosconfig_path}" -n "${node_ip}" get machineconfig persistent 1>/dev/null 2>&1
+}
+
+node_has_secondary_ip_active() {
+  local node_ip="$1"
+  local ip2="$2"
+
+  talosctl --talosconfig "${cluster_talosconfig_path}" -n "${node_ip}" get addresses -o yaml 2>/dev/null | grep -q "${ip2}/"
+}
+
+node_primary_default_route_ok() {
+  local node_ip="$1"
+
+  talosctl --talosconfig "${cluster_talosconfig_path}" -n "${node_ip}" get routespecs -o yaml 2>/dev/null | grep -q 'outLinkName: eth0'
+}
+
+secondary_network_machineconfig_path() {
+  local worker_name="$1"
+  printf '%s/machineconfig-%s.yaml' "${cluster_root_workspace}" "${worker_name}"
+}
+
+wait_for_node_ready() {
+  local node_name="$1"
+  local timeout_seconds="${2:-600}"
+  local start
+  local ready
+
+  start="$(date +%s)"
+  while true; do
+    ready="$(kubectl get node "${node_name}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
+    if [[ "${ready}" == "True" ]]; then
+      return 0
+    fi
+    if (( $(date +%s) - start >= timeout_seconds )); then
+      error "Timed out waiting for ${node_name} to become Ready." >&2
+      exit 1
+    fi
+    sleep 5
+  done
+}
+
+reset_vm_via_proxmox() {
+  local node_name="$1"
+  local vm_id="$2"
+  local response
+  local upid
+
+  message "Resetting VM ${vm_id} on ${node_name} to activate staged Talos config..."
+  response="$(proxmox_api_request POST "/nodes/${node_name}/qemu/${vm_id}/status/reset")"
+  upid="$(printf '%s' "${response}" | jq -r '.data // empty')"
+  if [[ -z "${upid}" ]]; then
+    error "Failed to start Proxmox reset task for VM ${vm_id} on ${node_name}." >&2
+    exit 1
+  fi
+  wait_for_proxmox_task_completion "${node_name}" "${upid}"
+}
+
+stage_secondary_network_worker_configs() {
+  local worker_lines=()
+  local line
+  local worker_name
+  local pve_node_name
+  local vm_id
+  local worker_ip
+  local worker_ip2
+  local machineconfig_path
+  local start
+
+  if ! secondary_network_enabled; then
+    return 0
+  fi
+
+  mapfile -t worker_lines < <(collect_workers_with_secondary_network)
+  if [[ "${#worker_lines[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  require_cmd talosctl
+
+  message "Staging secondary-network Talos config on workers..."
+  for line in "${worker_lines[@]}"; do
+    IFS='|' read -r worker_name pve_node_name vm_id worker_ip worker_ip2 <<<"${line}"
+
+    if ! node_has_persistent_machineconfig "${worker_ip}"; then
+      if node_has_secondary_ip_active "${worker_ip}" "${worker_ip2}" && node_primary_default_route_ok "${worker_ip}"; then
+        message "${worker_name} already has the secondary IP active; skipping config stage."
+        continue
+      fi
+    fi
+
+    if node_has_persistent_machineconfig "${worker_ip}"; then
+      message "${worker_name} already has staged Talos config; skipping config stage."
+      continue
+    fi
+
+    machineconfig_path="$(secondary_network_machineconfig_path "${worker_name}")"
+    if [[ ! -f "${machineconfig_path}" ]]; then
+      error "Missing rendered machineconfig for ${worker_name}: ${machineconfig_path}" >&2
+      exit 1
+    fi
+
+    talosctl --talosconfig "${cluster_talosconfig_path}" \
+      -n "${worker_ip}" \
+      apply-config \
+      --mode staged \
+      --file "${machineconfig_path}" 1>/dev/null
+
+    start="$(date +%s)"
+    until node_has_persistent_machineconfig "${worker_ip}"; do
+      if (( $(date +%s) - start >= 120 )); then
+        error "Timed out waiting for ${worker_name} to accept the staged secondary-network machineconfig." >&2
+        exit 1
+      fi
+      sleep 5
+    done
+  done
+}
+
+reconcile_secondary_network_workers() {
+  local worker_lines=()
+  local line
+  local worker_name
+  local pve_node_name
+  local vm_id
+  local worker_ip
+  local worker_ip2
+  local boot_id_before
+  local boot_id_after
+  local start
+
+  if ! secondary_network_enabled; then
+    return 0
+  fi
+
+  mapfile -t worker_lines < <(collect_workers_with_secondary_network)
+  if [[ "${#worker_lines[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  require_cmd jq
+  require_cmd curl
+  require_cmd talosctl
+  require_cmd kubectl
+
+  message "Reconciling staged secondary-network config on workers..."
+  for line in "${worker_lines[@]}"; do
+    IFS='|' read -r worker_name pve_node_name vm_id worker_ip worker_ip2 <<<"${line}"
+
+    if ! node_has_persistent_machineconfig "${worker_ip}"; then
+      if node_has_secondary_ip_active "${worker_ip}" "${worker_ip2}" && node_primary_default_route_ok "${worker_ip}"; then
+        message "${worker_name} already has the secondary IP active; skipping."
+        continue
+      fi
+
+      error "${worker_name} does not have a staged machineconfig and the secondary IP ${worker_ip2} is not active." >&2
+      error "Refusing to continue because the node is in an unexpected state." >&2
+      exit 1
+    fi
+
+    boot_id_before="$(talos_boot_id "${worker_ip}")"
+    if [[ -z "${boot_id_before}" ]]; then
+      error "Failed to read boot ID from ${worker_name} before reset." >&2
+      exit 1
+    fi
+
+    reset_vm_via_proxmox "${pve_node_name}" "${vm_id}"
+
+    start="$(date +%s)"
+    while true; do
+      boot_id_after="$(talos_boot_id "${worker_ip}")"
+      if [[ -n "${boot_id_after}" && "${boot_id_after}" != "${boot_id_before}" ]]; then
+        break
+      fi
+      if (( $(date +%s) - start >= 600 )); then
+        error "Timed out waiting for ${worker_name} to reboot after staged secondary-network reset." >&2
+        exit 1
+      fi
+      sleep 5
+    done
+
+    start="$(date +%s)"
+    while node_has_persistent_machineconfig "${worker_ip}"; do
+      if (( $(date +%s) - start >= 600 )); then
+        error "Timed out waiting for ${worker_name} to promote staged machineconfig." >&2
+        exit 1
+      fi
+      sleep 5
+    done
+
+    start="$(date +%s)"
+    while true; do
+      if node_has_secondary_ip_active "${worker_ip}" "${worker_ip2}" && node_primary_default_route_ok "${worker_ip}"; then
+        break
+      fi
+      if (( $(date +%s) - start >= 600 )); then
+        error "Timed out waiting for ${worker_name} to activate ${worker_ip2} on the secondary interface." >&2
+        exit 1
+      fi
+      sleep 5
+    done
+
+    wait_for_node_ready "${worker_name}" 600
+    message "${worker_name} recovered with ${worker_ip2} active on the secondary interface."
+  done
 }
 
 current_section=""
@@ -1620,7 +2041,8 @@ else
   message "Deploying the Talos cluster ${cluster_name} (PVE VMs creation, Talos cluster initialization, k8s bootstrapping)..."
   run_gen_talos_assets
   run_tofu_init "${cluster_root_workspace}"
-  run tofu -chdir="${cluster_root_workspace}" apply -auto-approve
+  mapfile -t root_apply_extra_args < <(root_apply_args)
+  run tofu -chdir="${cluster_root_workspace}" apply -auto-approve "${root_apply_extra_args[@]}"
 
   if [[ ! -f "${cluster_talosconfig_path}" ]]; then
     if ! tofu -chdir="${cluster_root_workspace}" output -raw talosconfig > "${cluster_talosconfig_path}" 2>/dev/null; then
@@ -1680,6 +2102,8 @@ else
     rm -f "${bootstrap_kubeconfig_path}"
     bootstrap_kubeconfig_path=""
   fi
+  stage_secondary_network_worker_configs
+  reconcile_secondary_network_workers
   wait_for_kubernetes_version_convergence "${cluster_constants_path}"
   reboot_nodes_with_pending_kubelet_max_pods "${cluster_constants_path}"
   message "k8s cluster is up and running. Current nodes:"

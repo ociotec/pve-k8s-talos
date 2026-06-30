@@ -28,6 +28,7 @@ variable "vms" {
     vm_id      = number
     type       = string
     ip         = string
+    ip2        = optional(string)
     k8s_labels = optional(map(string), {})
     vm_tags    = optional(string)
   }))

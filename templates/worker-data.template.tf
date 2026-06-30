@@ -6,6 +6,7 @@ data "talos_machine_configuration" "machineconfig___SAFE_NAME__" {
   machine_secrets  = talos_machine_secrets.machine_secrets.machine_secrets
   config_patches = compact([
     file("${path.module}/patches/machine-__NAME__.yaml"),
+    local.network_interface_patches["__NAME__"],
     file("${path.module}/patches/disable-aslr.yaml"),
     fileexists("${path.module}/patches/trusted-roots-root-ca.yaml") ? file("${path.module}/patches/trusted-roots-root-ca.yaml") : "",
     file("${path.module}/patches/qemu.yaml"),

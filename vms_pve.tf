@@ -4,6 +4,7 @@ locals {
     trimspace(tag)
     if trimspace(tag) != ""
   ]
+  pve_network2_enabled = try(trimspace(var.constants["network2"]["bridge_device"]) != "", false)
 }
 
 resource "proxmox_virtual_environment_vm" "create_pve_vms" {
@@ -40,6 +41,14 @@ resource "proxmox_virtual_environment_vm" "create_pve_vms" {
     bridge  = var.constants["network"]["bridge_device"]
     model   = "virtio"
     vlan_id = var.constants["network"]["vlan_tag"] != "" ? tonumber(var.constants["network"]["vlan_tag"]) : null
+  }
+  dynamic "network_device" {
+    for_each = local.pve_network2_enabled && trimspace(try(each.value.ip2 != null ? each.value.ip2 : "", "")) != "" ? [var.constants["network2"]] : []
+    content {
+      bridge  = network_device.value["bridge_device"]
+      model   = "virtio"
+      vlan_id = try(trimspace(network_device.value["vlan_tag"]) != "" ? tonumber(network_device.value["vlan_tag"]) : null, null)
+    }
   }
   dynamic "disk" {
     for_each = var.resources[each.value.type].disks
