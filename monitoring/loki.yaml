@@ -44,6 +44,7 @@ data:
       delete_request_store: filesystem
 
     limits_config:
+      max_query_lookback: ${loki_retention}
       retention_period: ${loki_retention}
       volume_enabled: true
       allow_structured_metadata: false
