@@ -268,6 +268,12 @@ locals {
   prometheus_storage_class_value         = local.prometheus_storage_class
   prometheus_wal_compression_value       = try(local.prometheus_wal_compression, true)
   prometheus_query_max_concurrency_value = try(local.prometheus_query_max_concurrency, 10)
+  prometheus_retention_size_percent_value = try(local.prometheus_retention_size_percent, 80)
+  prometheus_storage_size_mib = can(regex("^[0-9]+Gi$", local.prometheus_storage_size)) ? tonumber(trimsuffix(local.prometheus_storage_size, "Gi")) * 1024 : (
+    can(regex("^[0-9]+Mi$", local.prometheus_storage_size)) ? tonumber(trimsuffix(local.prometheus_storage_size, "Mi")) : null
+  )
+  prometheus_retention_size_mib = local.prometheus_storage_size_mib == null ? null : floor(local.prometheus_storage_size_mib * local.prometheus_retention_size_percent_value / 100)
+  prometheus_retention_size     = local.prometheus_retention_size_mib == null ? "" : format("%dMB", local.prometheus_retention_size_mib)
   prometheus_go_mem_limit_percent_value = try(local.prometheus_go_mem_limit_percent, 80)
   prometheus_mem_limit_mib = can(regex("^[0-9]+Gi$", local.prometheus_mem_limit)) ? tonumber(trimsuffix(local.prometheus_mem_limit, "Gi")) * 1024 : (
     can(regex("^[0-9]+Mi$", local.prometheus_mem_limit)) ? tonumber(trimsuffix(local.prometheus_mem_limit, "Mi")) : null
@@ -279,6 +285,7 @@ locals {
       storage_class                          = local.prometheus_storage_class_value
       prometheus_storage_size                = local.prometheus_storage_size
       prometheus_retention                   = local.prometheus_retention
+      prometheus_retention_size              = local.prometheus_retention_size
       prometheus_image_tag                   = local.prometheus_image_tag
       prometheus_hostname                    = local.prometheus_hostname
       prometheus_api_hostname                = local.prometheus_api_hostname_value

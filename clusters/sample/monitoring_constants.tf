@@ -19,6 +19,10 @@ locals {
   loki_storage_size       = "20Gi"
 
   prometheus_retention = "15d"
+  # Prometheus starts deleting old TSDB blocks when it reaches 80% of the PVC size,
+  # leaving head/WAL room so the volume is less likely to hit 100%.
+  # Docs: https://prometheus.io/docs/prometheus/latest/storage/#right-sizing-retention-size
+  prometheus_retention_size_percent = 80
   loki_retention       = "168h" # 7 days
 
   grafana_image_tag            = "13.0.1"

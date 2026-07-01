@@ -505,6 +505,9 @@ spec:
             - --config.file=/etc/prometheus/prometheus.yml
             - --storage.tsdb.path=/prometheus
             - --storage.tsdb.retention.time=${prometheus_retention}
+%{ if trimspace(prometheus_retention_size) != "" ~}
+            - --storage.tsdb.retention.size=${prometheus_retention_size}
+%{ endif ~}
 %{ if prometheus_wal_compression ~}
             - --storage.tsdb.wal-compression
 %{ endif ~}
