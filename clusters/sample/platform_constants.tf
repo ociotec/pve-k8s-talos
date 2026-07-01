@@ -6,7 +6,7 @@ locals {
 
   storage_class = "${local.ceph_name_prefix}-rbd-ec"
 
-  portainer_image_tag              = "2.39.2"
+  portainer_image_tag              = "2.39.4"
   portainer_storage_class          = local.storage_class
   portainer_pvc_size               = "10Gi"
   portainer_admin_password_length  = 24
@@ -21,19 +21,26 @@ locals {
   # Existing auto-created OAuth usernames to add to the default team on the next platform apply.
   portainer_auth_default_team_existing_users = []
 
+  portainer_cpu_request = "100m"
+  portainer_cpu_limit   = "500m"
+  portainer_mem_request = "512Mi"
+  portainer_mem_limit   = "512Mi"
+
   rancher_hostname                  = "rancher.${local.domain}"
   rancher_tls_secret_name           = "tls-rancher-ingress"
   rancher_replicas                  = 1
+  rancher_version                   = "2.12.2"
+  rancher_debug                     = true
   rancher_private_ca                = true
   rancher_bootstrap_password_length = 24
   rancher_auth_keycloak_realm       = "company"
   rancher_auth_allowed_group        = "k8s-admins"
   rancher_auth_global_role          = "admin"
   rancher_auth_access_mode          = "restricted"
-  rancher_cpu_request               = "200m"
-  rancher_cpu_limit                 = "1"
-  rancher_mem_request               = "2560Mi"
-  rancher_mem_limit                 = "2560Mi"
+  rancher_cpu_request               = "500m"
+  rancher_cpu_limit                 = "2"
+  rancher_mem_request               = "3Gi"
+  rancher_mem_limit                 = "3Gi"
 
   tls_secrets = [
     {

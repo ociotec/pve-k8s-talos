@@ -15,8 +15,8 @@ locals {
   prometheus_storage_class       = local.replica_storage_class
 
   grafana_storage_size    = "5Gi"
-  prometheus_storage_size = "20Gi"
-  loki_storage_size       = "20Gi"
+  prometheus_storage_size = "100Gi"
+  loki_storage_size       = "80Gi"
 
   prometheus_retention = "15d"
   # Prometheus starts deleting old TSDB blocks when it reaches 80% of the PVC size,
@@ -25,34 +25,42 @@ locals {
   prometheus_retention_size_percent = 80
   loki_retention       = "168h" # 7 days
 
-  grafana_image_tag            = "13.0.1"
-  prometheus_image_tag         = "v3.11.3"
-  loki_image_tag               = "3.7.1"
+  grafana_image_tag            = "13.0.2"
+  prometheus_image_tag         = "v3.12.0"
+  loki_image_tag               = "3.7.2"
   promtail_image_tag           = "3.6.10"
   kube_state_metrics_image_tag = "v2.18.0"
   node_exporter_image_tag      = "v1.11.1"
 
-  grafana_admin_user                  = "admin"
-  grafana_admin_password_length       = 24
-  grafana_db_name                     = "grafana"
-  grafana_db_username                 = "grafana"
-  grafana_postgres_image_tag          = "18.3"
-  grafana_postgres_exporter_image_tag = "v0.19.1"
-  grafana_postgres_pvc_size           = "8Gi"
-  grafana_postgres_password_length    = 24
-  grafana_auth_keycloak_realm         = "company"
-  grafana_auth_view_groups            = ["monitoring-view"]
-  grafana_auth_edit_groups            = ["monitoring-edit"]
-  grafana_auth_name                   = "Keycloak"
-  grafana_auth_scopes                 = "openid profile email"
-  grafana_auth_auto_login             = false
-  grafana_auth_allow_sign_up          = true
-  grafana_auth_ca_secret_name         = "grafana-oauth-ca"
+  grafana_admin_user                    = "admin"
+  grafana_admin_password_length         = 24
+  grafana_db_name                       = "grafana"
+  grafana_db_username                   = "grafana"
+  grafana_postgres_image_tag            = "18.4"
+  grafana_postgres_exporter_image_tag   = "v0.19.1"
+  grafana_postgres_pvc_size             = "8Gi"
+  grafana_postgres_password_length      = 24
+  grafana_postgres_cpu_request          = "100m"
+  grafana_postgres_cpu_limit            = "500m"
+  grafana_postgres_mem_request          = "256Mi"
+  grafana_postgres_mem_limit            = "256Mi"
+  grafana_wait_for_postgres_cpu_request = "20m"
+  grafana_wait_for_postgres_cpu_limit   = "100m"
+  grafana_wait_for_postgres_mem_request = "32Mi"
+  grafana_wait_for_postgres_mem_limit   = "32Mi"
+  grafana_auth_keycloak_realm           = "company"
+  grafana_auth_view_groups              = ["monitoring-view"]
+  grafana_auth_edit_groups              = ["monitoring-edit"]
+  grafana_auth_name                     = "Keycloak"
+  grafana_auth_scopes                   = "openid profile email"
+  grafana_auth_auto_login               = false
+  grafana_auth_allow_sign_up            = true
+  grafana_auth_ca_secret_name           = "grafana-oauth-ca"
 
-  grafana_dashboard_provisioning_enabled           = false
-  grafana_dashboard_provisioning_pvc_create        = false
+  grafana_dashboard_provisioning_enabled           = true
+  grafana_dashboard_provisioning_pvc_create        = true
   grafana_dashboard_provisioning_pvc_name          = "dashboards-provisioning"
-  grafana_dashboard_provisioning_pvc_storage_class = local.grafana_storage_class
+  grafana_dashboard_provisioning_pvc_storage_class = "${local.ceph_name_prefix}-cephfs-ec"
   grafana_dashboard_provisioning_pvc_access_modes  = ["ReadWriteMany"]
   grafana_dashboard_provisioning_pvc_size          = "1Gi"
 
@@ -68,13 +76,13 @@ locals {
   prometheus_oauth2_proxy_cookie_name       = "_prometheus_oauth2_proxy"
   prometheus_oauth2_proxy_cpu_request       = "50m"
   prometheus_oauth2_proxy_cpu_limit         = "200m"
-  prometheus_oauth2_proxy_mem_request       = "256Mi"
-  prometheus_oauth2_proxy_mem_limit         = "256Mi"
+  prometheus_oauth2_proxy_mem_request       = "128Mi"
+  prometheus_oauth2_proxy_mem_limit         = "128Mi"
   prometheus_api_basic_auth_secret_name     = "prometheus-api-basic-auth"
   prometheus_api_basic_auth_password_length = 32
 
-  prometheus_cpu_request = "1"
-  prometheus_cpu_limit   = "2"
+  prometheus_cpu_request = "200m"
+  prometheus_cpu_limit   = "1"
   prometheus_mem_request = "4Gi"
   prometheus_mem_limit   = "4Gi"
   prometheus_go_mem_limit_percent = 80
@@ -88,17 +96,17 @@ locals {
   # Docs: https://prometheus.io/docs/prometheus/latest/command-line/prometheus/#flags
   prometheus_query_max_concurrency = 10
 
-  grafana_cpu_request = "500m"
-  grafana_cpu_limit   = "2"
-  grafana_mem_request = "1Gi"
-  grafana_mem_limit   = "1Gi"
+  grafana_cpu_request          = "500m"
+  grafana_cpu_limit            = "2"
+  grafana_mem_request          = "1Gi"
+  grafana_mem_limit            = "1Gi"
   grafana_go_mem_limit_percent = 90
   grafana_go_gc_percent        = 50
 
   loki_cpu_request = "200m"
   loki_cpu_limit   = "1"
-  loki_mem_request = "2Gi"
-  loki_mem_limit   = "2Gi"
+  loki_mem_request = "1Gi"
+  loki_mem_limit   = "1Gi"
 
   promtail_cpu_request = "100m"
   promtail_cpu_limit   = "300m"
