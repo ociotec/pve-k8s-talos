@@ -21,6 +21,10 @@ rules:
       - get
       - list
       - watch
+  - nonResourceURLs:
+      - /metrics
+    verbs:
+      - get
   - apiGroups:
       - extensions
       - networking.k8s.io
@@ -30,10 +34,6 @@ rules:
       - get
       - list
       - watch
-  - nonResourceURLs:
-      - /metrics
-    verbs:
-      - get
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -120,15 +120,13 @@ data:
             source_labels: [__meta_kubernetes_namespace]
             regex: cert-manager
           - action: replace
-            source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
-            target_label: __tmp_prometheus_port
-          - action: keepequal
-            source_labels: [__meta_kubernetes_pod_container_port_number]
-            target_label: __tmp_prometheus_port
-          - action: replace
             source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
             target_label: __metrics_path__
             regex: (.+)
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scheme]
+            target_label: __scheme__
+            regex: (https?)
           - action: replace
             source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
             target_label: __address__
@@ -176,6 +174,140 @@ data:
             regex: (.+)
           - action: replace
             source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+            target_label: component
+            regex: (.+)
+          - action: replace
+            source_labels: [__meta_kubernetes_namespace]
+            target_label: section
+            regex: (.+)
+            replacement: other
+          - action: replace
+            source_labels: [__meta_kubernetes_namespace]
+            target_label: section
+            regex: identity
+            replacement: identity
+          - action: replace
+            source_labels: [__meta_kubernetes_namespace]
+            target_label: section
+            regex: monitoring
+            replacement: monitoring
+          - action: replace
+            source_labels: [__meta_kubernetes_namespace]
+            target_label: section
+            regex: rook-ceph
+            replacement: rook
+          - action: replace
+            source_labels: [__meta_kubernetes_namespace]
+            target_label: section
+            regex: cert-manager|metallb-system|ingress-nginx
+            replacement: k8s-net
+          - action: replace
+            source_labels: [__meta_kubernetes_namespace]
+            target_label: section
+            regex: kube-system
+            replacement: k8s
+          - action: replace
+            source_labels: [__meta_kubernetes_namespace]
+            target_label: section
+            regex: default
+            replacement: ""
+
+      - job_name: kubernetes-service-endpoints
+        kubernetes_sd_configs:
+          - role: endpoints
+        relabel_configs:
+          - action: keep
+            source_labels: [__meta_kubernetes_service_annotation_prometheus_io_port]
+            regex: "\\d+"
+          - action: keep
+            source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+            regex: "true"
+          - action: drop
+            source_labels: [__meta_kubernetes_namespace]
+            regex: cert-manager
+          - action: drop
+            source_labels: [__meta_kubernetes_pod_annotationpresent_prometheus_io_scrape]
+            regex: "true"
+          - action: replace
+            source_labels: [__meta_kubernetes_service_annotation_prometheus_io_path]
+            target_label: __metrics_path__
+            regex: (.+)
+          - action: replace
+            source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scheme]
+            target_label: __scheme__
+            regex: (https?)
+          - action: replace
+            source_labels: [__address__, __meta_kubernetes_service_annotation_prometheus_io_port]
+            target_label: __address__
+            regex: (.+):\d+;(\d+)
+            replacement: $1:$2
+          - action: replace
+            source_labels: [__address__]
+            target_label: scrape_instance
+          - action: replace
+            source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - action: replace
+            source_labels: [__meta_kubernetes_service_name]
+            target_label: instance
+          - action: replace
+            source_labels: [__meta_kubernetes_service_name]
+            target_label: service
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_container_name]
+            target_label: container
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_controller_name]
+            target_label: workload
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_controller_kind]
+            target_label: workload_type
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_ip]
+            target_label: pod_ip
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_host_ip]
+            target_label: host_ip
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+            target_label: app
+            regex: (.+)
+          - action: replace
+            source_labels: [__meta_kubernetes_service_label_app_kubernetes_io_name]
+            target_label: app
+            regex: (.+)
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_label_app]
+            target_label: app
+            regex: (.+)
+          - action: replace
+            source_labels: [__meta_kubernetes_service_label_app]
+            target_label: app
+            regex: (.+)
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_container_name]
+            target_label: component
+            regex: (.+)
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_label_component]
+            target_label: component
+            regex: (.+)
+          - action: replace
+            source_labels: [__meta_kubernetes_service_label_component]
+            target_label: component
+            regex: (.+)
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+            target_label: component
+            regex: (.+)
+          - action: replace
+            source_labels: [__meta_kubernetes_service_label_app_kubernetes_io_component]
             target_label: component
             regex: (.+)
           - action: replace
