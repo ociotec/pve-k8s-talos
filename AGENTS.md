@@ -23,6 +23,13 @@ It complements `README.md` and focuses on execution behavior, change safety, and
   Proxmox, Talos, or Kubernetes environment variables, load the cluster-local
   `.envrc` from `clusters/<cluster>` when it exists. Use `direnv exec . <command>`
   from the cluster directory, or `bash -lc 'source .envrc; <command>'`.
+- When running `kubectl exec` or similar nested shell commands, avoid long one-line
+  commands with multiple quoting layers. Prefer one of these patterns:
+  - keep the remote command to a small `sh -ec '...'` script with minimal quoting
+  - run multiple simpler commands instead of one heavily nested pipeline
+  - write a temporary script under `/tmp` or the repo and execute it from the pod if
+    the command needs `sed`, `jq`, variable expansion, or nested quotes
+  This is preferred over retrying ad hoc quoting fixes after execution failures.
 - Prefer `scripts/deploy.sh` for end-to-end deployment.
 - Do not offer to run deployments on behalf of the user by default. When changes need to be applied, provide the exact `scripts/deploy.sh` command with the minimum skip flags needed to deploy only the affected components and minimize runtime.
 - An agent may run `scripts/deploy.sh` only when the user gives explicit permission for that specific deployment and names the allowed cluster and deployment sections. The agent must keep skip flags constrained to those sections, must not expand scope without renewed permission, and must stop and ask before running a deployment command that would affect any section outside the user-approved set.
