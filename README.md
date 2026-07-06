@@ -609,18 +609,25 @@ cd clusters/<cluster>
 
 ### Benchmark
 
-The benchmark module creates the `benchmark` namespace and deploys CPU, memory, and CSI disk load generators at `0` replicas by default. Scale workloads manually when you want pressure:
+The benchmark module creates the `benchmark` namespace and deploys CPU, memory, and CSI disk load generators at `0` replicas by default. Use the benchmark scaling helper when you want CPU and memory pressure by cluster utilization target:
 
 ```bash
-kubectl -n benchmark scale deployment/benchmark-cpu-2vcpus --replicas=4
-kubectl -n benchmark scale deployment/benchmark-memory-4gb --replicas=4
-kubectl -n benchmark scale statefulset/benchmark-disk-rbd-replica-10mbs --replicas=2
+direnv exec . ../../scripts/scale-benchmarks-to-target.sh --cluster <cluster> --cpu 90 --memory 80
+direnv exec . ../../scripts/scale-benchmarks-to-target.sh --cluster <cluster> --cpu 90 --memory 80 --apply
 ```
 
-Scale back to zero to stop load:
+The first command is a dry-run. It reads Ready schedulable node allocatable capacity, current pod usage from `metrics.k8s.io`, subtracts any current CPU/memory benchmark pod usage, caps the result against per-node Kubernetes `requests` headroom, and prints the replica counts it would apply. Add `--apply` to scale the CPU and memory benchmark Deployments.
+
+Stop CPU and memory benchmark load with:
 
 ```bash
-kubectl -n benchmark scale deployment/benchmark-cpu-2vcpus deployment/benchmark-memory-4gb --replicas=0
+direnv exec . ../../scripts/scale-benchmarks-to-target.sh --cluster <cluster> --stop --apply
+```
+
+Disk benchmarks are still scaled explicitly because Kubernetes does not expose a native PVC throughput target:
+
+```bash
+kubectl -n benchmark scale statefulset/benchmark-disk-rbd-replica-10mbs --replicas=2
 kubectl -n benchmark scale statefulset/benchmark-disk-rbd-replica-10mbs --replicas=0
 ```
 
