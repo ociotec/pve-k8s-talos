@@ -1008,6 +1008,8 @@ prepare_monitoring_workspace() {
   fi
   link_into_workspace "${repo_root}/monitoring/main.tf" "${workspace}/main.tf"
   link_into_workspace "${cluster_monitoring_constants_path}" "${workspace}/constants.tf"
+  link_into_workspace "${cluster_vms_path}" "${workspace}/vms.auto.tfvars"
+  link_into_workspace "${cluster_resources_path}" "${workspace}/resources.auto.tfvars"
   link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/k8s_net_constants.tf"
   link_into_workspace "${cluster_ceph_constants_path}" "${workspace}/ceph_constants.tf"
   link_into_workspace "${cluster_credentials_path}" "${workspace}/credentials.json"

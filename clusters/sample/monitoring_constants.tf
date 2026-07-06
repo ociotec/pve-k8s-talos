@@ -81,10 +81,6 @@ locals {
   prometheus_api_basic_auth_secret_name     = "prometheus-api-basic-auth"
   prometheus_api_basic_auth_password_length = 32
 
-  prometheus_cpu_request = "200m"
-  prometheus_cpu_limit   = "1"
-  prometheus_mem_request = "4Gi"
-  prometheus_mem_limit   = "4Gi"
   prometheus_go_mem_limit_percent = 80
   prometheus_go_gc_percent        = 50
 
@@ -92,21 +88,8 @@ locals {
   # Docs: https://prometheus.io/docs/prometheus/latest/storage/#operational-aspects
   prometheus_wal_compression = true
 
-  # Caps concurrent PromQL queries so dashboard/API load leaves CPU and memory for TSDB WAL replay and compaction work.
-  # Docs: https://prometheus.io/docs/prometheus/latest/command-line/prometheus/#flags
-  prometheus_query_max_concurrency = 10
-
-  grafana_cpu_request          = "500m"
-  grafana_cpu_limit            = "2"
-  grafana_mem_request          = "1Gi"
-  grafana_mem_limit            = "1Gi"
   grafana_go_mem_limit_percent = 90
   grafana_go_gc_percent        = 50
-
-  loki_cpu_request = "200m"
-  loki_cpu_limit   = "1"
-  loki_mem_request = "1Gi"
-  loki_mem_limit   = "1Gi"
 
   promtail_cpu_request = "100m"
   promtail_cpu_limit   = "300m"

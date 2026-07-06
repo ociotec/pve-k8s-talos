@@ -21,6 +21,31 @@ variable "kubeconfig_path" {
   description = "Path to the kubeconfig file."
 }
 
+variable "resources" {
+  type = map(object({
+    vcpus      = number
+    memory     = number
+    k8s_node   = string
+    k8s_labels = optional(map(string), {})
+    disks = list(object({
+      size  = number
+      mount = optional(string)
+    }))
+  }))
+}
+
+variable "vms" {
+  type = map(object({
+    node_name  = string
+    vm_id      = number
+    type       = string
+    ip         = string
+    ip2        = optional(string)
+    k8s_labels = optional(map(string), {})
+    vm_tags    = optional(string)
+  }))
+}
+
 data "terraform_remote_state" "identity" {
   count = trimspace(try(local.grafana_auth_keycloak_realm, "")) != "" || trimspace(try(local.prometheus_auth_keycloak_realm, "")) != "" ? 1 : 0
 
@@ -102,9 +127,91 @@ locals {
     local.grafana_dashboard_provisioning_pvc_folders_from_files_structure,
     true
   )
+  worker_vms = {
+    for name, vm in var.vms : name => vm
+    if try(var.resources[vm.type].k8s_node, "") == "worker"
+  }
+  worker_count            = length(local.worker_vms)
+  total_worker_vcpu       = sum([for _, vm in local.worker_vms : var.resources[vm.type].vcpus])
+  total_worker_memory_mib = sum([for _, vm in local.worker_vms : var.resources[vm.type].memory])
+  total_worker_memory_gib = local.total_worker_memory_mib / 1024
+
+  monitoring_baseline_worker_count      = 4
+  monitoring_baseline_worker_vcpu       = 328
+  monitoring_baseline_worker_memory_gib = 420
+
+  monitoring_node_factor = max(
+    1,
+    local.worker_count > 0 ? local.worker_count / local.monitoring_baseline_worker_count : 1
+  )
+  monitoring_capacity_factor = max(
+    1,
+    local.total_worker_vcpu > 0 ? local.total_worker_vcpu / local.monitoring_baseline_worker_vcpu : 1,
+    local.total_worker_memory_gib > 0 ? local.total_worker_memory_gib / local.monitoring_baseline_worker_memory_gib : 1
+  )
+
+  grafana_sizing_factor    = 0.75 * local.monitoring_node_factor + 0.25 * local.monitoring_capacity_factor
+  prometheus_sizing_factor = 0.70 * local.monitoring_node_factor + 0.30 * local.monitoring_capacity_factor
+  loki_sizing_factor       = 0.80 * local.monitoring_node_factor + 0.20 * local.monitoring_capacity_factor
+
+  grafana_cpu_request_effective_millicores = ceil(500 * local.grafana_sizing_factor / 10) * 10
+  grafana_cpu_limit_effective_cores        = max(2, ceil(local.grafana_sizing_factor))
+  grafana_mem_effective_mib                = ceil((1024 * local.grafana_sizing_factor) / 64) * 64
+
+  prometheus_cpu_request_value = "200m"
+  prometheus_cpu_limit_value   = "1"
+  prometheus_mem_effective_mib = ceil((3072 + (1536 * (local.prometheus_sizing_factor - 1))) / 64) * 64
+
+  loki_cpu_request_value = "200m"
+  loki_cpu_limit_value   = "1"
+  loki_mem_effective_mib = ceil((1024 + (768 * (local.loki_sizing_factor - 1))) / 64) * 64
+
+  prometheus_storage_current_mib = can(regex("^[0-9]+Gi$", try(local.prometheus_storage_size, ""))) ? (
+    tonumber(trimsuffix(local.prometheus_storage_size, "Gi")) * 1024
+  ) : (
+    can(regex("^[0-9]+Mi$", try(local.prometheus_storage_size, ""))) ? tonumber(trimsuffix(local.prometheus_storage_size, "Mi")) : 0
+  )
+  loki_storage_current_mib = can(regex("^[0-9]+Gi$", try(local.loki_storage_size, ""))) ? (
+    tonumber(trimsuffix(local.loki_storage_size, "Gi")) * 1024
+  ) : (
+    can(regex("^[0-9]+Mi$", try(local.loki_storage_size, ""))) ? tonumber(trimsuffix(local.loki_storage_size, "Mi")) : 0
+  )
+
+  prometheus_storage_formula_gib = ceil(60 * local.prometheus_sizing_factor)
+  # Loki storage grows more softly than Prometheus so larger worker counts do not over-allocate log retention volume.
+  loki_storage_formula_gib = ceil(40 * (1 + (0.75 * (local.loki_sizing_factor - 1))))
+
+  prometheus_storage_effective_gib = max(local.prometheus_storage_formula_gib, ceil(local.prometheus_storage_current_mib / 1024))
+  loki_storage_effective_gib       = max(local.loki_storage_formula_gib, ceil(local.loki_storage_current_mib / 1024))
+
+  grafana_cpu_request_value = local.grafana_cpu_request_effective_millicores % 1000 == 0 ? (
+    format("%d", local.grafana_cpu_request_effective_millicores / 1000)
+  ) : format("%dm", local.grafana_cpu_request_effective_millicores)
+  grafana_cpu_limit_value = format("%d", local.grafana_cpu_limit_effective_cores)
+  grafana_mem_request_value = local.grafana_mem_effective_mib % 1024 == 0 ? (
+    format("%dGi", local.grafana_mem_effective_mib / 1024)
+  ) : format("%dMi", local.grafana_mem_effective_mib)
+  grafana_mem_limit_value = local.grafana_mem_request_value
+
+  prometheus_mem_request_value = local.prometheus_mem_effective_mib % 1024 == 0 ? (
+    format("%dGi", local.prometheus_mem_effective_mib / 1024)
+  ) : format("%dMi", local.prometheus_mem_effective_mib)
+  prometheus_mem_limit_value = local.prometheus_mem_request_value
+  prometheus_storage_size_value = format("%dGi", local.prometheus_storage_effective_gib)
+  prometheus_query_max_concurrency_value = min(
+    18,
+    10 + (2 * max(0, floor(local.prometheus_sizing_factor - 1)))
+  )
+
+  loki_mem_request_value = local.loki_mem_effective_mib % 1024 == 0 ? (
+    format("%dGi", local.loki_mem_effective_mib / 1024)
+  ) : format("%dMi", local.loki_mem_effective_mib)
+  loki_mem_limit_value    = local.loki_mem_request_value
+  loki_storage_size_value = format("%dGi", local.loki_storage_effective_gib)
+
   grafana_go_mem_limit_percent_value = try(local.grafana_go_mem_limit_percent, 90)
-  grafana_mem_limit_mib = can(regex("^[0-9]+Gi$", local.grafana_mem_limit)) ? tonumber(trimsuffix(local.grafana_mem_limit, "Gi")) * 1024 : (
-    can(regex("^[0-9]+Mi$", local.grafana_mem_limit)) ? tonumber(trimsuffix(local.grafana_mem_limit, "Mi")) : null
+  grafana_mem_limit_mib = can(regex("^[0-9]+Gi$", local.grafana_mem_limit_value)) ? tonumber(trimsuffix(local.grafana_mem_limit_value, "Gi")) * 1024 : (
+    can(regex("^[0-9]+Mi$", local.grafana_mem_limit_value)) ? tonumber(trimsuffix(local.grafana_mem_limit_value, "Mi")) : null
   )
   grafana_go_mem_limit_mib         = floor(local.grafana_mem_limit_mib * local.grafana_go_mem_limit_percent_value / 100)
   grafana_go_mem_limit             = format("%dMiB", local.grafana_go_mem_limit_mib)
@@ -267,32 +374,31 @@ locals {
   ))), 0, 12)
   prometheus_storage_class_value         = local.prometheus_storage_class
   prometheus_wal_compression_value       = try(local.prometheus_wal_compression, true)
-  prometheus_query_max_concurrency_value = try(local.prometheus_query_max_concurrency, 10)
   prometheus_retention_size_percent_value = try(local.prometheus_retention_size_percent, 80)
-  prometheus_storage_size_mib = can(regex("^[0-9]+Gi$", local.prometheus_storage_size)) ? tonumber(trimsuffix(local.prometheus_storage_size, "Gi")) * 1024 : (
-    can(regex("^[0-9]+Mi$", local.prometheus_storage_size)) ? tonumber(trimsuffix(local.prometheus_storage_size, "Mi")) : null
+  prometheus_storage_size_mib = can(regex("^[0-9]+Gi$", local.prometheus_storage_size_value)) ? tonumber(trimsuffix(local.prometheus_storage_size_value, "Gi")) * 1024 : (
+    can(regex("^[0-9]+Mi$", local.prometheus_storage_size_value)) ? tonumber(trimsuffix(local.prometheus_storage_size_value, "Mi")) : null
   )
   prometheus_retention_size_mib = local.prometheus_storage_size_mib == null ? null : floor(local.prometheus_storage_size_mib * local.prometheus_retention_size_percent_value / 100)
   prometheus_retention_size     = local.prometheus_retention_size_mib == null ? "" : format("%dMB", local.prometheus_retention_size_mib)
   prometheus_go_mem_limit_percent_value = try(local.prometheus_go_mem_limit_percent, 80)
-  prometheus_mem_limit_mib = can(regex("^[0-9]+Gi$", local.prometheus_mem_limit)) ? tonumber(trimsuffix(local.prometheus_mem_limit, "Gi")) * 1024 : (
-    can(regex("^[0-9]+Mi$", local.prometheus_mem_limit)) ? tonumber(trimsuffix(local.prometheus_mem_limit, "Mi")) : null
+  prometheus_mem_limit_mib = can(regex("^[0-9]+Gi$", local.prometheus_mem_limit_value)) ? tonumber(trimsuffix(local.prometheus_mem_limit_value, "Gi")) * 1024 : (
+    can(regex("^[0-9]+Mi$", local.prometheus_mem_limit_value)) ? tonumber(trimsuffix(local.prometheus_mem_limit_value, "Mi")) : null
   )
   prometheus_go_mem_limit_mib = floor(local.prometheus_mem_limit_mib * local.prometheus_go_mem_limit_percent_value / 100)
   prometheus_go_mem_limit     = format("%dMiB", local.prometheus_go_mem_limit_mib)
   prometheus_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/prometheus.yaml", {
       storage_class                          = local.prometheus_storage_class_value
-      prometheus_storage_size                = local.prometheus_storage_size
+      prometheus_storage_size                = local.prometheus_storage_size_value
       prometheus_retention                   = local.prometheus_retention
       prometheus_retention_size              = local.prometheus_retention_size
       prometheus_image_tag                   = local.prometheus_image_tag
       prometheus_hostname                    = local.prometheus_hostname
       prometheus_api_hostname                = local.prometheus_api_hostname_value
-      prometheus_cpu_request                 = local.prometheus_cpu_request
-      prometheus_cpu_limit                   = local.prometheus_cpu_limit
-      prometheus_mem_request                 = local.prometheus_mem_request
-      prometheus_mem_limit                   = local.prometheus_mem_limit
+      prometheus_cpu_request                 = local.prometheus_cpu_request_value
+      prometheus_cpu_limit                   = local.prometheus_cpu_limit_value
+      prometheus_mem_request                 = local.prometheus_mem_request_value
+      prometheus_mem_limit                   = local.prometheus_mem_limit_value
       prometheus_go_mem_limit                = local.prometheus_go_mem_limit
       prometheus_go_gc_percent               = tostring(try(local.prometheus_go_gc_percent, 50))
       prometheus_wal_compression             = local.prometheus_wal_compression_value
@@ -361,10 +467,10 @@ locals {
         local.grafana_wait_for_postgres_mem_limit,
         "32Mi"
       )
-      grafana_cpu_request                       = local.grafana_cpu_request
-      grafana_cpu_limit                         = local.grafana_cpu_limit
-      grafana_mem_request                       = local.grafana_mem_request
-      grafana_mem_limit                         = local.grafana_mem_limit
+      grafana_cpu_request                       = local.grafana_cpu_request_value
+      grafana_cpu_limit                         = local.grafana_cpu_limit_value
+      grafana_mem_request                       = local.grafana_mem_request_value
+      grafana_mem_limit                         = local.grafana_mem_limit_value
       grafana_go_mem_limit                      = local.grafana_go_mem_limit
       grafana_go_gc_percent                     = tostring(try(local.grafana_go_gc_percent, 50))
       grafana_tls_secret_name                   = local.grafana_tls_secret_name
@@ -403,13 +509,13 @@ locals {
   loki_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/loki.yaml", {
       storage_class     = local.loki_storage_class
-      loki_storage_size = local.loki_storage_size
+      loki_storage_size = local.loki_storage_size_value
       loki_retention    = local.loki_retention
       loki_image_tag    = local.loki_image_tag
-      loki_cpu_request  = local.loki_cpu_request
-      loki_cpu_limit    = local.loki_cpu_limit
-      loki_mem_request  = local.loki_mem_request
-      loki_mem_limit    = local.loki_mem_limit
+      loki_cpu_request  = local.loki_cpu_request_value
+      loki_cpu_limit    = local.loki_cpu_limit_value
+      loki_mem_request  = local.loki_mem_request_value
+      loki_mem_limit    = local.loki_mem_limit_value
     })) :
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
@@ -605,7 +711,7 @@ check "grafana_dashboard_provisioning_pvc_required" {
 check "grafana_go_memory_limit_supported" {
   assert {
     condition     = local.grafana_mem_limit_mib != null
-    error_message = format("grafana_mem_limit must use a supported whole-number memory unit for GOMEMLIMIT derivation: Mi or Gi. Got %q.", local.grafana_mem_limit)
+    error_message = format("grafana_mem_limit must use a supported whole-number memory unit for GOMEMLIMIT derivation: Mi or Gi. Got %q.", local.grafana_mem_limit_value)
   }
 }
 
@@ -619,7 +725,7 @@ check "grafana_go_mem_limit_percent_valid" {
 check "prometheus_go_memory_limit_supported" {
   assert {
     condition     = local.prometheus_mem_limit_mib != null
-    error_message = format("prometheus_mem_limit must use a supported whole-number memory unit for GOMEMLIMIT derivation: Mi or Gi. Got %q.", local.prometheus_mem_limit)
+    error_message = format("prometheus_mem_limit must use a supported whole-number memory unit for GOMEMLIMIT derivation: Mi or Gi. Got %q.", local.prometheus_mem_limit_value)
   }
 }
 
