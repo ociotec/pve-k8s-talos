@@ -828,13 +828,10 @@ configure_realm() {
     echo "[keycloak-api] realm ${realm}: group $(jq -r '.name' "${group_file}")"
     upsert_group "${realm}" "${group_file}"
     group_id_value="$(wait_for_group "${realm}" "$(jq -r '.name' "${group_file}")")"
-    if [[ "$(jq -r '.realm_admin' "${group_file}")" == "true" ]]; then
-      assign_group_realm_management_role "${realm}" "${group_id_value}" "realm-admin"
-    fi
+    jq -r '.realm_management_roles[]?' "${group_file}" | while IFS= read -r role_name; do
+      assign_group_realm_management_role "${realm}" "${group_id_value}" "${role_name}"
+    done
     if [[ "$(jq -r '.included_ldap_groups | length' "${group_file}")" -gt 0 ]]; then
-      assign_group_realm_management_role "${realm}" "${group_id_value}" "query-users"
-      assign_group_realm_management_role "${realm}" "${group_id_value}" "query-groups"
-      assign_group_realm_management_role "${realm}" "${group_id_value}" "view-users"
       jq -c '.included_ldap_groups[]' "${group_file}" | while IFS= read -r ldap_group; do
         wait_for_group "${realm}" "$(jq -r '.group_name' <<< "${ldap_group}")" >/dev/null
       done

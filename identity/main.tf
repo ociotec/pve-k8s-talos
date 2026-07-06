@@ -51,6 +51,11 @@ locals {
           name        = group.name
           description = try(group.description, "")
           realm_admin = try(group.realm_admin, false)
+          realm_management_roles = distinct(concat(
+            try(group.realm_management_roles, []),
+            try(group.realm_admin, false) ? ["realm-admin"] : [],
+            length(try(group.included_ldap_groups, [])) > 0 ? ["query-users", "query-groups", "view-users"] : []
+          ))
           extra_members = distinct(concat(
             try(group.extra_members, []),
             try(group.members, [])
