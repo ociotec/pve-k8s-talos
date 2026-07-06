@@ -21,10 +21,6 @@ rules:
       - get
       - list
       - watch
-  - nonResourceURLs:
-      - /metrics
-    verbs:
-      - get
   - apiGroups:
       - extensions
       - networking.k8s.io
@@ -34,6 +30,10 @@ rules:
       - get
       - list
       - watch
+  - nonResourceURLs:
+      - /metrics
+    verbs:
+      - get
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
