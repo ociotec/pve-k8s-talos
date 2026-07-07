@@ -52,9 +52,54 @@ spec:
       containers:
         - name: postgres
           image: postgres:${postgres_image_tag}
+          args:
+            - -c
+            - max_connections=${postgres_max_connections}
           ports:
             - name: postgres
               containerPort: 5432
+          startupProbe:
+            exec:
+              command:
+                - pg_isready
+                - -h
+                - 127.0.0.1
+                - -p
+                - "5432"
+                - -U
+                - $(POSTGRES_USER)
+            periodSeconds: 5
+            timeoutSeconds: 2
+            successThreshold: 1
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -h
+                - 127.0.0.1
+                - -p
+                - "5432"
+                - -U
+                - $(POSTGRES_USER)
+            periodSeconds: 10
+            timeoutSeconds: 2
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -h
+                - 127.0.0.1
+                - -p
+                - "5432"
+                - -U
+                - $(POSTGRES_USER)
+            periodSeconds: 30
+            timeoutSeconds: 2
+            successThreshold: 1
+            failureThreshold: 3
           env:
             - name: POSTGRES_DB
               valueFrom:
@@ -86,6 +131,24 @@ spec:
           ports:
             - name: metrics
               containerPort: 9187
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+              scheme: HTTP
+            periodSeconds: 10
+            timeoutSeconds: 2
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+              scheme: HTTP
+            periodSeconds: 30
+            timeoutSeconds: 2
+            successThreshold: 1
+            failureThreshold: 3
           env:
             - name: DATA_SOURCE_URI
               value: localhost:5432/${keycloak_db_name}?sslmode=disable
@@ -133,6 +196,11 @@ metadata:
     app.kubernetes.io/part-of: keycloak
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: keycloak
@@ -202,6 +270,8 @@ spec:
                 secretKeyRef:
                   name: keycloak-db
                   key: password
+            - name: KC_DB_POOL_MAX_SIZE
+              value: "${keycloak_db_pool_max_size}"
             - name: KC_BOOTSTRAP_ADMIN_CLIENT_ID
               value: identity-config
             - name: KC_BOOTSTRAP_ADMIN_CLIENT_SECRET

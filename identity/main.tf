@@ -286,9 +286,11 @@ locals {
       keycloak_image_tag          = local.keycloak_image_tag
       keycloak_tls_secret         = local.keycloak_tls_secret_name
       keycloak_db_name            = local.keycloak_db_name
+      keycloak_db_pool_max_size   = "20"
       postgres_image_tag          = local.postgres_image_tag
       postgres_exporter_image_tag = local.postgres_exporter_image_tag
       postgres_pvc_size           = local.postgres_pvc_size
+      postgres_max_connections    = "150"
       postgres_storage_class      = local.postgres_storage_class
       keycloak_cpu_request        = try(local.keycloak_cpu_request, "200m")
       keycloak_cpu_limit          = try(local.keycloak_cpu_limit, "2")
