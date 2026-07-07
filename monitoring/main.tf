@@ -160,7 +160,14 @@ locals {
 
   prometheus_cpu_request_value = "200m"
   prometheus_cpu_limit_value   = "1"
-  prometheus_mem_effective_mib = ceil((3072 + (1536 * (local.prometheus_sizing_factor - 1))) / 64) * 64
+  # Larger clusters accumulate more WAL and TSDB state, so startup replay needs
+  # extra memory beyond steady-state scraping/query load.
+  prometheus_wal_replay_headroom_mib = ceil((512 * max(0, local.monitoring_node_factor - 2)) / 64) * 64
+  prometheus_mem_effective_mib = ceil((
+    3072 +
+    (1536 * (local.prometheus_sizing_factor - 1)) +
+    local.prometheus_wal_replay_headroom_mib
+  ) / 64) * 64
 
   loki_cpu_request_value = "200m"
   loki_cpu_limit_value   = "1"
@@ -168,12 +175,12 @@ locals {
 
   prometheus_storage_current_mib = can(regex("^[0-9]+Gi$", try(local.prometheus_storage_size, ""))) ? (
     tonumber(trimsuffix(local.prometheus_storage_size, "Gi")) * 1024
-  ) : (
+    ) : (
     can(regex("^[0-9]+Mi$", try(local.prometheus_storage_size, ""))) ? tonumber(trimsuffix(local.prometheus_storage_size, "Mi")) : 0
   )
   loki_storage_current_mib = can(regex("^[0-9]+Gi$", try(local.loki_storage_size, ""))) ? (
     tonumber(trimsuffix(local.loki_storage_size, "Gi")) * 1024
-  ) : (
+    ) : (
     can(regex("^[0-9]+Mi$", try(local.loki_storage_size, ""))) ? tonumber(trimsuffix(local.loki_storage_size, "Mi")) : 0
   )
 
@@ -196,7 +203,7 @@ locals {
   prometheus_mem_request_value = local.prometheus_mem_effective_mib % 1024 == 0 ? (
     format("%dGi", local.prometheus_mem_effective_mib / 1024)
   ) : format("%dMi", local.prometheus_mem_effective_mib)
-  prometheus_mem_limit_value = local.prometheus_mem_request_value
+  prometheus_mem_limit_value    = local.prometheus_mem_request_value
   prometheus_storage_size_value = format("%dGi", local.prometheus_storage_effective_gib)
   prometheus_query_max_concurrency_value = min(
     18,
@@ -372,14 +379,14 @@ locals {
       file("${path.module}/grafana/dashboards/${filename}")
     ]
   ))), 0, 12)
-  prometheus_storage_class_value         = local.prometheus_storage_class
-  prometheus_wal_compression_value       = try(local.prometheus_wal_compression, true)
+  prometheus_storage_class_value          = local.prometheus_storage_class
+  prometheus_wal_compression_value        = try(local.prometheus_wal_compression, true)
   prometheus_retention_size_percent_value = try(local.prometheus_retention_size_percent, 80)
   prometheus_storage_size_mib = can(regex("^[0-9]+Gi$", local.prometheus_storage_size_value)) ? tonumber(trimsuffix(local.prometheus_storage_size_value, "Gi")) * 1024 : (
     can(regex("^[0-9]+Mi$", local.prometheus_storage_size_value)) ? tonumber(trimsuffix(local.prometheus_storage_size_value, "Mi")) : null
   )
-  prometheus_retention_size_mib = local.prometheus_storage_size_mib == null ? null : floor(local.prometheus_storage_size_mib * local.prometheus_retention_size_percent_value / 100)
-  prometheus_retention_size     = local.prometheus_retention_size_mib == null ? "" : format("%dMB", local.prometheus_retention_size_mib)
+  prometheus_retention_size_mib         = local.prometheus_storage_size_mib == null ? null : floor(local.prometheus_storage_size_mib * local.prometheus_retention_size_percent_value / 100)
+  prometheus_retention_size             = local.prometheus_retention_size_mib == null ? "" : format("%dMB", local.prometheus_retention_size_mib)
   prometheus_go_mem_limit_percent_value = try(local.prometheus_go_mem_limit_percent, 80)
   prometheus_mem_limit_mib = can(regex("^[0-9]+Gi$", local.prometheus_mem_limit_value)) ? tonumber(trimsuffix(local.prometheus_mem_limit_value, "Gi")) * 1024 : (
     can(regex("^[0-9]+Mi$", local.prometheus_mem_limit_value)) ? tonumber(trimsuffix(local.prometheus_mem_limit_value, "Mi")) : null
@@ -446,6 +453,7 @@ locals {
       grafana_postgres_image_tag          = local.grafana_postgres_image_tag_value
       grafana_postgres_exporter_image_tag = local.grafana_postgres_exporter_image_tag
       grafana_postgres_pvc_size           = local.grafana_postgres_pvc_size_value
+      grafana_postgres_max_connections    = "150"
       grafana_postgres_storage_class      = local.grafana_postgres_storage_class_value
       grafana_postgres_cpu_request        = try(local.grafana_postgres_cpu_request, "100m")
       grafana_postgres_cpu_limit          = try(local.grafana_postgres_cpu_limit, "500m")
@@ -471,6 +479,7 @@ locals {
       grafana_cpu_limit                         = local.grafana_cpu_limit_value
       grafana_mem_request                       = local.grafana_mem_request_value
       grafana_mem_limit                         = local.grafana_mem_limit_value
+      grafana_db_max_open_conn                  = "20"
       grafana_go_mem_limit                      = local.grafana_go_mem_limit
       grafana_go_gc_percent                     = tostring(try(local.grafana_go_gc_percent, 50))
       grafana_tls_secret_name                   = local.grafana_tls_secret_name

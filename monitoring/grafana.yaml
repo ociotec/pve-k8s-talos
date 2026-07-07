@@ -66,6 +66,9 @@ spec:
       containers:
         - name: postgres
           image: postgres:${grafana_postgres_image_tag}
+          args:
+            - -c
+            - max_connections=${grafana_postgres_max_connections}
           ports:
             - name: postgres
               containerPort: 5432
@@ -77,6 +80,8 @@ spec:
                 - 127.0.0.1
                 - -p
                 - "5432"
+                - -U
+                - $(POSTGRES_USER)
             periodSeconds: 5
             timeoutSeconds: 2
             successThreshold: 1
@@ -89,6 +94,8 @@ spec:
                 - 127.0.0.1
                 - -p
                 - "5432"
+                - -U
+                - $(POSTGRES_USER)
             periodSeconds: 10
             timeoutSeconds: 2
             successThreshold: 1
@@ -101,6 +108,8 @@ spec:
                 - 127.0.0.1
                 - -p
                 - "5432"
+                - -U
+                - $(POSTGRES_USER)
             periodSeconds: 30
             timeoutSeconds: 2
             successThreshold: 1
@@ -372,6 +381,8 @@ spec:
                   key: password
             - name: GF_DATABASE_SSL_MODE
               value: disable
+            - name: GF_DATABASE_MAX_OPEN_CONN
+              value: "${grafana_db_max_open_conn}"
             - name: GOMEMLIMIT
               value: "${grafana_go_mem_limit}"
             - name: GOGC
