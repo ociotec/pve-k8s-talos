@@ -164,7 +164,7 @@ locals {
   # extra memory beyond steady-state scraping/query load.
   prometheus_wal_replay_headroom_mib = ceil((512 * max(0, local.monitoring_node_factor - 2)) / 64) * 64
   prometheus_mem_effective_mib = ceil((
-    3072 +
+    4096 +
     (1536 * (local.prometheus_sizing_factor - 1)) +
     local.prometheus_wal_replay_headroom_mib
   ) / 64) * 64
@@ -206,7 +206,7 @@ locals {
   prometheus_mem_limit_value    = local.prometheus_mem_request_value
   prometheus_storage_size_value = format("%dGi", local.prometheus_storage_effective_gib)
   prometheus_startup_probe_failure_threshold_value = ceil((
-    300 + (60 * max(0, local.monitoring_node_factor - 1))
+    900 + (120 * max(0, local.monitoring_node_factor - 1))
   ) / 5)
   prometheus_query_max_concurrency_value = min(
     18,
