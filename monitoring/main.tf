@@ -205,6 +205,9 @@ locals {
   ) : format("%dMi", local.prometheus_mem_effective_mib)
   prometheus_mem_limit_value    = local.prometheus_mem_request_value
   prometheus_storage_size_value = format("%dGi", local.prometheus_storage_effective_gib)
+  prometheus_startup_probe_failure_threshold_value = ceil((
+    300 + (60 * max(0, local.monitoring_node_factor - 1))
+  ) / 5)
   prometheus_query_max_concurrency_value = min(
     18,
     10 + (2 * max(0, floor(local.prometheus_sizing_factor - 1)))
@@ -395,40 +398,41 @@ locals {
   prometheus_go_mem_limit     = format("%dMiB", local.prometheus_go_mem_limit_mib)
   prometheus_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/prometheus.yaml", {
-      storage_class                          = local.prometheus_storage_class_value
-      prometheus_storage_size                = local.prometheus_storage_size_value
-      prometheus_retention                   = local.prometheus_retention
-      prometheus_retention_size              = local.prometheus_retention_size
-      prometheus_image_tag                   = local.prometheus_image_tag
-      prometheus_hostname                    = local.prometheus_hostname
-      prometheus_api_hostname                = local.prometheus_api_hostname_value
-      prometheus_cpu_request                 = local.prometheus_cpu_request_value
-      prometheus_cpu_limit                   = local.prometheus_cpu_limit_value
-      prometheus_mem_request                 = local.prometheus_mem_request_value
-      prometheus_mem_limit                   = local.prometheus_mem_limit_value
-      prometheus_go_mem_limit                = local.prometheus_go_mem_limit
-      prometheus_go_gc_percent               = tostring(try(local.prometheus_go_gc_percent, 50))
-      prometheus_wal_compression             = local.prometheus_wal_compression_value
-      prometheus_query_max_concurrency       = local.prometheus_query_max_concurrency_value
-      prometheus_tls_secret_name             = local.prometheus_tls_secret_name
-      prometheus_auth_enabled                = local.prometheus_auth_enabled
-      prometheus_auth_ca_enabled             = local.prometheus_auth_ca_enabled
-      prometheus_auth_ca_secret_name         = local.prometheus_auth_ca_secret_name_value
-      prometheus_oauth_secret_name           = local.prometheus_oauth_secret_name_value
-      prometheus_oidc_issuer                 = local.prometheus_oidc_issuer
-      prometheus_oidc_client_id              = local.prometheus_oidc_client_id
-      prometheus_oauth_redirect_uri          = local.prometheus_oauth_redirect_uri
-      prometheus_oauth2_proxy_image_tag      = local.prometheus_oauth2_proxy_image_tag_value
-      prometheus_oauth2_proxy_cookie_name    = local.prometheus_oauth2_proxy_cookie_name_value
-      prometheus_oauth2_proxy_allowed_groups = local.prometheus_auth_effective_allowed_groups
-      prometheus_oauth2_proxy_cpu_request    = local.prometheus_oauth2_proxy_cpu_request_value
-      prometheus_oauth2_proxy_cpu_limit      = local.prometheus_oauth2_proxy_cpu_limit_value
-      prometheus_oauth2_proxy_mem_request    = local.prometheus_oauth2_proxy_mem_request_value
-      prometheus_oauth2_proxy_mem_limit      = local.prometheus_oauth2_proxy_mem_limit_value
-      ceph_prometheus_targets                = local.ceph_prometheus_targets
-      ceph_prometheus_scheme                 = local.ceph_prometheus_scheme_value
-      ceph_cluster_name                      = try(local.ceph_cluster_name, "rook-ceph")
-      ceph_namespace                         = try(local.ceph_namespace, "rook-ceph")
+      storage_class                              = local.prometheus_storage_class_value
+      prometheus_storage_size                    = local.prometheus_storage_size_value
+      prometheus_retention                       = local.prometheus_retention
+      prometheus_retention_size                  = local.prometheus_retention_size
+      prometheus_image_tag                       = local.prometheus_image_tag
+      prometheus_hostname                        = local.prometheus_hostname
+      prometheus_api_hostname                    = local.prometheus_api_hostname_value
+      prometheus_cpu_request                     = local.prometheus_cpu_request_value
+      prometheus_cpu_limit                       = local.prometheus_cpu_limit_value
+      prometheus_mem_request                     = local.prometheus_mem_request_value
+      prometheus_mem_limit                       = local.prometheus_mem_limit_value
+      prometheus_go_mem_limit                    = local.prometheus_go_mem_limit
+      prometheus_go_gc_percent                   = tostring(try(local.prometheus_go_gc_percent, 50))
+      prometheus_startup_probe_failure_threshold = local.prometheus_startup_probe_failure_threshold_value
+      prometheus_wal_compression                 = local.prometheus_wal_compression_value
+      prometheus_query_max_concurrency           = local.prometheus_query_max_concurrency_value
+      prometheus_tls_secret_name                 = local.prometheus_tls_secret_name
+      prometheus_auth_enabled                    = local.prometheus_auth_enabled
+      prometheus_auth_ca_enabled                 = local.prometheus_auth_ca_enabled
+      prometheus_auth_ca_secret_name             = local.prometheus_auth_ca_secret_name_value
+      prometheus_oauth_secret_name               = local.prometheus_oauth_secret_name_value
+      prometheus_oidc_issuer                     = local.prometheus_oidc_issuer
+      prometheus_oidc_client_id                  = local.prometheus_oidc_client_id
+      prometheus_oauth_redirect_uri              = local.prometheus_oauth_redirect_uri
+      prometheus_oauth2_proxy_image_tag          = local.prometheus_oauth2_proxy_image_tag_value
+      prometheus_oauth2_proxy_cookie_name        = local.prometheus_oauth2_proxy_cookie_name_value
+      prometheus_oauth2_proxy_allowed_groups     = local.prometheus_auth_effective_allowed_groups
+      prometheus_oauth2_proxy_cpu_request        = local.prometheus_oauth2_proxy_cpu_request_value
+      prometheus_oauth2_proxy_cpu_limit          = local.prometheus_oauth2_proxy_cpu_limit_value
+      prometheus_oauth2_proxy_mem_request        = local.prometheus_oauth2_proxy_mem_request_value
+      prometheus_oauth2_proxy_mem_limit          = local.prometheus_oauth2_proxy_mem_limit_value
+      ceph_prometheus_targets                    = local.ceph_prometheus_targets
+      ceph_prometheus_scheme                     = local.ceph_prometheus_scheme_value
+      ceph_cluster_name                          = try(local.ceph_cluster_name, "rook-ceph")
+      ceph_namespace                             = try(local.ceph_namespace, "rook-ceph")
     })) :
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0

@@ -656,7 +656,7 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 1
             successThreshold: 1
-            failureThreshold: 60
+            failureThreshold: ${prometheus_startup_probe_failure_threshold}
           readinessProbe:
             httpGet:
               path: /-/ready
