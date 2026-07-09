@@ -163,11 +163,12 @@ locals {
   # Larger clusters accumulate more WAL and TSDB state, so startup replay needs
   # extra memory beyond steady-state scraping/query load.
   prometheus_wal_replay_headroom_mib = ceil((512 * max(0, local.monitoring_node_factor - 2)) / 64) * 64
-  prometheus_mem_effective_mib = ceil((
+  prometheus_mem_computed_mib = ceil((
     4096 +
     (1536 * (local.prometheus_sizing_factor - 1)) +
     local.prometheus_wal_replay_headroom_mib
   ) / 64) * 64
+  prometheus_mem_effective_mib = max(6144, local.prometheus_mem_computed_mib)
 
   loki_cpu_request_value = "200m"
   loki_cpu_limit_value   = "1"
