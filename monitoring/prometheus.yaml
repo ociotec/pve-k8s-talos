@@ -650,7 +650,7 @@ spec:
               containerPort: 9090
           startupProbe:
             httpGet:
-              path: /-/ready
+              path: /-/healthy
               port: http
               scheme: HTTP
             periodSeconds: 5
