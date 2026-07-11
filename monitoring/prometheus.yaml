@@ -629,6 +629,8 @@ spec:
               cpu: ${prometheus_cpu_limit}
               memory: ${prometheus_mem_limit}
           env:
+            - name: GOMAXPROCS
+              value: "${prometheus_go_max_procs}"
             - name: GOMEMLIMIT
               value: "${prometheus_go_mem_limit}"
             - name: GOGC

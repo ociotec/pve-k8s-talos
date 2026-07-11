@@ -164,6 +164,9 @@ locals {
     1500,
     1000 * local.prometheus_sizing_factor
   ) / 10) * 10
+  # Prometheus' bundled auto-tuner floors fractional quotas; round up explicitly
+  # so WAL replay and compaction can use the full CPU limit.
+  prometheus_go_max_procs_value = tostring(ceil(local.prometheus_cpu_limit_effective_millicores / 1000))
   # Larger clusters accumulate more WAL and TSDB state, so startup replay needs
   # extra memory beyond steady-state scraping/query load.
   prometheus_wal_replay_headroom_mib = ceil((512 * max(0, local.monitoring_node_factor - 2)) / 64) * 64
@@ -418,6 +421,7 @@ locals {
       prometheus_api_hostname                    = local.prometheus_api_hostname_value
       prometheus_cpu_request                     = local.prometheus_cpu_request_value
       prometheus_cpu_limit                       = local.prometheus_cpu_limit_value
+      prometheus_go_max_procs                    = local.prometheus_go_max_procs_value
       prometheus_mem_request                     = local.prometheus_mem_request_value
       prometheus_mem_limit                       = local.prometheus_mem_limit_value
       prometheus_go_mem_limit                    = local.prometheus_go_mem_limit

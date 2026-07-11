@@ -84,6 +84,7 @@ Required rules:
 - CPU rounds up to the next `10m`.
 - Prometheus CPU request: `ceil(300m * prometheus_sizing_factor / 10m) * 10m`.
 - Prometheus CPU limit: `ceil(max(1500m, 1000m * prometheus_sizing_factor) / 10m) * 10m`.
+- Prometheus `GOMAXPROCS`: `ceil(prometheus_cpu_limit_millicores / 1000m)`.
 - Memory rounds up to the next `64Mi`.
 - Prefer whole `Gi` when the rounded result is exact or intentionally rounded to a clean Gi.
 - Use human-friendly `Gi` for PVCs whenever practical.
