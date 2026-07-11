@@ -76,12 +76,14 @@ Use the currently agreed monitoring sizing assumptions:
 
 - Grafana auto-scales CPU and memory.
 - Loki auto-scales memory and PVC, with softened growth for larger clusters.
-- Prometheus auto-scales memory and PVC.
+- Prometheus auto-scales CPU, memory, and PVC.
 - Existing cluster PVCs must never shrink.
 
 Required rules:
 
 - CPU rounds up to the next `10m`.
+- Prometheus CPU request: `ceil(300m * prometheus_sizing_factor / 10m) * 10m`.
+- Prometheus CPU limit: `ceil(max(1500m, 1000m * prometheus_sizing_factor) / 10m) * 10m`.
 - Memory rounds up to the next `64Mi`.
 - Prefer whole `Gi` when the rounded result is exact or intentionally rounded to a clean Gi.
 - Use human-friendly `Gi` for PVCs whenever practical.

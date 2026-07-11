@@ -158,8 +158,12 @@ locals {
   grafana_cpu_limit_effective_cores        = max(2, ceil(local.grafana_sizing_factor))
   grafana_mem_effective_mib                = ceil((1024 * local.grafana_sizing_factor) / 64) * 64
 
-  prometheus_cpu_request_value = "200m"
-  prometheus_cpu_limit_value   = "1"
+  # Reserve steady-state CPU proportionally and leave burst capacity for WAL replay and compaction.
+  prometheus_cpu_request_effective_millicores = ceil(300 * local.prometheus_sizing_factor / 10) * 10
+  prometheus_cpu_limit_effective_millicores = ceil(max(
+    1500,
+    1000 * local.prometheus_sizing_factor
+  ) / 10) * 10
   # Larger clusters accumulate more WAL and TSDB state, so startup replay needs
   # extra memory beyond steady-state scraping/query load.
   prometheus_wal_replay_headroom_mib = ceil((512 * max(0, local.monitoring_node_factor - 2)) / 64) * 64
@@ -201,6 +205,12 @@ locals {
   ) : format("%dMi", local.grafana_mem_effective_mib)
   grafana_mem_limit_value = local.grafana_mem_request_value
 
+  prometheus_cpu_request_value = local.prometheus_cpu_request_effective_millicores % 1000 == 0 ? (
+    format("%d", local.prometheus_cpu_request_effective_millicores / 1000)
+  ) : format("%dm", local.prometheus_cpu_request_effective_millicores)
+  prometheus_cpu_limit_value = local.prometheus_cpu_limit_effective_millicores % 1000 == 0 ? (
+    format("%d", local.prometheus_cpu_limit_effective_millicores / 1000)
+  ) : format("%dm", local.prometheus_cpu_limit_effective_millicores)
   prometheus_mem_request_value = local.prometheus_mem_effective_mib % 1024 == 0 ? (
     format("%dGi", local.prometheus_mem_effective_mib / 1024)
   ) : format("%dMi", local.prometheus_mem_effective_mib)
