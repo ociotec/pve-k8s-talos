@@ -83,6 +83,13 @@ locals {
   prometheus_oauth2_proxy_cpu_limit_value         = try(local.prometheus_oauth2_proxy_cpu_limit, "200m")
   prometheus_oauth2_proxy_mem_request_value       = try(local.prometheus_oauth2_proxy_mem_request, "256Mi")
   prometheus_oauth2_proxy_mem_limit_value         = try(local.prometheus_oauth2_proxy_mem_limit, "256Mi")
+  beyla_enabled_value                             = try(local.beyla_enabled, false)
+  beyla_image_tag_value                           = try(local.beyla_image_tag, "3.15.0")
+  beyla_cpu_request_value                         = try(local.beyla_cpu_request, "100m")
+  beyla_cpu_limit_value                           = try(local.beyla_cpu_limit, "500m")
+  beyla_mem_request_value                         = try(local.beyla_mem_request, "256Mi")
+  beyla_mem_limit_value                           = try(local.beyla_mem_limit, "256Mi")
+  beyla_sampling_ratio_value                      = try(local.beyla_sampling_ratio, 0.10)
   prometheus_auth_ca_content                      = local.prometheus_auth_enabled ? try(file(local.root_ca_crt), "") : ""
   prometheus_auth_ca_enabled                      = trimspace(local.prometheus_auth_ca_content) != ""
   prometheus_api_hostname_value                   = trimspace(try(local.prometheus_api_hostname, "")) != "" ? trimspace(local.prometheus_api_hostname) : format("prometheus-api.%s", local.domain)
@@ -614,6 +621,18 @@ locals {
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
   ]
+  beyla_manifests = [
+    for doc in split("\n---\n", templatefile("${path.module}/beyla.yaml", {
+      beyla_image_tag      = local.beyla_image_tag_value
+      beyla_cpu_request    = local.beyla_cpu_request_value
+      beyla_cpu_limit      = local.beyla_cpu_limit_value
+      beyla_mem_request    = local.beyla_mem_request_value
+      beyla_mem_limit      = local.beyla_mem_limit_value
+      beyla_sampling_ratio = local.beyla_sampling_ratio_value
+    })) :
+    yamldecode(doc)
+    if local.beyla_enabled_value && length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
+  ]
   promtail_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/promtail.yaml", {
       promtail_image_tag   = local.promtail_image_tag
@@ -675,6 +694,7 @@ locals {
     local.grafana_manifests,
     local.loki_manifests,
     local.tempo_manifests,
+    local.beyla_manifests,
     local.promtail_manifests,
     [
       {

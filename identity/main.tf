@@ -29,6 +29,8 @@ provider "kubernetes" {
 
 locals {
   cluster_credentials              = try(jsondecode(file("${path.module}/credentials.json")), {})
+  keycloak_tracing_enabled_value   = try(local.keycloak_tracing_enabled, false)
+  keycloak_tracing_sampler_ratio_value = try(local.keycloak_tracing_sampler_ratio, 0.10)
   identity_credentials             = try(local.cluster_credentials.identity, {})
   identity_oidc_client_secrets     = try(local.identity_credentials.oidc_client_secrets, {})
   identity_postgres_password       = try(local.identity_credentials.postgres_password, "")
@@ -284,6 +286,8 @@ locals {
       identity_namespace          = local.identity_namespace
       keycloak_hostname           = local.keycloak_hostname
       keycloak_image_tag          = local.keycloak_image_tag
+      keycloak_tracing_enabled    = local.keycloak_tracing_enabled_value
+      keycloak_tracing_sampler_ratio = local.keycloak_tracing_sampler_ratio_value
       keycloak_tls_secret         = local.keycloak_tls_secret_name
       keycloak_db_name            = local.keycloak_db_name
       keycloak_db_pool_max_size   = "20"

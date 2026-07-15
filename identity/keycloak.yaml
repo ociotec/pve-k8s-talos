@@ -287,6 +287,18 @@ spec:
               value: "true"
             - name: KC_EVENT_METRICS_USER_TAGS
               value: realm,clientId
+            - name: KC_TRACING_ENABLED
+              value: "${keycloak_tracing_enabled}"
+            - name: KC_TRACING_ENDPOINT
+              value: http://otel-collector.monitoring.svc.cluster.local:4317
+            - name: KC_TRACING_PROTOCOL
+              value: grpc
+            - name: KC_TELEMETRY_SERVICE_NAME
+              value: keycloak
+            - name: KC_TRACING_SAMPLER_TYPE
+              value: parentbased_traceidratio
+            - name: KC_TRACING_SAMPLER_RATIO
+              value: "${keycloak_tracing_sampler_ratio}"
           readinessProbe:
             httpGet:
               path: /realms/master

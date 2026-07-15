@@ -320,7 +320,16 @@ subjects:
   namespace: ingress-nginx
 ---
 apiVersion: v1
-data: null
+data:
+  enable-opentelemetry: "${ingress_nginx_tracing_enabled}"
+  opentelemetry-trust-incoming-span: "true"
+  opentelemetry-operation-name: "HTTP $request_method $service_name"
+  otlp-collector-host: "otel-collector.monitoring.svc.cluster.local"
+  otlp-collector-port: "4317"
+  otel-service-name: "ingress-nginx"
+  otel-sampler: "TraceIdRatioBased"
+  otel-sampler-parent-based: "true"
+  otel-sampler-ratio: "${ingress_nginx_tracing_sampler_ratio}"
 kind: ConfigMap
 metadata:
   labels:

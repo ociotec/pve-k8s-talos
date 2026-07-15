@@ -33,6 +33,14 @@ locals {
   loki_image_tag               = "3.7.2"
   tempo_image_tag              = "2.10.5"
   otel_collector_image_tag     = "0.155.0"
+  # Beyla auto-instruments only repository-managed oauth2-proxy containers.
+  beyla_enabled        = false
+  beyla_image_tag      = "3.15.0"
+  beyla_cpu_request    = "100m"
+  beyla_cpu_limit      = "500m"
+  beyla_mem_request    = "256Mi"
+  beyla_mem_limit      = "256Mi"
+  beyla_sampling_ratio = 0.10
   promtail_image_tag           = "3.6.10"
   kube_state_metrics_image_tag = "v2.18.0"
   node_exporter_image_tag      = "v1.11.1"

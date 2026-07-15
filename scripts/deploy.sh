@@ -1022,6 +1022,7 @@ prepare_monitoring_workspace() {
   link_into_workspace "${repo_root}/monitoring/grafana.yaml" "${workspace}/grafana.yaml"
   link_into_workspace "${repo_root}/monitoring/loki.yaml" "${workspace}/loki.yaml"
   link_into_workspace "${repo_root}/monitoring/tempo.yaml" "${workspace}/tempo.yaml"
+  link_into_workspace "${repo_root}/monitoring/beyla.yaml" "${workspace}/beyla.yaml"
   link_into_workspace "${repo_root}/monitoring/promtail.yaml" "${workspace}/promtail.yaml"
   link_into_workspace "${repo_root}/monitoring/kube-state-metrics.yaml" "${workspace}/kube-state-metrics.yaml"
   link_into_workspace "${repo_root}/monitoring/node-exporter.yaml" "${workspace}/node-exporter.yaml"
@@ -2355,6 +2356,9 @@ else
   message "Waiting for monitoring PVCs, workloads, and endpoints to become ready..."
   monitoring_deployments=(grafana-postgres grafana loki tempo otel-collector prometheus kube-state-metrics)
   monitoring_daemonsets=(node-exporter promtail)
+  if kubectl -n monitoring get daemonset/beyla >/dev/null 2>&1; then
+    monitoring_daemonsets+=(beyla)
+  fi
   monitoring_services=(grafana-postgres grafana loki tempo otel-collector prometheus kube-state-metrics node-exporter)
   monitoring_pvcs=(grafana-postgres-data grafana-data loki-data tempo-data prometheus-data)
   if kubectl -n monitoring get deploy/prometheus-oauth2-proxy >/dev/null 2>&1; then

@@ -1,0 +1,174 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: beyla
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: beyla
+    app.kubernetes.io/instance: beyla
+    app.kubernetes.io/component: auto-instrumentation
+    app.kubernetes.io/part-of: tempo
+    app.kubernetes.io/managed-by: infrastructure
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: beyla
+  labels:
+    app.kubernetes.io/name: beyla
+    app.kubernetes.io/instance: beyla
+    app.kubernetes.io/component: auto-instrumentation
+    app.kubernetes.io/part-of: tempo
+    app.kubernetes.io/managed-by: infrastructure
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "nodes", "pods", "services"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: beyla
+  labels:
+    app.kubernetes.io/name: beyla
+    app.kubernetes.io/instance: beyla
+    app.kubernetes.io/component: auto-instrumentation
+    app.kubernetes.io/part-of: tempo
+    app.kubernetes.io/managed-by: infrastructure
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: beyla
+subjects:
+  - kind: ServiceAccount
+    name: beyla
+    namespace: monitoring
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: beyla-config
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: beyla
+    app.kubernetes.io/instance: beyla
+    app.kubernetes.io/component: auto-instrumentation
+    app.kubernetes.io/part-of: tempo
+    app.kubernetes.io/managed-by: infrastructure
+data:
+  beyla.yaml: |
+    attributes:
+      kubernetes:
+        enable: true
+    discovery:
+      instrument:
+        - container_name: oauth2-proxy
+          containers_only: true
+          exports: [traces]
+    ebpf:
+      context_propagation: headers
+      track_request_headers: true
+    otel_traces_export:
+      endpoint: http://otel-collector.monitoring.svc.cluster.local:4317
+      protocol: grpc
+      instrumentations: [http]
+      sampler:
+        name: parentbased_traceidratio
+        arg: "${beyla_sampling_ratio}"
+    prometheus_export:
+      port: 9090
+      path: /metrics
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: beyla
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: beyla
+    app.kubernetes.io/instance: beyla
+    app.kubernetes.io/component: auto-instrumentation
+    app.kubernetes.io/part-of: tempo
+    app.kubernetes.io/managed-by: infrastructure
+spec:
+  selector:
+    matchLabels:
+      app: beyla
+  template:
+    metadata:
+      labels:
+        app: beyla
+        app.kubernetes.io/name: beyla
+        app.kubernetes.io/instance: beyla
+        app.kubernetes.io/component: auto-instrumentation
+        app.kubernetes.io/part-of: tempo
+        app.kubernetes.io/managed-by: infrastructure
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: /metrics
+    spec:
+      hostPID: true
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      priorityClassName: infra-observability
+      serviceAccountName: beyla
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: beyla
+          image: grafana/beyla:${beyla_image_tag}
+          args:
+            - -config=/etc/beyla/beyla.yaml
+          ports:
+            - name: metrics
+              containerPort: 9090
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add: [BPF, CHECKPOINT_RESTORE, DAC_READ_SEARCH, NET_ADMIN, NET_RAW, PERFMON, SYS_ADMIN, SYS_PTRACE]
+          resources:
+            requests:
+              cpu: ${beyla_cpu_request}
+              memory: ${beyla_mem_request}
+            limits:
+              cpu: ${beyla_cpu_limit}
+              memory: ${beyla_mem_limit}
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+              scheme: HTTP
+            periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+              scheme: HTTP
+            periodSeconds: 30
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          volumeMounts:
+            - name: config
+              mountPath: /etc/beyla
+              readOnly: true
+            - name: cgroup
+              mountPath: /sys/fs/cgroup
+            - name: kernel-security
+              mountPath: /sys/kernel/security
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: beyla-config
+        - name: cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+        - name: kernel-security
+          hostPath:
+            path: /sys/kernel/security
+            type: DirectoryOrCreate
