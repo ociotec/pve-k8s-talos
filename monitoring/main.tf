@@ -65,6 +65,7 @@ provider "kubernetes" {
 
 locals {
   cluster_credentials                             = try(jsondecode(file("${path.module}/credentials.json")), {})
+  monitoring_constants_source                     = file("${path.module}/constants.tf")
   monitoring_credentials                          = try(local.cluster_credentials.monitoring, {})
   monitoring_grafana_admin_password               = try(local.monitoring_credentials.grafana_admin_password, "")
   monitoring_grafana_postgres_password            = try(local.monitoring_credentials.grafana_postgres_password, "")
@@ -83,13 +84,27 @@ locals {
   prometheus_oauth2_proxy_cpu_limit_value         = try(local.prometheus_oauth2_proxy_cpu_limit, "200m")
   prometheus_oauth2_proxy_mem_request_value       = try(local.prometheus_oauth2_proxy_mem_request, "256Mi")
   prometheus_oauth2_proxy_mem_limit_value         = try(local.prometheus_oauth2_proxy_mem_limit, "256Mi")
-  beyla_enabled_value                             = try(local.beyla_enabled, true)
-  beyla_image_tag_value                           = try(local.beyla_image_tag, "3.15.0")
-  beyla_cpu_request_value                         = try(local.beyla_cpu_request, "100m")
-  beyla_cpu_limit_value                           = try(local.beyla_cpu_limit, "500m")
-  beyla_mem_request_value                         = try(local.beyla_mem_request, "256Mi")
-  beyla_mem_limit_value                           = try(local.beyla_mem_limit, "256Mi")
-  beyla_sampling_ratio_value                      = try(local.beyla_sampling_ratio, 0.10)
+  beyla_enabled_value = can(regex("(?m)^\\s*beyla_enabled\\s*=\\s*(true|false)\\s*$", local.monitoring_constants_source)[0]) ? (
+    tobool(regex("(?m)^\\s*beyla_enabled\\s*=\\s*(true|false)\\s*$", local.monitoring_constants_source)[0])
+  ) : true
+  beyla_image_tag_value = can(regex("(?m)^\\s*beyla_image_tag\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]) ? (
+    regex("(?m)^\\s*beyla_image_tag\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]
+  ) : "3.15.0"
+  beyla_cpu_request_value = can(regex("(?m)^\\s*beyla_cpu_request\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]) ? (
+    regex("(?m)^\\s*beyla_cpu_request\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]
+  ) : "100m"
+  beyla_cpu_limit_value = can(regex("(?m)^\\s*beyla_cpu_limit\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]) ? (
+    regex("(?m)^\\s*beyla_cpu_limit\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]
+  ) : "500m"
+  beyla_mem_request_value = can(regex("(?m)^\\s*beyla_mem_request\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]) ? (
+    regex("(?m)^\\s*beyla_mem_request\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]
+  ) : "256Mi"
+  beyla_mem_limit_value = can(regex("(?m)^\\s*beyla_mem_limit\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]) ? (
+    regex("(?m)^\\s*beyla_mem_limit\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]
+  ) : "256Mi"
+  beyla_sampling_ratio_value = can(regex("(?m)^\\s*beyla_sampling_ratio\\s*=\\s*([0-9.]+)\\s*$", local.monitoring_constants_source)[0]) ? (
+    tonumber(regex("(?m)^\\s*beyla_sampling_ratio\\s*=\\s*([0-9.]+)\\s*$", local.monitoring_constants_source)[0])
+  ) : 0.10
   prometheus_auth_ca_content                      = local.prometheus_auth_enabled ? try(file(local.root_ca_crt), "") : ""
   prometheus_auth_ca_enabled                      = trimspace(local.prometheus_auth_ca_content) != ""
   prometheus_api_hostname_value                   = trimspace(try(local.prometheus_api_hostname, "")) != "" ? trimspace(local.prometheus_api_hostname) : format("prometheus-api.%s", local.domain)

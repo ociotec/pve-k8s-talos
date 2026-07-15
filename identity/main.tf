@@ -29,8 +29,13 @@ provider "kubernetes" {
 
 locals {
   cluster_credentials              = try(jsondecode(file("${path.module}/credentials.json")), {})
-  keycloak_tracing_enabled_value   = try(local.keycloak_tracing_enabled, true)
-  keycloak_tracing_sampler_ratio_value = try(local.keycloak_tracing_sampler_ratio, 0.10)
+  identity_constants_source        = file("${path.module}/constants.tf")
+  keycloak_tracing_enabled_value = can(regex("(?m)^\\s*keycloak_tracing_enabled\\s*=\\s*(true|false)\\s*$", local.identity_constants_source)[0]) ? (
+    tobool(regex("(?m)^\\s*keycloak_tracing_enabled\\s*=\\s*(true|false)\\s*$", local.identity_constants_source)[0])
+  ) : true
+  keycloak_tracing_sampler_ratio_value = can(regex("(?m)^\\s*keycloak_tracing_sampler_ratio\\s*=\\s*([0-9.]+)\\s*$", local.identity_constants_source)[0]) ? (
+    tonumber(regex("(?m)^\\s*keycloak_tracing_sampler_ratio\\s*=\\s*([0-9.]+)\\s*$", local.identity_constants_source)[0])
+  ) : 0.10
   identity_credentials             = try(local.cluster_credentials.identity, {})
   identity_oidc_client_secrets     = try(local.identity_credentials.oidc_client_secrets, {})
   identity_postgres_password       = try(local.identity_credentials.postgres_password, "")

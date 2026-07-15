@@ -52,6 +52,12 @@ locals {
   }
 
   constants_source = file("${path.module}/constants.tf")
+  ingress_nginx_tracing_enabled_value = can(regex("(?m)^\\s*ingress_nginx_tracing_enabled\\s*=\\s*(true|false)\\s*$", local.constants_source)[0]) ? (
+    tobool(regex("(?m)^\\s*ingress_nginx_tracing_enabled\\s*=\\s*(true|false)\\s*$", local.constants_source)[0])
+  ) : true
+  ingress_nginx_tracing_sampler_ratio_value = can(regex("(?m)^\\s*ingress_nginx_tracing_sampler_ratio\\s*=\\s*([0-9.]+)\\s*$", local.constants_source)[0]) ? (
+    tonumber(regex("(?m)^\\s*ingress_nginx_tracing_sampler_ratio\\s*=\\s*([0-9.]+)\\s*$", local.constants_source)[0])
+  ) : 0.10
   cert_manager = [
     for doc in split("\n---\n", file("${path.module}/cert-manager.yaml")) :
     yamldecode(doc)
@@ -105,8 +111,8 @@ locals {
       ingress_nginx_admission_job_cpu_limit   = local.ingress_nginx_admission_job_cpu_limit
       ingress_nginx_admission_job_mem_request = local.ingress_nginx_admission_job_mem_request
       ingress_nginx_admission_job_mem_limit   = local.ingress_nginx_admission_job_mem_limit
-      ingress_nginx_tracing_enabled           = try(local.ingress_nginx_tracing_enabled, true)
-      ingress_nginx_tracing_sampler_ratio     = try(local.ingress_nginx_tracing_sampler_ratio, 0.10)
+      ingress_nginx_tracing_enabled           = local.ingress_nginx_tracing_enabled_value
+      ingress_nginx_tracing_sampler_ratio     = local.ingress_nginx_tracing_sampler_ratio_value
     })) :
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
