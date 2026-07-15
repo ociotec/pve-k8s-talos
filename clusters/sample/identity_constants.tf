@@ -16,7 +16,7 @@ locals {
   keycloak_hostname        = "keycloak.${local.domain}"
   keycloak_tls_secret_name = "keycloak-tls"
   keycloak_image_tag       = "26.6.1"
-  keycloak_tracing_enabled       = false
+  keycloak_tracing_enabled       = true
   keycloak_tracing_sampler_ratio = 0.10
 
   keycloak_admin_username        = "admin"

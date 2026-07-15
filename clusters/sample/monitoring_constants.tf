@@ -34,7 +34,7 @@ locals {
   tempo_image_tag              = "2.10.5"
   otel_collector_image_tag     = "0.155.0"
   # Beyla auto-instruments only repository-managed oauth2-proxy containers.
-  beyla_enabled        = false
+  beyla_enabled        = true
   beyla_image_tag      = "3.15.0"
   beyla_cpu_request    = "100m"
   beyla_cpu_limit      = "500m"

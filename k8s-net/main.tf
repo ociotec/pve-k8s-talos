@@ -105,7 +105,7 @@ locals {
       ingress_nginx_admission_job_cpu_limit   = local.ingress_nginx_admission_job_cpu_limit
       ingress_nginx_admission_job_mem_request = local.ingress_nginx_admission_job_mem_request
       ingress_nginx_admission_job_mem_limit   = local.ingress_nginx_admission_job_mem_limit
-      ingress_nginx_tracing_enabled           = try(local.ingress_nginx_tracing_enabled, false)
+      ingress_nginx_tracing_enabled           = try(local.ingress_nginx_tracing_enabled, true)
       ingress_nginx_tracing_sampler_ratio     = try(local.ingress_nginx_tracing_sampler_ratio, 0.10)
     })) :
     yamldecode(doc)

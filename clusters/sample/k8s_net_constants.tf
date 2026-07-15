@@ -20,8 +20,8 @@ locals {
   ingress_nginx_controller_cpu_limit      = "500m"
   ingress_nginx_controller_mem_request    = "512Mi"
   ingress_nginx_controller_mem_limit      = "512Mi"
-  # Enable only after the monitoring OTLP collector is deployed.
-  ingress_nginx_tracing_enabled       = false
+  # The OTLP collector is provided by the monitoring deployment.
+  ingress_nginx_tracing_enabled       = true
   ingress_nginx_tracing_sampler_ratio = 0.10
   ingress_nginx_admission_job_cpu_request = "25m"
   ingress_nginx_admission_job_cpu_limit   = "200m"

@@ -83,7 +83,7 @@ locals {
   prometheus_oauth2_proxy_cpu_limit_value         = try(local.prometheus_oauth2_proxy_cpu_limit, "200m")
   prometheus_oauth2_proxy_mem_request_value       = try(local.prometheus_oauth2_proxy_mem_request, "256Mi")
   prometheus_oauth2_proxy_mem_limit_value         = try(local.prometheus_oauth2_proxy_mem_limit, "256Mi")
-  beyla_enabled_value                             = try(local.beyla_enabled, false)
+  beyla_enabled_value                             = try(local.beyla_enabled, true)
   beyla_image_tag_value                           = try(local.beyla_image_tag, "3.15.0")
   beyla_cpu_request_value                         = try(local.beyla_cpu_request, "100m")
   beyla_cpu_limit_value                           = try(local.beyla_cpu_limit, "500m")
