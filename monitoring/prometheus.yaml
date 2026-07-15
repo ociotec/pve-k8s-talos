@@ -4,6 +4,94 @@ metadata:
   name: prometheus
   namespace: monitoring
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus-wal-check-and-recovery
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/instance: prometheus
+    app.kubernetes.io/component: recovery
+    app.kubernetes.io/part-of: prometheus
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: prometheus-wal-check-and-recovery
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/instance: prometheus
+    app.kubernetes.io/component: recovery
+    app.kubernetes.io/part-of: prometheus
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - pods/log
+    verbs:
+      - get
+  - apiGroups:
+      - ""
+    resources:
+      - pods/exec
+    verbs:
+      - create
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    resourceNames:
+      - prometheus
+    verbs:
+      - get
+  - apiGroups:
+      - apps
+    resources:
+      - deployments/scale
+    resourceNames:
+      - prometheus
+    verbs:
+      - get
+      - patch
+      - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: prometheus-wal-check-and-recovery
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/instance: prometheus
+    app.kubernetes.io/component: recovery
+    app.kubernetes.io/part-of: prometheus
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+subjects:
+  - kind: ServiceAccount
+    name: prometheus-wal-check-and-recovery
+    namespace: monitoring
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: prometheus-wal-check-and-recovery
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -702,6 +790,106 @@ spec:
     - name: http
       port: 9090
       targetPort: http
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-wal-check-and-recovery-scripts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/instance: prometheus
+    app.kubernetes.io/component: recovery
+    app.kubernetes.io/part-of: prometheus
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+data:
+%{ for filename, content in prometheus_wal_check_and_recovery_scripts ~}
+  ${filename}: |${indent(4, "\n${chomp(content)}")}
+%{ endfor ~}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: prometheus-wal-check-and-recovery
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/instance: prometheus
+    app.kubernetes.io/component: recovery
+    app.kubernetes.io/part-of: prometheus
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+spec:
+  suspend: false
+  schedule: "0 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app: prometheus-wal-check-and-recovery
+            app.kubernetes.io/name: prometheus
+            app.kubernetes.io/instance: prometheus
+            app.kubernetes.io/component: recovery
+            app.kubernetes.io/part-of: prometheus
+            app.kubernetes.io/managed-by: infrastructure
+            pve-k8s-talos/section: monitoring
+        spec:
+          priorityClassName: infra-observability
+          serviceAccountName: prometheus-wal-check-and-recovery
+          restartPolicy: Never
+          securityContext:
+            fsGroup: 65534
+            runAsGroup: 65534
+            runAsNonRoot: true
+            runAsUser: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: prometheus-wal-check-and-recovery
+              image: ${prometheus_wal_recovery_kubectl_image}
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+              resources:
+                requests:
+                  cpu: ${prometheus_wal_recovery_cpu_request}
+                  memory: ${prometheus_wal_recovery_mem_request}
+                limits:
+                  cpu: ${prometheus_wal_recovery_cpu_limit}
+                  memory: ${prometheus_wal_recovery_mem_limit}
+              env:
+                - name: PROMETHEUS_IMAGE
+                  value: prom/prometheus:${prometheus_image_tag}
+                - name: RECOVERY_CPU_REQUEST
+                  value: "${prometheus_wal_recovery_cpu_request}"
+                - name: RECOVERY_CPU_LIMIT
+                  value: "${prometheus_wal_recovery_cpu_limit}"
+                - name: RECOVERY_MEM_REQUEST
+                  value: "${prometheus_wal_recovery_mem_request}"
+                - name: RECOVERY_MEM_LIMIT
+                  value: "${prometheus_wal_recovery_mem_limit}"
+              command:
+                - sh
+                - /scripts/prometheus-wal-check-and-recovery.sh
+              volumeMounts:
+                - name: recovery-scripts
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: recovery-scripts
+              configMap:
+                name: prometheus-wal-check-and-recovery-scripts
+                defaultMode: 365
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate

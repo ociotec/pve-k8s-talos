@@ -1007,6 +1007,7 @@ prepare_monitoring_workspace() {
     link_into_workspace "${repo_root}/monitoring/.terraform" "${workspace}/.terraform"
   fi
   link_into_workspace "${repo_root}/monitoring/main.tf" "${workspace}/main.tf"
+  link_into_workspace "${cluster_constants_path}" "${workspace}/constants.auto.tfvars"
   link_into_workspace "${cluster_monitoring_constants_path}" "${workspace}/constants.tf"
   link_into_workspace "${cluster_vms_path}" "${workspace}/vms.auto.tfvars"
   link_into_workspace "${cluster_resources_path}" "${workspace}/resources.auto.tfvars"
@@ -1024,6 +1025,7 @@ prepare_monitoring_workspace() {
   link_into_workspace "${repo_root}/monitoring/kube-state-metrics.yaml" "${workspace}/kube-state-metrics.yaml"
   link_into_workspace "${repo_root}/monitoring/node-exporter.yaml" "${workspace}/node-exporter.yaml"
   link_into_workspace "${repo_root}/monitoring/grafana" "${workspace}/grafana"
+  link_into_workspace "${repo_root}/monitoring/scripts" "${workspace}/scripts"
   if [[ -r "${repo_root}/monitoring/.terraform.lock.hcl" ]]; then
     link_into_workspace "${repo_root}/monitoring/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
   fi

@@ -46,6 +46,10 @@ variable "vms" {
   }))
 }
 
+variable "constants" {
+  type = any
+}
+
 data "terraform_remote_state" "identity" {
   count = trimspace(try(local.grafana_auth_keycloak_realm, "")) != "" || trimspace(try(local.prometheus_auth_keycloak_realm, "")) != "" ? 1 : 0
 
@@ -408,8 +412,18 @@ locals {
   prometheus_mem_limit_mib = can(regex("^[0-9]+Gi$", local.prometheus_mem_limit_value)) ? tonumber(trimsuffix(local.prometheus_mem_limit_value, "Gi")) * 1024 : (
     can(regex("^[0-9]+Mi$", local.prometheus_mem_limit_value)) ? tonumber(trimsuffix(local.prometheus_mem_limit_value, "Mi")) : null
   )
-  prometheus_go_mem_limit_mib = floor(local.prometheus_mem_limit_mib * local.prometheus_go_mem_limit_percent_value / 100)
-  prometheus_go_mem_limit     = format("%dMiB", local.prometheus_go_mem_limit_mib)
+  prometheus_go_mem_limit_mib               = floor(local.prometheus_mem_limit_mib * local.prometheus_go_mem_limit_percent_value / 100)
+  prometheus_go_mem_limit                   = format("%dMiB", local.prometheus_go_mem_limit_mib)
+  prometheus_wal_recovery_cpu_request_value = "50m"
+  prometheus_wal_recovery_cpu_limit_value   = "200m"
+  prometheus_wal_recovery_mem_request_value = "128Mi"
+  prometheus_wal_recovery_mem_limit_value   = "128Mi"
+  # registry.k8s.io/kubectl and rancher/kubectl are distroless and cannot run the mounted shell scripts.
+  prometheus_wal_recovery_kubectl_image = "dtzar/helm-kubectl:3.19.0"
+  prometheus_wal_check_and_recovery_scripts = {
+    "prometheus-wal-check-and-recovery.sh" = file("${path.module}/scripts/prometheus-wal-check-and-recovery.sh")
+    "prometheus-wal-cleanup.sh"            = file("${path.module}/scripts/prometheus-wal-cleanup.sh")
+  }
   prometheus_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/prometheus.yaml", {
       storage_class                              = local.prometheus_storage_class_value
@@ -429,6 +443,12 @@ locals {
       prometheus_startup_probe_failure_threshold = local.prometheus_startup_probe_failure_threshold_value
       prometheus_wal_compression                 = local.prometheus_wal_compression_value
       prometheus_query_max_concurrency           = local.prometheus_query_max_concurrency_value
+      prometheus_wal_recovery_cpu_request        = local.prometheus_wal_recovery_cpu_request_value
+      prometheus_wal_recovery_cpu_limit          = local.prometheus_wal_recovery_cpu_limit_value
+      prometheus_wal_recovery_mem_request        = local.prometheus_wal_recovery_mem_request_value
+      prometheus_wal_recovery_mem_limit          = local.prometheus_wal_recovery_mem_limit_value
+      prometheus_wal_recovery_kubectl_image      = local.prometheus_wal_recovery_kubectl_image
+      prometheus_wal_check_and_recovery_scripts  = local.prometheus_wal_check_and_recovery_scripts
       prometheus_tls_secret_name                 = local.prometheus_tls_secret_name
       prometheus_auth_enabled                    = local.prometheus_auth_enabled
       prometheus_auth_ca_enabled                 = local.prometheus_auth_ca_enabled
