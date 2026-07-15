@@ -34,7 +34,7 @@ Options:
   -p, --skip-platform       Skip platform services.
       --skip-portainer      Deprecated alias for --skip-platform.
   -k, --skip-kafka          Skip Kafka/Redpanda services.
-  -m, --skip-monitoring     Skip monitoring stack (Prometheus, Loki, Grafana).
+  -m, --skip-monitoring     Skip monitoring stack (Prometheus, Loki, Grafana, Tempo).
   -b, --skip-benchmark      Skip benchmark workloads.
       --services-only       Skip Talos VM/root apply and deploy Kubernetes services only.
                             Requires existing out/kubeconfig and out/talosconfig.
@@ -1021,6 +1021,7 @@ prepare_monitoring_workspace() {
   link_into_workspace "${repo_root}/monitoring/prometheus-oauth2-proxy.yaml" "${workspace}/prometheus-oauth2-proxy.yaml"
   link_into_workspace "${repo_root}/monitoring/grafana.yaml" "${workspace}/grafana.yaml"
   link_into_workspace "${repo_root}/monitoring/loki.yaml" "${workspace}/loki.yaml"
+  link_into_workspace "${repo_root}/monitoring/tempo.yaml" "${workspace}/tempo.yaml"
   link_into_workspace "${repo_root}/monitoring/promtail.yaml" "${workspace}/promtail.yaml"
   link_into_workspace "${repo_root}/monitoring/kube-state-metrics.yaml" "${workspace}/kube-state-metrics.yaml"
   link_into_workspace "${repo_root}/monitoring/node-exporter.yaml" "${workspace}/node-exporter.yaml"
@@ -2300,11 +2301,15 @@ else
   message "Deploying monitoring stack..."
   run_tofu_init "${cluster_monitoring_workspace}"
   monitoring_prometheus_config_hash_before=""
+  monitoring_tempo_config_rv_before=""
   monitoring_grafana_datasources_rv_before=""
   monitoring_grafana_dashboard_provider_rv_before=""
   if kubectl get namespace monitoring >/dev/null 2>&1; then
     monitoring_prometheus_config_hash_before="$(
       kubernetes_configmap_key_sha256 "monitoring" "prometheus-config" "prometheus.yml"
+    )"
+    monitoring_tempo_config_rv_before="$(
+      kubernetes_resource_version "monitoring" "configmap" "tempo-config"
     )"
     monitoring_grafana_datasources_rv_before="$(
       kubernetes_resource_version "monitoring" "configmap" "grafana-datasources"
@@ -2317,6 +2322,9 @@ else
   monitoring_prometheus_config_hash_after="$(
     kubernetes_configmap_key_sha256 "monitoring" "prometheus-config" "prometheus.yml"
   )"
+  monitoring_tempo_config_rv_after="$(
+    kubernetes_resource_version "monitoring" "configmap" "tempo-config"
+  )"
   monitoring_grafana_datasources_rv_after="$(
     kubernetes_resource_version "monitoring" "configmap" "grafana-datasources"
   )"
@@ -2324,9 +2332,13 @@ else
     kubernetes_resource_version "monitoring" "configmap" "grafana-dashboard-provider"
   )"
   monitoring_prometheus_config_changed=false
+  monitoring_tempo_restart_needed=false
   monitoring_grafana_restart_needed=false
   if kubernetes_resource_changed "${monitoring_prometheus_config_hash_before}" "${monitoring_prometheus_config_hash_after}"; then
     monitoring_prometheus_config_changed=true
+  fi
+  if kubernetes_resource_changed "${monitoring_tempo_config_rv_before}" "${monitoring_tempo_config_rv_after}"; then
+    monitoring_tempo_restart_needed=true
   fi
   if kubernetes_resource_changed "${monitoring_grafana_datasources_rv_before}" "${monitoring_grafana_datasources_rv_after}" \
     || kubernetes_resource_changed "${monitoring_grafana_dashboard_provider_rv_before}" "${monitoring_grafana_dashboard_provider_rv_after}"; then
@@ -2336,11 +2348,15 @@ else
     message "Restarting Grafana to reload datasource or dashboard provisioning configuration..."
     kubectl -n monitoring rollout restart deploy/grafana 1>/dev/null
   fi
+  if [[ "${monitoring_tempo_restart_needed}" == "true" ]]; then
+    message "Restarting Tempo to reload tracing metrics configuration..."
+    kubectl -n monitoring rollout restart deploy/tempo 1>/dev/null
+  fi
   message "Waiting for monitoring PVCs, workloads, and endpoints to become ready..."
-  monitoring_deployments=(grafana-postgres grafana loki prometheus kube-state-metrics)
+  monitoring_deployments=(grafana-postgres grafana loki tempo otel-collector prometheus kube-state-metrics)
   monitoring_daemonsets=(node-exporter promtail)
-  monitoring_services=(grafana-postgres grafana loki prometheus kube-state-metrics node-exporter)
-  monitoring_pvcs=(grafana-postgres-data grafana-data loki-data prometheus-data)
+  monitoring_services=(grafana-postgres grafana loki tempo otel-collector prometheus kube-state-metrics node-exporter)
+  monitoring_pvcs=(grafana-postgres-data grafana-data loki-data tempo-data prometheus-data)
   if kubectl -n monitoring get deploy/prometheus-oauth2-proxy >/dev/null 2>&1; then
     monitoring_deployments+=(prometheus-oauth2-proxy)
     monitoring_services+=(prometheus-oauth2-proxy)

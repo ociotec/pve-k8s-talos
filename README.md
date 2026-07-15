@@ -557,13 +557,15 @@ If you don't have internal DNS, add an `/etc/hosts` entry using `ingress_lb_ip` 
 192.168.1.70 ceph.home.arpa
 ```
 
-### Monitoring (Prometheus, Loki, Grafana)
+### Monitoring (Prometheus, Loki, Grafana, Tempo)
 
 Define your constants in `clusters/<cluster>/monitoring_constants.tf`: monitoring hostnames, storage class, PVC sizes, retention settings, and image versions.
 
 Define Portainer/Rancher constants in `clusters/<cluster>/platform_constants.tf`.
 Rancher is enabled when `rancher_hostname` is non-empty and uses one replica by default in the sample constants.
-This stack also includes kube-state-metrics (requests/limits), kubelet cAdvisor scrape for pod/container CPU/RAM usage, and node-exporter for host/VM CPU, memory, filesystem, disk, and network metrics. Grafana provisions a Node Exporter dashboard from the Grafana Labs quickstart dashboard, adapted to the local `job="node-exporter"` scrape.
+This stack also includes Tempo in monolithic mode with a PVC backend and an internal OpenTelemetry Collector gateway. The collector accepts OTLP/gRPC on `otel-collector.monitoring.svc.cluster.local:4317` and OTLP/HTTP on port `4318`; Tempo is only reachable through the cluster and Grafana. Tempo generates TraceQL metrics for Grafana Traces Drilldown plus span and service-graph metrics remote-written to Prometheus. No workload instrumentation or public OTLP ingress is enabled by this baseline. Configure `tempo_storage_size`, `tempo_retention`, and the Tempo/Collector resource and image settings in the monitoring constants before enabling application tracing.
+
+The stack also includes kube-state-metrics (requests/limits), kubelet cAdvisor scrape for pod/container CPU/RAM usage, and node-exporter for host/VM CPU, memory, filesystem, disk, and network metrics. Grafana provisions a Node Exporter dashboard from the Grafana Labs quickstart dashboard, adapted to the local `job="node-exporter"` scrape.
 The manifests are rendered from templates using those values.
 Use the same domain as `k8s_net_constants.tf` so TLS and DNS align.
 
@@ -665,7 +667,7 @@ Run with `-h` or `--help` to see help documentation. Common options:
 --skip-s3-storage Skip Garage S3 storage services.
 --skip-platform   Skip platform services.
 --skip-kafka      Skip Kafka/Redpanda services.
---skip-monitoring Skip Prometheus/Loki/Grafana stack.
+--skip-monitoring Skip Prometheus/Loki/Grafana/Tempo stack.
 --skip-benchmark  Skip benchmark workloads.
 --services-only   Skip Talos VM/root apply and deploy Kubernetes services only.
 ```

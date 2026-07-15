@@ -1,0 +1,389 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tempo-config
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: tempo
+    app.kubernetes.io/instance: tempo
+    app.kubernetes.io/component: server
+    app.kubernetes.io/part-of: tempo
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+data:
+  tempo.yaml: |
+    stream_over_http_enabled: true
+
+    server:
+      http_listen_port: 3200
+
+    distributor:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+            http:
+              endpoint: 0.0.0.0:4318
+
+    ingester:
+      max_block_duration: 5m
+
+    compactor:
+      compaction:
+        block_retention: ${tempo_retention}
+
+    metrics_generator:
+      registry:
+        external_labels:
+          source: tempo
+      storage:
+        path: /var/tempo/generator/wal
+        remote_write:
+          - url: http://prometheus.monitoring.svc.cluster.local:9090/api/v1/write
+            send_exemplars: true
+      traces_storage:
+        path: /var/tempo/generator/traces
+      processor:
+        local_blocks:
+          filter_server_spans: false
+          flush_to_storage: true
+
+    storage:
+      trace:
+        backend: local
+        wal:
+          path: /var/tempo/wal
+        local:
+          path: /var/tempo/traces
+
+    overrides:
+      defaults:
+        metrics_generator:
+          processors:
+            - service-graphs
+            - span-metrics
+            - local-blocks
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tempo-data
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: tempo
+    app.kubernetes.io/instance: tempo
+    app.kubernetes.io/component: server
+    app.kubernetes.io/part-of: tempo
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+    pve-k8s-talos/storage-role: traces
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: ${storage_class}
+  resources:
+    requests:
+      storage: ${tempo_storage_size}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tempo
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: tempo
+    app.kubernetes.io/instance: tempo
+    app.kubernetes.io/component: server
+    app.kubernetes.io/part-of: tempo
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: tempo
+  template:
+    metadata:
+      labels:
+        app: tempo
+        app.kubernetes.io/name: tempo
+        app.kubernetes.io/instance: tempo
+        app.kubernetes.io/component: server
+        app.kubernetes.io/part-of: tempo
+        app.kubernetes.io/managed-by: infrastructure
+        pve-k8s-talos/section: monitoring
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3200"
+        prometheus.io/path: /metrics
+    spec:
+      priorityClassName: infra-observability
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: tempo
+          image: grafana/tempo:${tempo_image_tag}
+          args:
+            - -config.file=/etc/tempo/tempo.yaml
+          ports:
+            - name: http
+              containerPort: 3200
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: http
+              scheme: HTTP
+            periodSeconds: 5
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+              scheme: HTTP
+            periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: http
+              scheme: HTTP
+            periodSeconds: 30
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: ${tempo_cpu_request}
+              memory: ${tempo_mem_request}
+            limits:
+              cpu: ${tempo_cpu_limit}
+              memory: ${tempo_mem_limit}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: config
+              mountPath: /etc/tempo
+            - name: data
+              mountPath: /var/tempo
+      volumes:
+        - name: config
+          configMap:
+            name: tempo-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: tempo-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: tempo
+    app.kubernetes.io/instance: tempo
+    app.kubernetes.io/component: server
+    app.kubernetes.io/part-of: tempo
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+spec:
+  selector:
+    app: tempo
+  ports:
+    - name: http
+      port: 3200
+      targetPort: http
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/instance: otel-collector
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: tempo
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+data:
+  config.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: ${otel_collector_memory_limit_mib}
+        spike_limit_mib: ${otel_collector_memory_spike_mib}
+      batch:
+        timeout: 5s
+
+    exporters:
+      otlp/tempo:
+        endpoint: tempo.monitoring.svc.cluster.local:4317
+        tls:
+          insecure: true
+
+    service:
+      extensions:
+        - health_check
+      pipelines:
+        traces:
+          receivers:
+            - otlp
+          processors:
+            - memory_limiter
+            - batch
+          exporters:
+            - otlp/tempo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/instance: otel-collector
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: tempo
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+        app.kubernetes.io/name: otel-collector
+        app.kubernetes.io/instance: otel-collector
+        app.kubernetes.io/component: gateway
+        app.kubernetes.io/part-of: tempo
+        app.kubernetes.io/managed-by: infrastructure
+        pve-k8s-talos/section: monitoring
+    spec:
+      priorityClassName: infra-observability
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector:${otel_collector_image_tag}
+          args:
+            - --config=/conf/config.yaml
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+            - name: health
+              containerPort: 13133
+          startupProbe:
+            httpGet:
+              path: /
+              port: health
+              scheme: HTTP
+            periodSeconds: 5
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+              scheme: HTTP
+            periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: health
+              scheme: HTTP
+            periodSeconds: 30
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: ${otel_collector_cpu_request}
+              memory: ${otel_collector_mem_request}
+            limits:
+              cpu: ${otel_collector_cpu_limit}
+              memory: ${otel_collector_mem_limit}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+      volumes:
+        - name: config
+          configMap:
+            name: otel-collector-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: otel-collector
+    app.kubernetes.io/instance: otel-collector
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: tempo
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+spec:
+  selector:
+    app: otel-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http

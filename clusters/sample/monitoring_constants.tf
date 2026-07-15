@@ -12,22 +12,27 @@ locals {
   grafana_storage_class          = local.ec_storage_class
   grafana_postgres_storage_class = local.ec_storage_class
   loki_storage_class             = local.ec_storage_class
+  tempo_storage_class            = local.replica_storage_class
   prometheus_storage_class       = local.replica_storage_class
 
   grafana_storage_size    = "5Gi"
   prometheus_storage_size = "100Gi"
   loki_storage_size       = "80Gi"
+  tempo_storage_size      = "40Gi"
 
   prometheus_retention = "15d"
   # Prometheus starts deleting old TSDB blocks when it reaches 80% of the PVC size,
   # leaving head/WAL room so the volume is less likely to hit 100%.
   # Docs: https://prometheus.io/docs/prometheus/latest/storage/#right-sizing-retention-size
   prometheus_retention_size_percent = 80
-  loki_retention       = "168h" # 7 days
+  loki_retention                    = "168h" # 7 days
+  tempo_retention                   = "336h" # 14 days
 
   grafana_image_tag            = "13.0.2"
   prometheus_image_tag         = "v3.12.0"
   loki_image_tag               = "3.7.2"
+  tempo_image_tag              = "2.10.5"
+  otel_collector_image_tag     = "0.155.0"
   promtail_image_tag           = "3.6.10"
   kube_state_metrics_image_tag = "v2.18.0"
   node_exporter_image_tag      = "v1.11.1"
@@ -95,6 +100,13 @@ locals {
   promtail_cpu_limit   = "300m"
   promtail_mem_request = "256Mi"
   promtail_mem_limit   = "256Mi"
+
+  otel_collector_cpu_request      = "100m"
+  otel_collector_cpu_limit        = "500m"
+  otel_collector_mem_request      = "256Mi"
+  otel_collector_mem_limit        = "256Mi"
+  otel_collector_memory_limit_mib = 192
+  otel_collector_memory_spike_mib = 64
 
   kube_state_metrics_cpu_request = "100m"
   kube_state_metrics_cpu_limit   = "300m"

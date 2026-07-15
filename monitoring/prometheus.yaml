@@ -735,6 +735,7 @@ spec:
 %{ endif ~}
             - --query.max-concurrency=${prometheus_query_max_concurrency}
             - --web.enable-lifecycle
+            - --web.enable-remote-write-receiver
           ports:
             - name: http
               containerPort: 9090

@@ -157,6 +157,7 @@ locals {
   grafana_sizing_factor    = 0.75 * local.monitoring_node_factor + 0.25 * local.monitoring_capacity_factor
   prometheus_sizing_factor = 0.70 * local.monitoring_node_factor + 0.30 * local.monitoring_capacity_factor
   loki_sizing_factor       = 0.80 * local.monitoring_node_factor + 0.20 * local.monitoring_capacity_factor
+  tempo_sizing_factor      = 0.80 * local.monitoring_node_factor + 0.20 * local.monitoring_capacity_factor
 
   grafana_cpu_request_effective_millicores = ceil(500 * local.grafana_sizing_factor / 10) * 10
   grafana_cpu_limit_effective_cores        = max(2, ceil(local.grafana_sizing_factor))
@@ -185,6 +186,10 @@ locals {
   loki_cpu_limit_value   = "1"
   loki_mem_effective_mib = ceil((1024 + (768 * (local.loki_sizing_factor - 1))) / 64) * 64
 
+  tempo_cpu_request_effective_millicores = ceil(200 * local.tempo_sizing_factor / 10) * 10
+  tempo_cpu_limit_effective_millicores   = ceil(max(1000, 1000 * local.tempo_sizing_factor) / 10) * 10
+  tempo_mem_effective_mib                = ceil((1024 + (512 * (local.tempo_sizing_factor - 1))) / 64) * 64
+
   prometheus_storage_current_mib = can(regex("^[0-9]+Gi$", try(local.prometheus_storage_size, ""))) ? (
     tonumber(trimsuffix(local.prometheus_storage_size, "Gi")) * 1024
     ) : (
@@ -195,13 +200,21 @@ locals {
     ) : (
     can(regex("^[0-9]+Mi$", try(local.loki_storage_size, ""))) ? tonumber(trimsuffix(local.loki_storage_size, "Mi")) : 0
   )
+  tempo_storage_current_mib = can(regex("^[0-9]+Gi$", try(local.tempo_storage_size, ""))) ? (
+    tonumber(trimsuffix(local.tempo_storage_size, "Gi")) * 1024
+    ) : (
+    can(regex("^[0-9]+Mi$", try(local.tempo_storage_size, ""))) ? tonumber(trimsuffix(local.tempo_storage_size, "Mi")) : 0
+  )
 
   prometheus_storage_formula_gib = ceil(60 * local.prometheus_sizing_factor)
   # Loki storage grows more softly than Prometheus so larger worker counts do not over-allocate log retention volume.
   loki_storage_formula_gib = ceil(40 * (1 + (0.75 * (local.loki_sizing_factor - 1))))
+  # Trace volume depends primarily on application traffic and sampling, so this is a conservative floor, not a capacity forecast.
+  tempo_storage_formula_gib = ceil(30 * (1 + (0.75 * (local.tempo_sizing_factor - 1))))
 
   prometheus_storage_effective_gib = max(local.prometheus_storage_formula_gib, ceil(local.prometheus_storage_current_mib / 1024))
   loki_storage_effective_gib       = max(local.loki_storage_formula_gib, ceil(local.loki_storage_current_mib / 1024))
+  tempo_storage_effective_gib      = max(local.tempo_storage_formula_gib, ceil(local.tempo_storage_current_mib / 1024))
 
   grafana_cpu_request_value = local.grafana_cpu_request_effective_millicores % 1000 == 0 ? (
     format("%d", local.grafana_cpu_request_effective_millicores / 1000)
@@ -236,6 +249,18 @@ locals {
   ) : format("%dMi", local.loki_mem_effective_mib)
   loki_mem_limit_value    = local.loki_mem_request_value
   loki_storage_size_value = format("%dGi", local.loki_storage_effective_gib)
+
+  tempo_cpu_request_value = local.tempo_cpu_request_effective_millicores % 1000 == 0 ? (
+    format("%d", local.tempo_cpu_request_effective_millicores / 1000)
+  ) : format("%dm", local.tempo_cpu_request_effective_millicores)
+  tempo_cpu_limit_value = local.tempo_cpu_limit_effective_millicores % 1000 == 0 ? (
+    format("%d", local.tempo_cpu_limit_effective_millicores / 1000)
+  ) : format("%dm", local.tempo_cpu_limit_effective_millicores)
+  tempo_mem_request_value = local.tempo_mem_effective_mib % 1024 == 0 ? (
+    format("%dGi", local.tempo_mem_effective_mib / 1024)
+  ) : format("%dMi", local.tempo_mem_effective_mib)
+  tempo_mem_limit_value    = local.tempo_mem_request_value
+  tempo_storage_size_value = format("%dGi", local.tempo_storage_effective_gib)
 
   grafana_go_mem_limit_percent_value = try(local.grafana_go_mem_limit_percent, 90)
   grafana_mem_limit_mib = can(regex("^[0-9]+Gi$", local.grafana_mem_limit_value)) ? tonumber(trimsuffix(local.grafana_mem_limit_value, "Gi")) * 1024 : (
@@ -568,6 +593,27 @@ locals {
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
   ]
+  tempo_manifests = [
+    for doc in split("\n---\n", templatefile("${path.module}/tempo.yaml", {
+      storage_class                   = local.tempo_storage_class
+      tempo_storage_size              = local.tempo_storage_size_value
+      tempo_retention                 = local.tempo_retention
+      tempo_image_tag                 = local.tempo_image_tag
+      tempo_cpu_request               = local.tempo_cpu_request_value
+      tempo_cpu_limit                 = local.tempo_cpu_limit_value
+      tempo_mem_request               = local.tempo_mem_request_value
+      tempo_mem_limit                 = local.tempo_mem_limit_value
+      otel_collector_image_tag        = local.otel_collector_image_tag
+      otel_collector_cpu_request      = local.otel_collector_cpu_request
+      otel_collector_cpu_limit        = local.otel_collector_cpu_limit
+      otel_collector_mem_request      = local.otel_collector_mem_request
+      otel_collector_mem_limit        = local.otel_collector_mem_limit
+      otel_collector_memory_limit_mib = local.otel_collector_memory_limit_mib
+      otel_collector_memory_spike_mib = local.otel_collector_memory_spike_mib
+    })) :
+    yamldecode(doc)
+    if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
+  ]
   promtail_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/promtail.yaml", {
       promtail_image_tag   = local.promtail_image_tag
@@ -628,6 +674,7 @@ locals {
     local.prometheus_api_manifests,
     local.grafana_manifests,
     local.loki_manifests,
+    local.tempo_manifests,
     local.promtail_manifests,
     [
       {
