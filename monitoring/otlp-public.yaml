@@ -1,0 +1,245 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-public-config
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: otel-collector-public
+    app.kubernetes.io/instance: otel-collector-public
+    app.kubernetes.io/component: public-gateway
+    app.kubernetes.io/part-of: tempo
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+data:
+  config.yaml: |
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+      oidc:
+        providers:
+          - issuer_url: ${otlp_public_oidc_issuer}
+            # Any authenticated user of this realm is accepted for the initial rollout.
+            # A dedicated audience can be required later without changing the frontend exporter.
+            ignore_audience: true
+%{ if otlp_public_oidc_ca_enabled ~}
+            issuer_ca_path: /run/secrets/otlp-public-oidc-ca/ca.crt
+%{ endif ~}
+
+    receivers:
+      otlp/public:
+        protocols:
+          http:
+            endpoint: 0.0.0.0:4318
+            auth:
+              authenticator: oidc
+            cors:
+              allowed_origins:
+%{ for origin in otlp_public_cors_allowed_origins ~}
+                - ${origin}
+%{ endfor ~}
+              allowed_headers:
+                - authorization
+                - content-type
+                - traceparent
+                - tracestate
+                - baggage
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: ${otlp_public_collector_memory_limit_mib}
+        spike_limit_mib: ${otlp_public_collector_memory_spike_mib}
+      resource/cluster:
+        attributes:
+          - key: service.namespace
+            value: frontend
+            action: upsert
+      batch:
+        timeout: 5s
+
+    exporters:
+      otlp/tempo:
+        endpoint: tempo.monitoring.svc.cluster.local:4317
+        tls:
+          insecure: true
+
+    service:
+      extensions:
+        - health_check
+        - oidc
+      pipelines:
+        traces:
+          receivers:
+            - otlp/public
+          processors:
+            - memory_limiter
+            - resource/cluster
+            - batch
+          exporters:
+            - otlp/tempo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector-public
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: otel-collector-public
+    app.kubernetes.io/instance: otel-collector-public
+    app.kubernetes.io/component: public-gateway
+    app.kubernetes.io/part-of: tempo
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector-public
+  template:
+    metadata:
+      labels:
+        app: otel-collector-public
+        app.kubernetes.io/name: otel-collector-public
+        app.kubernetes.io/instance: otel-collector-public
+        app.kubernetes.io/component: public-gateway
+        app.kubernetes.io/part-of: tempo
+        app.kubernetes.io/managed-by: infrastructure
+        pve-k8s-talos/section: monitoring
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8888"
+        prometheus.io/path: /metrics
+    spec:
+      priorityClassName: infra-observability
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: otel-collector-public
+          image: otel/opentelemetry-collector-contrib:${otlp_public_collector_image_tag}
+          args:
+            - --config=/conf/config.yaml
+          ports:
+            - name: otlp-http
+              containerPort: 4318
+            - name: metrics
+              containerPort: 8888
+            - name: health
+              containerPort: 13133
+          startupProbe:
+            httpGet:
+              path: /
+              port: health
+              scheme: HTTP
+            periodSeconds: 5
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+              scheme: HTTP
+            periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: health
+              scheme: HTTP
+            periodSeconds: 30
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: ${otlp_public_collector_cpu_request}
+              memory: ${otlp_public_collector_mem_request}
+            limits:
+              cpu: ${otlp_public_collector_cpu_limit}
+              memory: ${otlp_public_collector_mem_limit}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: config
+              mountPath: /conf
+              readOnly: true
+%{ if otlp_public_oidc_ca_enabled ~}
+            - name: otlp-public-oidc-ca
+              mountPath: /run/secrets/otlp-public-oidc-ca
+              readOnly: true
+%{ endif ~}
+      volumes:
+        - name: config
+          configMap:
+            name: otel-collector-public-config
+%{ if otlp_public_oidc_ca_enabled ~}
+        - name: otlp-public-oidc-ca
+          secret:
+            secretName: ${otlp_public_oidc_ca_secret_name}
+%{ endif ~}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector-public
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: otel-collector-public
+    app.kubernetes.io/instance: otel-collector-public
+    app.kubernetes.io/component: public-gateway
+    app.kubernetes.io/part-of: tempo
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+spec:
+  selector:
+    app: otel-collector-public
+  ports:
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: otlp-public-cert
+  namespace: monitoring
+spec:
+  secretName: ${otlp_public_tls_secret_name}
+  issuerRef:
+    name: root-ca
+    kind: ClusterIssuer
+  dnsNames:
+    - ${otlp_public_hostname}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: otlp-public
+  namespace: monitoring
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - ${otlp_public_hostname}
+      secretName: ${otlp_public_tls_secret_name}
+  rules:
+    - host: ${otlp_public_hostname}
+      http:
+        paths:
+          - path: /v1/traces
+            pathType: Exact
+            backend:
+              service:
+                name: otel-collector-public
+                port:
+                  name: otlp-http

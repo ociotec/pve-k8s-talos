@@ -28,19 +28,31 @@ locals {
   loki_retention                    = "168h" # 7 days
   tempo_retention                   = "336h" # 14 days
 
-  grafana_image_tag            = "13.0.2"
-  prometheus_image_tag         = "v3.12.0"
-  loki_image_tag               = "3.7.2"
-  tempo_image_tag              = "2.10.5"
-  otel_collector_image_tag     = "0.155.0"
+  grafana_image_tag        = "13.0.2"
+  prometheus_image_tag     = "v3.12.0"
+  loki_image_tag           = "3.7.2"
+  tempo_image_tag          = "2.10.5"
+  otel_collector_image_tag = "0.155.0"
+  # Disabled by default because this opens an Internet-facing trace-ingest endpoint.
+  # Frontends deployed under the cluster domain are accepted without creating
+  # an application-to-monitoring configuration dependency.
+  otlp_public_enabled         = false
+  otlp_public_hostname        = "otlp.${local.domain}"
+  otlp_public_tls_secret_name = "otlp-public-tls"
+  otlp_public_keycloak_realm  = "company"
+  otlp_public_cors_allowed_origins = [
+    "https://*.${local.domain}",
+    # "http://localhost:8080",
+  ]
+  # Enable localhost:8080 above only in development-cluster constants.
   # Beyla auto-instruments only repository-managed oauth2-proxy containers.
-  beyla_enabled        = true
-  beyla_image_tag      = "3.15.0"
-  beyla_cpu_request    = "100m"
-  beyla_cpu_limit      = "500m"
-  beyla_mem_request    = "256Mi"
-  beyla_mem_limit      = "256Mi"
-  beyla_sampling_ratio = 0.10
+  beyla_enabled                = true
+  beyla_image_tag              = "3.15.0"
+  beyla_cpu_request            = "100m"
+  beyla_cpu_limit              = "500m"
+  beyla_mem_request            = "256Mi"
+  beyla_mem_limit              = "256Mi"
+  beyla_sampling_ratio         = 0.10
   promtail_image_tag           = "3.6.10"
   kube_state_metrics_image_tag = "v2.18.0"
   node_exporter_image_tag      = "v1.11.1"
@@ -109,12 +121,18 @@ locals {
   promtail_mem_request = "256Mi"
   promtail_mem_limit   = "256Mi"
 
-  otel_collector_cpu_request      = "100m"
-  otel_collector_cpu_limit        = "500m"
-  otel_collector_mem_request      = "256Mi"
-  otel_collector_mem_limit        = "256Mi"
-  otel_collector_memory_limit_mib = 192
-  otel_collector_memory_spike_mib = 64
+  otel_collector_cpu_request             = "100m"
+  otel_collector_cpu_limit               = "500m"
+  otel_collector_mem_request             = "256Mi"
+  otel_collector_mem_limit               = "256Mi"
+  otel_collector_memory_limit_mib        = 192
+  otel_collector_memory_spike_mib        = 64
+  otlp_public_collector_cpu_request      = "100m"
+  otlp_public_collector_cpu_limit        = "500m"
+  otlp_public_collector_mem_request      = "256Mi"
+  otlp_public_collector_mem_limit        = "256Mi"
+  otlp_public_collector_memory_limit_mib = 192
+  otlp_public_collector_memory_spike_mib = 64
 
   kube_state_metrics_cpu_request = "100m"
   kube_state_metrics_cpu_limit   = "300m"

@@ -51,7 +51,7 @@ variable "constants" {
 }
 
 data "terraform_remote_state" "identity" {
-  count = trimspace(try(local.grafana_auth_keycloak_realm, "")) != "" || trimspace(try(local.prometheus_auth_keycloak_realm, "")) != "" ? 1 : 0
+  count = trimspace(try(local.grafana_auth_keycloak_realm, "")) != "" || trimspace(try(local.prometheus_auth_keycloak_realm, "")) != "" || local.otlp_public_enabled_value ? 1 : 0
 
   backend = "local"
   config = {
@@ -64,26 +64,26 @@ provider "kubernetes" {
 }
 
 locals {
-  cluster_credentials                             = try(jsondecode(file("${path.module}/credentials.json")), {})
-  monitoring_constants_source                     = file("${path.module}/constants.tf")
-  monitoring_credentials                          = try(local.cluster_credentials.monitoring, {})
-  monitoring_grafana_admin_password               = try(local.monitoring_credentials.grafana_admin_password, "")
-  monitoring_grafana_postgres_password            = try(local.monitoring_credentials.grafana_postgres_password, "")
-  monitoring_prometheus_api_basic_auth_password   = try(local.monitoring_credentials.prometheus_api_basic_auth_password, "")
-  monitoring_prometheus_api_basic_auth_hash       = try(local.monitoring_credentials.prometheus_api_basic_auth_hash, "")
-  monitoring_prometheus_oauth_cookie_secret       = try(local.monitoring_credentials.prometheus_oauth_cookie_secret, "")
-  prometheus_auth_keycloak_realm_value            = trimspace(try(local.prometheus_auth_keycloak_realm, ""))
-  prometheus_auth_enabled                         = local.prometheus_auth_keycloak_realm_value != ""
-  prometheus_auth_allowed_groups_value            = distinct(compact(try(local.prometheus_auth_allowed_groups, [])))
-  prometheus_auth_ca_secret_name_value            = try(local.prometheus_auth_ca_secret_name, "prometheus-oauth-ca")
-  prometheus_oauth_secret_name_value              = "prometheus-oauth"
-  prometheus_oauth_redirect_uri                   = format("https://%s/oauth2/callback", local.prometheus_hostname)
-  prometheus_oauth2_proxy_image_tag_value         = try(local.prometheus_oauth2_proxy_image_tag, "v7.12.0")
-  prometheus_oauth2_proxy_cookie_name_value       = try(local.prometheus_oauth2_proxy_cookie_name, "_prometheus_oauth2_proxy")
-  prometheus_oauth2_proxy_cpu_request_value       = try(local.prometheus_oauth2_proxy_cpu_request, "50m")
-  prometheus_oauth2_proxy_cpu_limit_value         = try(local.prometheus_oauth2_proxy_cpu_limit, "200m")
-  prometheus_oauth2_proxy_mem_request_value       = try(local.prometheus_oauth2_proxy_mem_request, "256Mi")
-  prometheus_oauth2_proxy_mem_limit_value         = try(local.prometheus_oauth2_proxy_mem_limit, "256Mi")
+  cluster_credentials                           = try(jsondecode(file("${path.module}/credentials.json")), {})
+  monitoring_constants_source                   = file("${path.module}/constants.tf")
+  monitoring_credentials                        = try(local.cluster_credentials.monitoring, {})
+  monitoring_grafana_admin_password             = try(local.monitoring_credentials.grafana_admin_password, "")
+  monitoring_grafana_postgres_password          = try(local.monitoring_credentials.grafana_postgres_password, "")
+  monitoring_prometheus_api_basic_auth_password = try(local.monitoring_credentials.prometheus_api_basic_auth_password, "")
+  monitoring_prometheus_api_basic_auth_hash     = try(local.monitoring_credentials.prometheus_api_basic_auth_hash, "")
+  monitoring_prometheus_oauth_cookie_secret     = try(local.monitoring_credentials.prometheus_oauth_cookie_secret, "")
+  prometheus_auth_keycloak_realm_value          = trimspace(try(local.prometheus_auth_keycloak_realm, ""))
+  prometheus_auth_enabled                       = local.prometheus_auth_keycloak_realm_value != ""
+  prometheus_auth_allowed_groups_value          = distinct(compact(try(local.prometheus_auth_allowed_groups, [])))
+  prometheus_auth_ca_secret_name_value          = try(local.prometheus_auth_ca_secret_name, "prometheus-oauth-ca")
+  prometheus_oauth_secret_name_value            = "prometheus-oauth"
+  prometheus_oauth_redirect_uri                 = format("https://%s/oauth2/callback", local.prometheus_hostname)
+  prometheus_oauth2_proxy_image_tag_value       = try(local.prometheus_oauth2_proxy_image_tag, "v7.12.0")
+  prometheus_oauth2_proxy_cookie_name_value     = try(local.prometheus_oauth2_proxy_cookie_name, "_prometheus_oauth2_proxy")
+  prometheus_oauth2_proxy_cpu_request_value     = try(local.prometheus_oauth2_proxy_cpu_request, "50m")
+  prometheus_oauth2_proxy_cpu_limit_value       = try(local.prometheus_oauth2_proxy_cpu_limit, "200m")
+  prometheus_oauth2_proxy_mem_request_value     = try(local.prometheus_oauth2_proxy_mem_request, "256Mi")
+  prometheus_oauth2_proxy_mem_limit_value       = try(local.prometheus_oauth2_proxy_mem_limit, "256Mi")
   beyla_enabled_value = can(regex("(?m)^\\s*beyla_enabled\\s*=\\s*(true|false)\\s*$", local.monitoring_constants_source)[0]) ? (
     tobool(regex("(?m)^\\s*beyla_enabled\\s*=\\s*(true|false)\\s*$", local.monitoring_constants_source)[0])
   ) : true
@@ -105,8 +105,53 @@ locals {
   beyla_sampling_ratio_value = can(regex("(?m)^\\s*beyla_sampling_ratio\\s*=\\s*([0-9.]+)\\s*$", local.monitoring_constants_source)[0]) ? (
     tonumber(regex("(?m)^\\s*beyla_sampling_ratio\\s*=\\s*([0-9.]+)\\s*$", local.monitoring_constants_source)[0])
   ) : 0.10
-  prometheus_auth_ca_content                      = local.prometheus_auth_enabled ? try(file(local.root_ca_crt), "") : ""
-  prometheus_auth_ca_enabled                      = trimspace(local.prometheus_auth_ca_content) != ""
+  prometheus_auth_ca_content = local.prometheus_auth_enabled ? try(file(local.root_ca_crt), "") : ""
+  prometheus_auth_ca_enabled = trimspace(local.prometheus_auth_ca_content) != ""
+  otlp_public_enabled_value = can(regex("(?m)^\\s*otlp_public_enabled\\s*=\\s*(true|false)\\s*$", local.monitoring_constants_source)[0]) ? (
+    tobool(regex("(?m)^\\s*otlp_public_enabled\\s*=\\s*(true|false)\\s*$", local.monitoring_constants_source)[0])
+  ) : false
+  otlp_public_hostname_value = can(regex("(?m)^\\s*otlp_public_hostname\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]) ? (
+    replace(
+      regex("(?m)^\\s*otlp_public_hostname\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0],
+      "$${local.domain}",
+      local.domain
+    )
+  ) : format("otlp.%s", local.domain)
+  otlp_public_tls_secret_name_value = can(regex("(?m)^\\s*otlp_public_tls_secret_name\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]) ? (
+    regex("(?m)^\\s*otlp_public_tls_secret_name\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]
+  ) : "otlp-public-tls"
+  otlp_public_keycloak_realm_value = can(regex("(?m)^\\s*otlp_public_keycloak_realm\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]) ? (
+    regex("(?m)^\\s*otlp_public_keycloak_realm\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]
+  ) : ""
+  otlp_public_cors_allowed_origins_value = distinct(compact([
+    for origin in flatten([
+      for match in regexall(
+        "\"([^\"]+)\"",
+        try(regex("(?m)^\\s*otlp_public_cors_allowed_origins\\s*=\\s*\\[([^]]*)\\]\\s*$", local.monitoring_constants_source)[0], "")
+      ) : match
+    ]) : replace(origin, "$${local.domain}", local.domain)
+  ]))
+  otlp_public_oidc_ca_content     = local.otlp_public_enabled_value ? try(file(local.root_ca_crt), "") : ""
+  otlp_public_oidc_ca_enabled     = trimspace(local.otlp_public_oidc_ca_content) != ""
+  otlp_public_oidc_ca_secret_name = "otlp-public-oidc-ca"
+  otlp_public_collector_cpu_request_value = can(regex("(?m)^\\s*otlp_public_collector_cpu_request\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]) ? (
+    regex("(?m)^\\s*otlp_public_collector_cpu_request\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]
+  ) : "100m"
+  otlp_public_collector_cpu_limit_value = can(regex("(?m)^\\s*otlp_public_collector_cpu_limit\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]) ? (
+    regex("(?m)^\\s*otlp_public_collector_cpu_limit\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]
+  ) : "500m"
+  otlp_public_collector_mem_request_value = can(regex("(?m)^\\s*otlp_public_collector_mem_request\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]) ? (
+    regex("(?m)^\\s*otlp_public_collector_mem_request\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]
+  ) : "256Mi"
+  otlp_public_collector_mem_limit_value = can(regex("(?m)^\\s*otlp_public_collector_mem_limit\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]) ? (
+    regex("(?m)^\\s*otlp_public_collector_mem_limit\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]
+  ) : "256Mi"
+  otlp_public_collector_memory_limit_mib_value = can(regex("(?m)^\\s*otlp_public_collector_memory_limit_mib\\s*=\\s*([0-9]+)\\s*$", local.monitoring_constants_source)[0]) ? (
+    tonumber(regex("(?m)^\\s*otlp_public_collector_memory_limit_mib\\s*=\\s*([0-9]+)\\s*$", local.monitoring_constants_source)[0])
+  ) : 192
+  otlp_public_collector_memory_spike_mib_value = can(regex("(?m)^\\s*otlp_public_collector_memory_spike_mib\\s*=\\s*([0-9]+)\\s*$", local.monitoring_constants_source)[0]) ? (
+    tonumber(regex("(?m)^\\s*otlp_public_collector_memory_spike_mib\\s*=\\s*([0-9]+)\\s*$", local.monitoring_constants_source)[0])
+  ) : 64
   prometheus_api_hostname_value                   = trimspace(try(local.prometheus_api_hostname, "")) != "" ? trimspace(local.prometheus_api_hostname) : format("prometheus-api.%s", local.domain)
   prometheus_api_tls_secret_name_value            = try(local.prometheus_api_tls_secret_name, local.prometheus_tls_secret_name)
   prometheus_api_basic_auth_secret_name_value     = try(local.prometheus_api_basic_auth_secret_name, "prometheus-api-basic-auth")
@@ -290,7 +335,7 @@ locals {
   )
   grafana_go_mem_limit_mib         = floor(local.grafana_mem_limit_mib * local.grafana_go_mem_limit_percent_value / 100)
   grafana_go_mem_limit             = format("%dMiB", local.grafana_go_mem_limit_mib)
-  monitoring_keycloak_auth_enabled = local.grafana_auth_enabled || local.prometheus_auth_enabled
+  monitoring_keycloak_auth_enabled = local.grafana_auth_enabled || local.prometheus_auth_enabled || local.otlp_public_enabled_value
   identity_realm_groups = local.monitoring_keycloak_auth_enabled ? try(
     data.terraform_remote_state.identity[0].outputs.keycloak_realm_groups,
     {}
@@ -300,6 +345,10 @@ locals {
     {}
   ) : {}
   identity_oidc_client_secrets = try(local.cluster_credentials.identity.oidc_client_secrets, {})
+  otlp_public_oidc_issuer_value = local.otlp_public_enabled_value ? try(
+    local.identity_oidc_metadata[local.otlp_public_keycloak_realm_value].issuer_url,
+    ""
+  ) : ""
   grafana_oidc_issuer = local.grafana_auth_enabled ? try(
     local.identity_oidc_metadata[local.grafana_auth_keycloak_realm_value].issuer_url,
     ""
@@ -386,8 +435,16 @@ locals {
     if !contains(keys(try(local.identity_realm_groups[local.prometheus_auth_keycloak_realm_value], {})), group_name)
   ] : []
   available_identity_realms = keys(local.identity_oidc_metadata)
-  monitoring_namespace      = yamldecode(file("${path.module}/namespace.yaml"))
-  grafana_dashboard_files   = sort(fileset("${path.module}/grafana/dashboards", "**/*.json"))
+  monitoring_tls_secrets = concat(
+    local.tls_secrets,
+    local.otlp_public_enabled_value ? [{
+      certificate = local.default_certificate_name
+      namespace   = "monitoring"
+      secret_name = local.otlp_public_tls_secret_name_value
+    }] : []
+  )
+  monitoring_namespace    = yamldecode(file("${path.module}/namespace.yaml"))
+  grafana_dashboard_files = sort(fileset("${path.module}/grafana/dashboards", "**/*.json"))
   grafana_dashboard_configmap_keys = {
     for filename in local.grafana_dashboard_files :
     filename => replace(filename, "/", "__")
@@ -636,6 +693,25 @@ locals {
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
   ]
+  otlp_public_manifests = [
+    for doc in split("\n---\n", templatefile("${path.module}/otlp-public.yaml", {
+      otlp_public_hostname                   = local.otlp_public_hostname_value
+      otlp_public_tls_secret_name            = local.otlp_public_tls_secret_name_value
+      otlp_public_oidc_issuer                = local.otlp_public_oidc_issuer_value
+      otlp_public_cors_allowed_origins       = local.otlp_public_cors_allowed_origins_value
+      otlp_public_oidc_ca_enabled            = local.otlp_public_oidc_ca_enabled
+      otlp_public_oidc_ca_secret_name        = local.otlp_public_oidc_ca_secret_name
+      otlp_public_collector_image_tag        = local.otel_collector_image_tag
+      otlp_public_collector_cpu_request      = local.otlp_public_collector_cpu_request_value
+      otlp_public_collector_cpu_limit        = local.otlp_public_collector_cpu_limit_value
+      otlp_public_collector_mem_request      = local.otlp_public_collector_mem_request_value
+      otlp_public_collector_mem_limit        = local.otlp_public_collector_mem_limit_value
+      otlp_public_collector_memory_limit_mib = local.otlp_public_collector_memory_limit_mib_value
+      otlp_public_collector_memory_spike_mib = local.otlp_public_collector_memory_spike_mib_value
+    })) :
+    yamldecode(doc)
+    if local.otlp_public_enabled_value && length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
+  ]
   beyla_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/beyla.yaml", {
       beyla_image_tag      = local.beyla_image_tag_value
@@ -709,6 +785,7 @@ locals {
     local.grafana_manifests,
     local.loki_manifests,
     local.tempo_manifests,
+    local.otlp_public_manifests,
     local.beyla_manifests,
     local.promtail_manifests,
     [
@@ -777,7 +854,7 @@ locals {
   ]
 
   preissued_tls_secrets_by_target = {
-    for secret in local.tls_secrets : format("%s/%s", secret.namespace, secret.secret_name) => merge(
+    for secret in local.monitoring_tls_secrets : format("%s/%s", secret.namespace, secret.secret_name) => merge(
       secret,
       try(local.available_certificates[secret.certificate], {}),
       {
@@ -787,7 +864,7 @@ locals {
     )
   }
   expected_preissued_tls_secret_targets = local.tls_source == "preissued" ? [
-    for secret in local.tls_secrets : format("%s/%s", secret.namespace, secret.secret_name)
+    for secret in local.monitoring_tls_secrets : format("%s/%s", secret.namespace, secret.secret_name)
   ] : []
   missing_preissued_tls_secret_targets = [
     for target in local.expected_preissued_tls_secret_targets : target
@@ -804,7 +881,7 @@ check "tls_source_valid" {
 
 check "preissued_tls_secrets_unique" {
   assert {
-    condition     = local.tls_source != "preissued" || length(local.tls_secrets) == length(local.preissued_tls_secrets_by_target)
+    condition     = local.tls_source != "preissued" || length(local.monitoring_tls_secrets) == length(local.preissued_tls_secrets_by_target)
     error_message = "tls_secrets contains duplicate namespace/secret_name pairs."
   }
 }
@@ -901,6 +978,24 @@ check "prometheus_auth_groups" {
   assert {
     condition     = !local.prometheus_auth_enabled || (length(local.prometheus_auth_effective_allowed_groups) > 0 && length(local.missing_prometheus_auth_group_definitions) == 0)
     error_message = format("Prometheus auth groups must exist in the selected Keycloak realm. Missing logical groups: %s", join(", ", local.missing_prometheus_auth_group_definitions))
+  }
+}
+
+check "otlp_public_configuration" {
+  assert {
+    condition = !local.otlp_public_enabled_value || (
+      local.otlp_public_hostname_value != "" &&
+      local.otlp_public_tls_secret_name_value != "" &&
+      local.otlp_public_oidc_issuer_value != "" &&
+      length(local.otlp_public_cors_allowed_origins_value) > 0 &&
+      alltrue([
+        for origin in local.otlp_public_cors_allowed_origins_value :
+        origin == format("https://*.%s", local.domain) || (
+          !strcontains(origin, "*") && can(regex("^https?://[^/]+$", origin))
+        )
+      ])
+    )
+    error_message = "Public OTLP requires a hostname, TLS secret name, Keycloak realm, and CORS origins. The only wildcard accepted is https://*.<cluster domain>; all other origins must be explicit HTTP(S) origins."
   }
 }
 
@@ -1043,6 +1138,22 @@ resource "kubernetes_secret_v1" "prometheus_oauth_ca" {
   depends_on = [kubernetes_manifest.monitoring_namespace]
 }
 
+resource "kubernetes_secret_v1" "otlp_public_oidc_ca" {
+  count = local.otlp_public_enabled_value && local.otlp_public_oidc_ca_enabled ? 1 : 0
+
+  metadata {
+    name      = local.otlp_public_oidc_ca_secret_name
+    namespace = "monitoring"
+  }
+
+  data = {
+    "ca.crt" = local.otlp_public_oidc_ca_content
+  }
+
+  type       = "Opaque"
+  depends_on = [kubernetes_manifest.monitoring_namespace]
+}
+
 resource "kubernetes_manifest" "monitoring_other" {
   for_each = {
     for m in local.monitoring_other :
@@ -1086,6 +1197,7 @@ resource "kubernetes_manifest" "monitoring_other" {
     kubernetes_secret_v1.prometheus_api_basic_auth,
     kubernetes_secret_v1.prometheus_oauth,
     kubernetes_secret_v1.prometheus_oauth_ca,
+    kubernetes_secret_v1.otlp_public_oidc_ca,
   ]
 }
 
@@ -1140,6 +1252,7 @@ resource "null_resource" "monitoring_jobs" {
     kubernetes_secret_v1.grafana_admin,
     local_file.monitoring_jobs,
   ]
+
 }
 
 resource "null_resource" "cert_manager_webhook_ready" {

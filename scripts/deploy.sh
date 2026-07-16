@@ -1022,6 +1022,7 @@ prepare_monitoring_workspace() {
   link_into_workspace "${repo_root}/monitoring/grafana.yaml" "${workspace}/grafana.yaml"
   link_into_workspace "${repo_root}/monitoring/loki.yaml" "${workspace}/loki.yaml"
   link_into_workspace "${repo_root}/monitoring/tempo.yaml" "${workspace}/tempo.yaml"
+  link_into_workspace "${repo_root}/monitoring/otlp-public.yaml" "${workspace}/otlp-public.yaml"
   link_into_workspace "${repo_root}/monitoring/beyla.yaml" "${workspace}/beyla.yaml"
   link_into_workspace "${repo_root}/monitoring/promtail.yaml" "${workspace}/promtail.yaml"
   link_into_workspace "${repo_root}/monitoring/kube-state-metrics.yaml" "${workspace}/kube-state-metrics.yaml"
