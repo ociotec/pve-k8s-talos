@@ -266,9 +266,14 @@ locals {
     for m in local.platform_resources : m
     if try(m.kind, "") == "Ingress"
   ]
+  platform_rancher_deployments = [
+    for m in local.platform_resources : m
+    if try(m.kind, "") == "Deployment" && try(m.metadata.name, "") == "rancher"
+  ]
   platform_other = [
     for m in local.platform_resources : m
-    if !contains(["Certificate", "Ingress", "Namespace"], try(m.kind, ""))
+    if !contains(["Certificate", "Ingress", "Namespace"], try(m.kind, "")) &&
+    !(try(m.kind, "") == "Deployment" && try(m.metadata.name, "") == "rancher")
   ]
   platform_namespaces = [
     for m in local.platform_resources : m
@@ -797,19 +802,13 @@ resource "kubernetes_manifest" "platform_namespaces" {
 resource "kubernetes_manifest" "platform_other" {
   for_each = { for i, m in local.platform_other : i => m }
   manifest = each.value
-  computed_fields = concat(
-    [
-      "globalDefault",
-    ],
-    try(each.value.kind, "") == "Deployment" && try(each.value.metadata.name, "") == "rancher" ? [] : [
-      "metadata.annotations",
-      "metadata.annotations[\"deprecated.daemonset.template.generation\"]",
-    ],
-    [
-      "spec.template.spec.containers[0].resources.limits.cpu",
-      "spec.template.spec.nodeSelector",
-    ],
-  )
+  computed_fields = [
+    "globalDefault",
+    "metadata.annotations",
+    "metadata.annotations[\"deprecated.daemonset.template.generation\"]",
+    "spec.template.spec.containers[0].resources.limits.cpu",
+    "spec.template.spec.nodeSelector",
+  ]
   lifecycle {
     ignore_changes = [
       manifest.metadata.annotations,
@@ -819,6 +818,198 @@ resource "kubernetes_manifest" "platform_other" {
     kubernetes_manifest.platform_namespaces,
     kubernetes_secret_v1.portainer_admin,
     kubernetes_secret_v1.portainer_oauth_ca,
+  ]
+}
+
+resource "kubernetes_deployment_v1" "rancher" {
+  count = length(local.platform_rancher_deployments)
+
+  metadata {
+    name      = local.platform_rancher_deployments[count.index].metadata.name
+    namespace = local.platform_rancher_deployments[count.index].metadata.namespace
+    labels    = local.platform_rancher_deployments[count.index].metadata.labels
+  }
+
+  spec {
+    replicas = tostring(local.platform_rancher_deployments[count.index].spec.replicas)
+
+    selector {
+      match_labels = local.platform_rancher_deployments[count.index].spec.selector.matchLabels
+    }
+
+    strategy {
+      type = local.platform_rancher_deployments[count.index].spec.strategy.type
+
+      rolling_update {
+        max_surge       = tostring(local.platform_rancher_deployments[count.index].spec.strategy.rollingUpdate.maxSurge)
+        max_unavailable = tostring(local.platform_rancher_deployments[count.index].spec.strategy.rollingUpdate.maxUnavailable)
+      }
+    }
+
+    template {
+      metadata {
+        labels = local.platform_rancher_deployments[count.index].spec.template.metadata.labels
+      }
+
+      spec {
+        priority_class_name  = local.platform_rancher_deployments[count.index].spec.template.spec.priorityClassName
+        service_account_name = local.platform_rancher_deployments[count.index].spec.template.spec.serviceAccountName
+
+        affinity {
+          node_affinity {
+            required_during_scheduling_ignored_during_execution {
+              node_selector_term {
+                match_expressions {
+                  key      = local.platform_rancher_deployments[count.index].spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].key
+                  operator = local.platform_rancher_deployments[count.index].spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].operator
+                  values   = local.platform_rancher_deployments[count.index].spec.template.spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution.nodeSelectorTerms[0].matchExpressions[0].values
+                }
+              }
+            }
+          }
+
+          pod_anti_affinity {
+            preferred_during_scheduling_ignored_during_execution {
+              weight = local.platform_rancher_deployments[count.index].spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].weight
+
+              pod_affinity_term {
+                topology_key = local.platform_rancher_deployments[count.index].spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.topologyKey
+
+                label_selector {
+                  match_expressions {
+                    key      = local.platform_rancher_deployments[count.index].spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.labelSelector.matchExpressions[0].key
+                    operator = local.platform_rancher_deployments[count.index].spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.labelSelector.matchExpressions[0].operator
+                    values   = local.platform_rancher_deployments[count.index].spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution[0].podAffinityTerm.labelSelector.matchExpressions[0].values
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        dynamic "toleration" {
+          for_each = local.platform_rancher_deployments[count.index].spec.template.spec.tolerations
+          content {
+            key      = toleration.value.key
+            operator = toleration.value.operator
+            value    = toleration.value.value
+            effect   = toleration.value.effect
+          }
+        }
+
+        container {
+          name              = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].name
+          image             = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].image
+          image_pull_policy = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].imagePullPolicy
+          args              = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].args
+
+          dynamic "port" {
+            for_each = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].ports
+            content {
+              container_port = port.value.containerPort
+              protocol       = port.value.protocol
+            }
+          }
+
+          dynamic "env" {
+            for_each = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].env
+            content {
+              name  = env.value.name
+              value = try(env.value.value, null)
+
+              dynamic "value_from" {
+                for_each = try(env.value.valueFrom, null) == null ? [] : [env.value.valueFrom]
+                content {
+                  dynamic "secret_key_ref" {
+                    for_each = try(value_from.value.secretKeyRef, null) == null ? [] : [value_from.value.secretKeyRef]
+                    content {
+                      name = secret_key_ref.value.name
+                      key  = secret_key_ref.value.key
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          startup_probe {
+            failure_threshold = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].startupProbe.failureThreshold
+            period_seconds    = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].startupProbe.periodSeconds
+            success_threshold = 1
+            timeout_seconds   = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].startupProbe.timeoutSeconds
+
+            http_get {
+              path   = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].startupProbe.httpGet.path
+              port   = tostring(local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].startupProbe.httpGet.port)
+              scheme = "HTTP"
+            }
+          }
+
+          liveness_probe {
+            failure_threshold = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].livenessProbe.failureThreshold
+            period_seconds    = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].livenessProbe.periodSeconds
+            success_threshold = 1
+            timeout_seconds   = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].livenessProbe.timeoutSeconds
+
+            http_get {
+              path   = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].livenessProbe.httpGet.path
+              port   = tostring(local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].livenessProbe.httpGet.port)
+              scheme = "HTTP"
+            }
+          }
+
+          readiness_probe {
+            failure_threshold = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].readinessProbe.failureThreshold
+            period_seconds    = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].readinessProbe.periodSeconds
+            success_threshold = 1
+            timeout_seconds   = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].readinessProbe.timeoutSeconds
+
+            http_get {
+              path   = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].readinessProbe.httpGet.path
+              port   = tostring(local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].readinessProbe.httpGet.port)
+              scheme = "HTTP"
+            }
+          }
+
+          resources {
+            requests = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].resources.requests
+            limits   = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].resources.limits
+          }
+
+          volume_mount {
+            name       = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].volumeMounts[0].name
+            mount_path = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].volumeMounts[0].mountPath
+            sub_path   = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].volumeMounts[0].subPath
+            read_only  = local.platform_rancher_deployments[count.index].spec.template.spec.containers[0].volumeMounts[0].readOnly
+          }
+        }
+
+        volume {
+          name = local.platform_rancher_deployments[count.index].spec.template.spec.volumes[0].name
+
+          secret {
+            secret_name  = local.platform_rancher_deployments[count.index].spec.template.spec.volumes[0].secret.secretName
+            default_mode = format("0%o", local.platform_rancher_deployments[count.index].spec.template.spec.volumes[0].secret.defaultMode)
+          }
+        }
+      }
+    }
+  }
+
+  wait_for_rollout = false
+
+  lifecycle {
+    ignore_changes = [
+      metadata[0].annotations,
+      spec[0].template[0].spec[0].automount_service_account_token,
+      spec[0].template[0].spec[0].enable_service_links,
+    ]
+  }
+
+  depends_on = [
+    kubernetes_manifest.platform_namespaces,
+    kubernetes_secret_v1.rancher_bootstrap,
+    kubernetes_secret_v1.rancher_ca,
   ]
 }
 
@@ -904,6 +1095,7 @@ resource "null_resource" "rancher_ready" {
 
   depends_on = [
     kubernetes_manifest.platform_other,
+    kubernetes_deployment_v1.rancher,
     kubernetes_manifest.platform_ingress,
     kubernetes_secret_v1.rancher_ca,
   ]
@@ -1038,6 +1230,7 @@ resource "kubernetes_manifest" "platform_ingress" {
   manifest = each.value
   depends_on = [
     kubernetes_manifest.platform_other,
+    kubernetes_deployment_v1.rancher,
     kubernetes_manifest.platform_certificates,
     kubernetes_secret_v1.preissued_tls,
     kubernetes_secret_v1.rancher_bootstrap,

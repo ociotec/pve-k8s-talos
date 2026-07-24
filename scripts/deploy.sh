@@ -1064,6 +1064,95 @@ kubernetes_resource_changed() {
   [[ -n "${before}" && -n "${after}" && "${before}" != "${after}" ]]
 }
 
+migrate_platform_rancher_deployment_state() {
+  local workspace="$1"
+  local target_address='kubernetes_deployment_v1.rancher[0]'
+  local desired_count
+  local legacy_address
+  local migration_dir
+  local working_state
+  local migrated_state
+
+  desired_count="$(
+    printf 'length(local.platform_rancher_deployments)\n' |
+      tofu -chdir="${workspace}" console 2>/dev/null |
+      tail -n 1 |
+      tr -d '[:space:]'
+  )"
+  case "${desired_count}" in
+    0)
+      return 0
+      ;;
+    1)
+      ;;
+    *)
+      error "Unable to determine the Rancher Deployment resource count for state migration." >&2
+      return 1
+      ;;
+  esac
+
+  legacy_address="$(
+    tofu -chdir="${workspace}" show -json |
+      jq -r '
+        .values.root_module.resources[]?
+        | select(
+            .type == "kubernetes_manifest"
+            and .name == "platform_other"
+            and .values.manifest.kind == "Deployment"
+            and .values.manifest.metadata.name == "rancher"
+            and .values.manifest.metadata.namespace == "cattle-system"
+          )
+        | .address
+      ' |
+      head -n 1
+  )"
+
+  if tofu -chdir="${workspace}" state list 2>/dev/null |
+    grep -Fxq "${target_address}"; then
+    if [[ -n "${legacy_address}" ]]; then
+      error "Both legacy and typed Rancher Deployment resources exist in OpenTofu state." >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  if [[ -z "${legacy_address}" ]]; then
+    return 0
+  fi
+  if ! kubectl -n cattle-system get deployment rancher >/dev/null 2>&1; then
+    error "Legacy Rancher state exists, but cattle-system/rancher is absent from Kubernetes." >&2
+    return 1
+  fi
+
+  message "Migrating the existing Rancher Deployment to the typed OpenTofu resource..."
+  migration_dir="$(mktemp -d)"
+  working_state="${migration_dir}/terraform.tfstate"
+  migrated_state="${migration_dir}/terraform-migrated.tfstate"
+
+  tofu -chdir="${workspace}" state pull >"${working_state}"
+  tofu -chdir="${workspace}" state rm \
+    -state="${working_state}" \
+    -backup="${migration_dir}/state-rm.backup" \
+    "${legacy_address}" >/dev/null
+
+  if ! tofu -chdir="${workspace}" import \
+    -input=false \
+    -no-color \
+    -state="${working_state}" \
+    -state-out="${migrated_state}" \
+    -backup="${migration_dir}/import.backup" \
+    "${target_address}" \
+    "cattle-system/rancher" >/dev/null; then
+    rm -rf "${migration_dir}"
+    error "Failed to import the existing Rancher Deployment; the authoritative state was not changed." >&2
+    return 1
+  fi
+
+  cp "${migrated_state}" "${workspace}/terraform.tfstate"
+  rm -rf "${migration_dir}"
+  message "Rancher Deployment state migration completed."
+}
+
 rook_external_csi_configuration_sha256() {
   if ! kubectl get namespace rook-ceph >/dev/null 2>&1; then
     printf "absent"
@@ -2688,6 +2777,7 @@ else
   prepare_platform_workspace
   message "Deploying platform services..."
   run_tofu_init "${cluster_platform_workspace}"
+  migrate_platform_rancher_deployment_state "${cluster_platform_workspace}"
   run tofu -chdir="${cluster_platform_workspace}" apply -auto-approve
   message "Waiting for Portainer PVC, workload, and endpoints to become ready..."
   wait_for_pvcs_bound "portainer" "600" "portainer"
