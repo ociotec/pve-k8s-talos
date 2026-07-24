@@ -22,6 +22,11 @@ Their canonical, credential-free origin URLs are stored once in
 `repositories.json`. Each deployment section stores the commit and dirty state
 used from both repositories.
 
+After a successful deployment, `runtime-state.json` stores the cluster
+repository commit containing the resulting OpenTofu state and runtime files.
+This is intentionally separate from the cluster source revision captured at
+deployment start.
+
 The `platform` and `cluster` aliases are stable identities. A repository URL may
 move while preserving the same Git history, but an alias must not be rebound to
 an unrelated repository history without an explicit schema migration.
@@ -68,6 +73,11 @@ The revisions and dirty flags are captured before `deploy.sh` starts changing
 generated workspaces or tracked state files. If either source worktree is dirty
 at that point, its revision records `dirty = true`. A dirty revision identifies
 the base commit but is not exactly reproducible from another clone.
+
+Mandatory state synchronization means deployment starts only from clean
+repositories, so both dirty flags are false. The later runtime-state commit is
+a derived deployment result and does not change the source revision used by
+each section.
 
 An initial adoption entry has:
 
@@ -134,14 +144,30 @@ it must include `out/**/terraform.tfstate`, `out/kubeconfig`,
 `out/talosconfig`, and `out/.talos-bootstrap-complete`. The last file is a
 stable Talos lifecycle marker, not a deployment-revision stamp; omitting it
 causes the root workspace to treat an existing cluster as not yet bootstrapped.
-Operators must serialize cluster operations:
+Operators must still run deployments from one PC at a time.
 
-1. Run `git pull --ff-only` before an operation.
-2. Start only from a clean cluster repository.
-3. Run the deployment from one PC.
-4. Commit and push every changed state before operating from another PC.
-5. If a deployment fails partway through, preserve and push the states changed
-   by the completed applies before switching PCs.
+State synchronization is a mandatory part of every `scripts/deploy.sh` run:
+
+1. Require clean platform and cluster repositories.
+2. Fetch and require the platform branch to match its upstream.
+3. Pull the cluster branch with `git pull --ff-only` and push any clean local
+   commits that were not yet published.
+4. Run the deployment from the captured clean source revisions.
+5. Commit and push only the allowlisted runtime files after success.
+6. On failure, commit and push any partial runtime-state changes without
+   advancing the failed section's deployment record.
+7. After success, record the resulting runtime-state commit in the ConfigMap.
+
+Unexpected source or configuration changes block the automatic commit. If the
+push fails, the local state commit is preserved and the command exits non-zero;
+do not use another PC until that commit has been pushed. This behavior cannot
+be disabled for a `deploy.sh` run.
+
+A successful `--destroy-only` commits and pushes the removal of all tracked
+runtime files. Because the Kubernetes API no longer exists, no ConfigMap update
+is attempted. A later normal deployment sees no state or bootstrap marker and
+performs a fresh cluster bootstrap. Failed or partial destruction preserves
+and pushes the remaining authoritative state instead.
 
 Do not version `terraform.tfstate.backup`, `.terraform/`, or
 `.terraform.tfstate.lock.info`. Git history already provides previous committed

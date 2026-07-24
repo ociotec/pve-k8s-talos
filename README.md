@@ -702,9 +702,21 @@ This status does not replace OpenTofu state or deployment locking. When a
 private cluster repository versions runtime state, include
 `out/**/terraform.tfstate`, `out/kubeconfig`, `out/talosconfig`, and
 `out/.talos-bootstrap-complete`. The last file is the stable lifecycle marker
-that prevents an existing Talos cluster from being bootstrapped again. Run
-operations from only one PC at a time, pull with fast-forward only before
-starting, and commit/push every changed state before switching PCs. See
+that prevents an existing Talos cluster from being bootstrapped again.
+
+Every `scripts/deploy.sh` run requires clean platform and cluster
+repositories and requires the platform branch to match its upstream. It pulls
+the cluster branch with `--ff-only`, pushes any clean pending cluster commits,
+and commits and pushes only those runtime files after success. It also
+preserves and pushes partial runtime state after a failed deployment. Any
+changed file outside the runtime allowlist blocks the automatic commit.
+`--destroy-only` records the successful removal of runtime files, so the next
+normal deployment starts as a new cluster. This synchronization cannot be
+disabled for a `deploy.sh` run.
+
+Run operations from only one PC at a time. The ConfigMap reports the source
+revisions used by the deployment and the resulting cluster runtime-state
+commit. See
 [`docs/deployment-status.md`](docs/deployment-status.md) for the serialized
 workflow.
 

@@ -20,6 +20,9 @@ Usage:
       [--platform-commit <commit> --cluster-commit <commit>
        --platform-dirty <true|false> --cluster-dirty <true|false>] [--dry-run]
 
+  deployment-status.sh record-runtime-state --deployment-id <id>
+      --cluster-commit <commit> [--dry-run]
+
 Reads or updates the deployment provenance stored in Kubernetes. Run this
 script from clusters/<cluster> with the cluster-local environment loaded.
 
@@ -37,6 +40,10 @@ Commands:
 
   record
       Record one section after a successful scripts/deploy.sh section.
+
+  record-runtime-state
+      Record the cluster repository commit containing the resulting runtime
+      state after a successful deployment.
 USAGE
 }
 
@@ -220,11 +227,19 @@ show_status() {
             schema_version: $data["schema-version"],
             cluster: $data["cluster-name"],
             repositories: ($data["repositories.json"] | fromjson),
+            runtime_state: (
+              if $data["runtime-state.json"] then
+                ($data["runtime-state.json"] | fromjson)
+              else
+                null
+              end
+            ),
             sections: (
               $data
               | to_entries
               | map(
                   select(.key != "repositories.json")
+                  | select(.key != "runtime-state.json")
                   | select(.key | endswith(".json"))
                   | {
                       key: (.key | rtrimstr(".json")),
@@ -235,6 +250,31 @@ show_status() {
             )
           }
       '
+}
+
+record_runtime_state() {
+  local runtime_state_json="$1"
+  local patch_path
+
+  if [[ -z "$(
+    "${kubectl_bin}" -n "${status_namespace}" get configmap "${status_configmap}" \
+      --ignore-not-found -o name
+  )" ]]; then
+    error "Cannot record runtime state because ${status_namespace}/${status_configmap} does not exist." >&2
+    exit 1
+  fi
+
+  patch_path="$(mktemp)"
+  jq -n \
+    --arg runtime_state_json "${runtime_state_json}" \
+    '{data: {"runtime-state.json": $runtime_state_json}}' >"${patch_path}"
+  if ! "${kubectl_bin}" -n "${status_namespace}" patch configmap "${status_configmap}" \
+    --type merge --patch-file "${patch_path}" >/dev/null; then
+    rm -f "${patch_path}"
+    return 1
+  fi
+  rm -f "${patch_path}"
+  message "Updated runtime state commit for cluster ${cluster_name}."
 }
 
 command="${1:-}"
@@ -305,7 +345,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "${command}" in
-  show|baseline|record)
+  show|baseline|record|record-runtime-state)
     ;;
   -h|--help)
     usage
@@ -334,7 +374,47 @@ cluster_url="$(repository_url "${cluster_dir}" "cluster")"
 timestamp="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 sections=()
 
-if [[ "${command}" == "baseline" ]]; then
+if [[ "${command}" == "record-runtime-state" ]]; then
+  if [[ -z "${deployment_id}" || ! "${deployment_id}" =~ ^[A-Za-z0-9._:-]+$ ]]; then
+    error "record-runtime-state requires a safe --deployment-id." >&2
+    exit 1
+  fi
+  if [[ -z "${cluster_commit_override}" ]]; then
+    error "record-runtime-state requires --cluster-commit." >&2
+    exit 1
+  fi
+  if [[ -n "${sections_csv}" || -n "${section}" \
+    || -n "${platform_commit_override}" || -n "${platform_dirty_override}" \
+    || -n "${cluster_dirty_override}" || "${confirm_aligned}" == "true" ]]; then
+    error "record-runtime-state only accepts deployment ID and cluster commit provenance." >&2
+    exit 1
+  fi
+  if repository_is_dirty "${cluster_dir}"; then
+    error "Cannot record a runtime state commit from a dirty cluster repository." >&2
+    exit 1
+  fi
+
+  cluster_commit="$(
+    resolve_explicit_commit "${cluster_dir}" "cluster" "${cluster_commit_override}"
+  )"
+  runtime_state_json="$(
+    jq -cn \
+      --arg commit "${cluster_commit}" \
+      --arg recorded_at "${timestamp}" \
+      --arg deployment_id "${deployment_id}" \
+      '{
+        commit: $commit,
+        recorded_at: $recorded_at,
+        deployment_id: $deployment_id
+      }'
+  )"
+  if [[ "${dry_run}" == "true" ]]; then
+    jq . <<<"${runtime_state_json}"
+    exit 0
+  fi
+  record_runtime_state "${runtime_state_json}"
+  exit 0
+elif [[ "${command}" == "baseline" ]]; then
   if [[ -n "${platform_dirty_override}" || -n "${cluster_dirty_override}" ]]; then
     error "Dirty overrides are only valid with the record command." >&2
     exit 1

@@ -68,6 +68,10 @@ authoritative.
 - Do not update cluster-side deployment status merely because new platform or
   cluster repository commits were detected or because local validation
   succeeded. Successful `scripts/deploy.sh` sections update their own status.
+- Every deployment requires clean repositories and automatically pulls,
+  commits, and pushes allowlisted cluster runtime state. Do not recommend manual
+  state commits around a successful deployment unless automatic synchronization
+  failed.
 - When comparing a recorded revision with the corresponding repository `HEAD`,
   inspect the changed paths between the two commits. If the difference is only
   documentation or agent-operation guidance, such as `README.md`, `docs/**`, or

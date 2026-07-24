@@ -159,6 +159,13 @@ setup_cluster_context "${script_dir}" ""
 
 controlplane_vip="$(awk -F'"' '/"controlplane_vip"/ { print $4; exit }' "${cluster_constants_path}")"
 
+state_sync_armed=false
+state_sync_finalized=false
+"${script_dir}/cluster-state-sync.sh" preflight \
+  --platform-dir "${repo_root}" \
+  --cluster-dir "${cluster_dir}"
+state_sync_armed=true
+
 deployment_status_enabled=false
 deployment_id=""
 deployment_platform_commit=""
@@ -198,6 +205,29 @@ record_deployment_status() {
     --cluster-commit "${deployment_cluster_commit}" \
     --platform-dirty "${deployment_platform_dirty}" \
     --cluster-dirty "${deployment_cluster_dirty}"
+}
+
+persist_cluster_runtime_state() {
+  local outcome="$1"
+  local sync_args=(
+    persist
+    --platform-dir "${repo_root}"
+    --cluster-dir "${cluster_dir}"
+    --deployment-id "${deployment_id}"
+    --outcome "${outcome}"
+  )
+
+  if [[ "${purge_credentials}" == "true" ]]; then
+    sync_args+=(--include-purged-credentials)
+  fi
+
+  "${script_dir}/cluster-state-sync.sh" "${sync_args[@]}"
+
+  if [[ "${outcome}" == "success" && "${deployment_status_enabled}" == "true" ]]; then
+    "${script_dir}/deployment-status.sh" record-runtime-state \
+      --deployment-id "${deployment_id}" \
+      --cluster-commit "$(git -C "${cluster_dir}" rev-parse HEAD)"
+  fi
 }
 
 check_integer_cpu_millicores() {
@@ -958,11 +988,34 @@ finish_deploy_section() {
 }
 
 report_current_section_failure() {
-  local exit_code="$?"
-
-  set +e
   if [[ -n "${current_section}" && -n "${section_start}" ]]; then
     error "Section ${current_section} failed after $(render_elapsed "${section_start}") (total elapsed: $(render_elapsed "${deploy_start}"))." >&2
+  fi
+}
+
+handle_deploy_exit() {
+  local exit_code="$?"
+  local sync_exit_code=0
+
+  trap - ERR EXIT
+  set +e
+
+  if [[ "${exit_code}" -ne 0 ]]; then
+    report_current_section_failure
+  fi
+
+  if [[ "${state_sync_armed}" == "true" \
+    && "${state_sync_finalized}" != "true" ]]; then
+    state_sync_finalized=true
+    persist_cluster_runtime_state "failed"
+    sync_exit_code="$?"
+    if [[ "${sync_exit_code}" -ne 0 ]]; then
+      error "Failed to preserve cluster runtime state after the deployment error." >&2
+    fi
+  fi
+
+  if [[ "${exit_code}" -eq 0 && "${sync_exit_code}" -ne 0 ]]; then
+    exit_code="${sync_exit_code}"
   fi
   exit "${exit_code}"
 }
@@ -2052,7 +2105,7 @@ ceph_mode_from_constants() {
 }
 
 deploy_start="$(start_timer)"
-trap report_current_section_failure ERR
+trap handle_deploy_exit EXIT
 message "Provider upgrades are disabled by default. Update manually when needed: tofu -chdir=<workspace> init -upgrade"
 if [[ "${purge_external_ceph}" == "true" ]]; then
   if [[ "$(ceph_mode_from_constants "${cluster_ceph_constants_path}")" != "external" ]]; then
@@ -2106,6 +2159,8 @@ else
 
     if [[ "${destroy_only}" == "true" ]]; then
       finish_deploy_section "Talos/Kubernetes" "destroyed"
+      state_sync_finalized=true
+      persist_cluster_runtime_state "destroyed"
       message "Destroy-only requested; exiting without deploying."
       exit 0
     fi
@@ -2603,6 +2658,9 @@ fi
 start_deploy_section "credentials and URLs report"
 write_credentials_and_urls_report
 finish_deploy_section "credentials and URLs report"
+
+state_sync_finalized=true
+persist_cluster_runtime_state "success"
 
 message "Cluster deployed successfully in $(render_elapsed "${deploy_start}")."
 message ""

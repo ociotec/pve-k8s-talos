@@ -33,6 +33,10 @@ It complements `README.md` and focuses on execution behavior, change safety, and
 - Prefer `scripts/deploy.sh` for end-to-end deployment.
 - Do not offer to run deployments on behalf of the user by default. When changes need to be applied, provide the exact `scripts/deploy.sh` command with the minimum skip flags needed to deploy only the affected components and minimize runtime.
 - An agent may run `scripts/deploy.sh` only when the user gives explicit permission for that specific deployment and names the allowed cluster and deployment sections. The agent must keep skip flags constrained to those sections, must not expand scope without renewed permission, and must stop and ask before running a deployment command that would affect any section outside the user-approved set.
+- Every `scripts/deploy.sh` run also performs the repository's mandatory
+  cluster-state synchronization: fast-forward pull before deployment and an
+  allowlisted runtime-state commit/push after success or failure. Deployment
+  permission covers only those automatic cluster repository operations.
 - After every code or configuration change, include the exact `scripts/deploy.sh` command that should be run with minimum skip flags, or state the exact deployment command already run with user permission. If no deployment is needed, say that explicitly.
 - Regenerate Talos assets whenever inputs change:
   - `constants.auto.tfvars`
@@ -165,8 +169,10 @@ For any non-trivial change:
   into shared/versioned platform content.
 - Do not version `terraform.tfstate.backup`, `.terraform/`, or
   `.terraform.tfstate.lock.info`. When a real cluster repository versions local
-  state, serialize all operations: pull with fast-forward only before starting,
-  use one PC at a time, and commit/push every changed state before switching PCs.
+  state, use one PC at a time. The mandatory `scripts/deploy.sh` flow requires
+  clean repositories, pulls with fast-forward only, and commits/pushes only the
+  allowlisted runtime files. On failure it preserves partial state before the
+  command exits. Do not switch PCs when synchronization reports a push failure.
 - Keep cert files under `clusters/<cluster>/certs/`; version them only in the
   separately access-controlled real cluster repository when explicitly intended.
 - Real cluster service credentials live in `clusters/<cluster>/secrets/credentials.json` and are intentionally outside `out/` so purging generated workspaces does not rotate passwords or OIDC client secrets. Use `scripts/extract-credentials-from-state.sh` to recover this file from existing local state before deleting `out/`. Do not print secret values. Do not delete this file or generated internal root CA files under `certs/` unless the user explicitly requests credential rotation or uses `scripts/deploy.sh --purge-credentials` with a destroy flow.
