@@ -661,6 +661,7 @@ Run with `-h` or `--help` to see help documentation. Common options:
 --destroy         Destroy the cluster first and purge local runtime workspaces under out/.
 --purge-credentials
                   Also delete secrets/credentials.json and the generated internal root CA.
+--show-secrets    Show service passwords and tokens in console output.
 --skip-ceph       Skip Rook Ceph operator/cluster/dashboard/CSI.
 --skip-k8s-net    Skip MetalLB, ingress-nginx, and cert-manager.
 --skip-identity   Skip Keycloak and its PostgreSQL database.
@@ -679,6 +680,19 @@ For faster iterative deploys after the Talos VMs and kubeconfig already exist, u
 ```bash
 ../../scripts/deploy.sh --services-only
 ```
+
+Normal deployment output shows service URLs and usernames but hides passwords
+and tokens. Use `--show-secrets` only from an authorized administrative
+console when the values must be displayed. The complete report is always
+written to `secrets/credentials_and_urls.md`.
+
+Repeated deployments avoid operational churn: external Ceph CSI components
+restart only when their effective connection configuration changes,
+ingress-nginx admission bootstrap Jobs run only when their certificate is
+missing or their rendered configuration changes, and Keycloak API
+reconciliation runs only when its desired configuration or configuration
+script changes. MetalLB and ingress-nginx availability are still
+checked on every selected deployment.
 
 ### Inspect deployed repository revisions
 

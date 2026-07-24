@@ -121,10 +121,18 @@ locals {
     for m in local.ingress_nginx : m
     if try(m.kind, "") == "Namespace"
   ]
-  ingress_nginx_other = [
+  ingress_nginx_admission_jobs = [
+    for m in local.ingress_nginx : m
+    if try(m.kind, "") == "Job"
+  ]
+  ingress_nginx_non_namespace = [
     for m in local.ingress_nginx : m
     if try(m.kind, "") != "Namespace"
   ]
+  ingress_nginx_other = {
+    for i, m in local.ingress_nginx_non_namespace : tostring(i) => m
+    if try(m.kind, "") != "Job"
+  }
   metrics_server = [
     for doc in split("\n---\n", file("${path.module}/metrics-server.yaml")) :
     yamldecode(doc)
@@ -368,18 +376,24 @@ resource "kubernetes_manifest" "metallb_native_namespace" {
 resource "kubernetes_manifest" "metallb_native" {
   for_each = { for i, m in local.metallb_native_other : i => m }
   manifest = each.value
-  computed_fields = [
-    "metadata.annotations",
-    "metadata.annotations[\"deprecated.daemonset.template.generation\"]",
-    "object.metadata.annotations",
-    "object.metadata.annotations[\"deprecated.daemonset.template.generation\"]",
-  ]
+  computed_fields = concat(
+    [
+      "metadata.annotations",
+      "metadata.annotations[\"deprecated.daemonset.template.generation\"]",
+      "object.metadata.annotations",
+      "object.metadata.annotations[\"deprecated.daemonset.template.generation\"]",
+    ],
+    try(each.value.kind, "") == "ValidatingWebhookConfiguration" ? [
+      "object.metadata.creationTimestamp",
+    ] : [],
+  )
   lifecycle {
     ignore_changes = [
       manifest.metadata.annotations,
       manifest.metadata.annotations["deprecated.daemonset.template.generation"],
       object.metadata.annotations,
       object.metadata.annotations["deprecated.daemonset.template.generation"],
+      object.metadata.creationTimestamp,
     ]
   }
   field_manager {
@@ -392,13 +406,12 @@ resource "kubernetes_manifest" "metallb_native" {
 }
 
 resource "kubernetes_manifest" "metallb_pool" {
-  for_each   = { for i, m in local.metallb_pool : i => m }
-  manifest   = each.value
-  depends_on = [null_resource.metallb_controller_ready]
+  for_each = { for i, m in local.metallb_pool : i => m }
+  manifest = each.value
 }
 
 resource "kubernetes_manifest" "ingress_nginx" {
-  for_each = { for i, m in local.ingress_nginx_other : i => m }
+  for_each = local.ingress_nginx_other
   manifest = each.value
   computed_fields = [
     "metadata.labels",
@@ -497,14 +510,6 @@ resource "null_resource" "kube_system_resource_requirements" {
   }
 
   depends_on = [null_resource.coredns_reload]
-}
-
-resource "null_resource" "ingress_nginx_webhook_ready" {
-  depends_on = [kubernetes_manifest.ingress_nginx]
-
-  provisioner "local-exec" {
-    command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=300s && KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n ingress-nginx wait --for=condition=Ready pod -l app.kubernetes.io/name=ingress-nginx,app.kubernetes.io/component=controller --timeout=300s"
-  }
 }
 
 resource "null_resource" "metrics_server_ready" {
@@ -641,55 +646,10 @@ resource "null_resource" "cert_manager_webhook_ready" {
   }
 }
 
-resource "null_resource" "metallb_controller_ready" {
-  depends_on = [kubernetes_manifest.metallb_native]
-  # Always re-run webhook readiness checks on each apply. The cluster can be recreated
-  # outside this module state, so relying on null_resource state alone is not enough.
-  triggers = {
-    run_id = timestamp()
-  }
+output "ingress_nginx_admission_jobs" {
+  value = local.ingress_nginx_admission_jobs
+}
 
-  provisioner "local-exec" {
-    interpreter = ["/bin/bash", "-c"]
-    command     = <<-EOT
-      set -euo pipefail
-      kubeconfig="${abspath("${path.module}/${var.kubeconfig_path}")}"
-
-      KUBECONFIG="$kubeconfig" kubectl -n metallb-system rollout status deploy/controller --timeout=${local.metallb_wait_seconds}s
-      KUBECONFIG="$kubeconfig" kubectl -n metallb-system wait --for=condition=Available deploy/controller --timeout=${local.metallb_wait_seconds}s
-      KUBECONFIG="$kubeconfig" kubectl -n metallb-system get endpoints metallb-webhook-service \
-        -o jsonpath='{.subsets[0].addresses[0].ip}' | grep -q '.'
-
-      deadline=$((SECONDS+${local.metallb_wait_seconds}))
-      while true; do
-        if KUBECONFIG="$kubeconfig" kubectl apply --dry-run=server -f - >/dev/null <<'EOF'
-apiVersion: metallb.io/v1beta1
-kind: IPAddressPool
-metadata:
-  name: webhook-ready-check
-  namespace: metallb-system
-spec:
-  addresses:
-  # Use an RFC 5737 TEST-NET-3 address so the readiness probe does not overlap
-  # with the real cluster pool and fail after the webhook is actually working.
-  - 203.0.113.10-203.0.113.10
----
-apiVersion: metallb.io/v1beta1
-kind: L2Advertisement
-metadata:
-  name: webhook-ready-check
-  namespace: metallb-system
-spec: {}
-EOF
-        then
-          break
-        fi
-        if [ "$SECONDS" -ge "$deadline" ]; then
-          echo "Error: MetalLB webhook not ready after ${local.metallb_wait_seconds}s." >&2
-          exit 1
-        fi
-        sleep 5
-      done
-    EOT
-  }
+output "ingress_nginx_admission_config_sha256" {
+  value = sha256(jsonencode(local.ingress_nginx_admission_jobs))
 }

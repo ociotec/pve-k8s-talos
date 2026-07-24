@@ -139,6 +139,44 @@ api_allow_404() {
   done
 }
 
+json_contains_desired() {
+  local current_file="$1"
+  local desired_file="$2"
+
+  jq -e --slurpfile desired "${desired_file}" '
+    def contains_desired($current; $wanted):
+      if ($wanted | type) == "object" then
+        (($current | type) == "object")
+        and all(
+          $wanted | keys[];
+          . as $key
+          | ($current | has($key))
+          and contains_desired($current[$key]; $wanted[$key])
+        )
+      else
+        $current == $wanted
+      end;
+
+    contains_desired(.; $desired[0])
+  ' "${current_file}" >/dev/null
+}
+
+api_put_if_changed() {
+  local path="$1"
+  local payload="$2"
+  local current_path="${3:-${path}}"
+  local current_file
+
+  current_file="$(mktemp)"
+  api GET "${current_path}" >"${current_file}"
+  if json_contains_desired "${current_file}" "${payload}"; then
+    rm -f "${current_file}"
+    return 0
+  fi
+  rm -f "${current_file}"
+  api PUT "${path}" "${payload}" >/dev/null
+}
+
 json_file() {
   local file="$1"
   shift
@@ -284,6 +322,10 @@ assign_user_realm_role() {
   local user_id_value="$2"
   local role_name="$3"
   local role_payload
+  if api GET "realms/$(urlencode "${realm}")/users/${user_id_value}/role-mappings/realm" |
+    jq -e --arg role_name "${role_name}" 'any(.[]; .name == $role_name)' >/dev/null; then
+    return 0
+  fi
   role_payload="${TMPDIR}/user-realm-role-${realm}-${user_id_value}-${role_name}.json"
   realm_role_json "${realm}" "${role_name}" | jq '[.]' > "${role_payload}"
   api POST "realms/$(urlencode "${realm}")/users/${user_id_value}/role-mappings/realm" "${role_payload}" >/dev/null || true
@@ -297,6 +339,10 @@ assign_user_client_role() {
   local client_id_value
   local role_payload
   client_id_value="$(client_uuid "${realm}" "${client_identifier}")"
+  if api GET "realms/$(urlencode "${realm}")/users/${user_id_value}/role-mappings/clients/${client_id_value}" |
+    jq -e --arg role_name "${role_name}" 'any(.[]; .name == $role_name)' >/dev/null; then
+    return 0
+  fi
   role_payload="${TMPDIR}/user-role-${realm}-${user_id_value}-${client_identifier}-${role_name}.json"
   role_json "${realm}" "${client_id_value}" "${role_name}" | jq '[.]' > "${role_payload}"
   api POST "realms/$(urlencode "${realm}")/users/${user_id_value}/role-mappings/clients/${client_id_value}" "${role_payload}" >/dev/null || true
@@ -312,6 +358,10 @@ assign_client_scope_client_role() {
   local role_payload
   client_id_value="$(client_uuid "${realm}" "${client_identifier}")"
   role_client_id="$(client_uuid "${realm}" "${role_client_identifier}")"
+  if api GET "realms/$(urlencode "${realm}")/clients/${client_id_value}/scope-mappings/clients/${role_client_id}" |
+    jq -e --arg role_name "${role_name}" 'any(.[]; .name == $role_name)' >/dev/null; then
+    return 0
+  fi
   role_payload="${TMPDIR}/client-scope-${realm}-${client_identifier}-${role_client_identifier}-${role_name}.json"
   role_json "${realm}" "${role_client_id}" "${role_name}" | jq '[.]' > "${role_payload}"
   api POST "realms/$(urlencode "${realm}")/clients/${client_id_value}/scope-mappings/clients/${role_client_id}" "${role_payload}" >/dev/null || true
@@ -320,6 +370,7 @@ assign_client_scope_client_role() {
 ensure_master_admin_user() {
   local user_id_value
   local payload
+  local user_created=false
   user_id_value="$(user_id master "${KEYCLOAK_ADMIN_USER}")"
 
   if [[ -z "${user_id_value}" ]]; then
@@ -338,9 +389,10 @@ ensure_master_admin_user() {
           temporary: false,
           value: $password
         }]
-      }' > "${payload}"
+    }' > "${payload}"
     api POST "realms/master/users" "${payload}" >/dev/null
     user_id_value="$(user_id master "${KEYCLOAK_ADMIN_USER}")"
+    user_created=true
   else
     echo "[keycloak-api] master: permanent admin user ${KEYCLOAK_ADMIN_USER} exists"
   fi
@@ -350,10 +402,18 @@ ensure_master_admin_user() {
     exit 1
   fi
 
-  echo "[keycloak-api] master: setting permanent admin password"
-  payload="${TMPDIR}/master-admin-password.json"
-  jq -n --arg password "${KEYCLOAK_ADMIN_PASSWORD}" '{type: "password", temporary: false, value: $password}' > "${payload}"
-  api PUT "realms/master/users/${user_id_value}/reset-password" "${payload}" >/dev/null
+  if [[ "${user_created}" != "true" ]]; then
+    if password_login >/dev/null 2>&1; then
+      echo "[keycloak-api] master: permanent admin password is current"
+    else
+      client_credentials_login >/dev/null 2>&1 || login >/dev/null 2>&1
+      echo "[keycloak-api] master: updating permanent admin password"
+      payload="${TMPDIR}/master-admin-password.json"
+      jq -n --arg password "${KEYCLOAK_ADMIN_PASSWORD}" \
+        '{type: "password", temporary: false, value: $password}' > "${payload}"
+      api PUT "realms/master/users/${user_id_value}/reset-password" "${payload}" >/dev/null
+    fi
+  fi
   echo "[keycloak-api] master: assigning admin role"
   assign_user_realm_role master "${user_id_value}" admin
 }
@@ -373,7 +433,7 @@ configure_master_realm_settings() {
     adminEventsEnabled: ($settings.save_admin_events // false),
     adminEventsDetailsEnabled: ($settings.save_admin_event_details // ($settings.save_admin_events // false))
   }' > "${payload}"
-  api PUT "realms/master" "${payload}" >/dev/null
+  api_put_if_changed "realms/master" "${payload}"
 }
 
 upsert_realm() {
@@ -392,7 +452,7 @@ upsert_realm() {
   }' "${realm_json}" > "${payload}"
 
   if realm_exists "${realm}"; then
-    api PUT "realms/$(urlencode "${realm}")" "${payload}" >/dev/null
+    api_put_if_changed "realms/$(urlencode "${realm}")" "${payload}"
   else
     api POST "realms" "${payload}" >/dev/null
   fi
@@ -437,7 +497,9 @@ upsert_client() {
 
   client_id_value="$(client_uuid "${realm}" "${client_identifier}")"
   if [[ -n "${client_id_value}" ]]; then
-    api PUT "realms/$(urlencode "${realm}")/clients/${client_id_value}" "${payload}" >/dev/null
+    api_put_if_changed \
+      "realms/$(urlencode "${realm}")/clients/${client_id_value}" \
+      "${payload}"
   else
     api POST "realms/$(urlencode "${realm}")/clients" "${payload}" >/dev/null
   fi
@@ -465,7 +527,12 @@ upsert_client_mapper() {
 
   existing_id="$(client_protocol_mapper_id "${realm}" "${client_id_value}" "${mapper_name}")"
   if [[ -n "${existing_id}" ]]; then
-    api DELETE "realms/$(urlencode "${realm}")/clients/${client_id_value}/protocol-mappers/models/${existing_id}" >/dev/null
+    jq --arg id "${existing_id}" '.id = $id' "${payload}" >"${payload}.updated"
+    mv "${payload}.updated" "${payload}"
+    api_put_if_changed \
+      "realms/$(urlencode "${realm}")/clients/${client_id_value}/protocol-mappers/models/${existing_id}" \
+      "${payload}"
+    return 0
   fi
   api POST "realms/$(urlencode "${realm}")/clients/${client_id_value}/protocol-mappers/models" "${payload}" >/dev/null
 }
@@ -524,7 +591,9 @@ upsert_component() {
 
   if [[ -n "${existing_id}" ]]; then
     jq --arg id "${existing_id}" '.id = $id' "${component_json}" > "${payload}"
-    api PUT "realms/$(urlencode "${realm}")/components/${existing_id}" "${payload}" >/dev/null
+    api_put_if_changed \
+      "realms/$(urlencode "${realm}")/components/${existing_id}" \
+      "${payload}"
     printf '%s\n' "${existing_id}"
   else
     api POST "realms/$(urlencode "${realm}")/components" "${component_json}" >/dev/null
@@ -592,7 +661,10 @@ upsert_group() {
   jq '{name: .name, path: ("/" + .name), attributes: {}, subGroups: [], description: .description}' "${group_json}" > "${payload}"
   existing_id="$(group_id "${realm}" "${group_name}")"
   if [[ -n "${existing_id}" ]]; then
-    api PUT "realms/$(urlencode "${realm}")/groups/${existing_id}" "${payload}" >/dev/null
+    api_put_if_changed \
+      "realms/$(urlencode "${realm}")/groups/${existing_id}" \
+      "${payload}" \
+      "realms/$(urlencode "${realm}")/groups/${existing_id}"
   else
     api POST "realms/$(urlencode "${realm}")/groups" "${payload}" >/dev/null
   fi
@@ -610,6 +682,10 @@ assign_user_group() {
     return 1
   fi
 
+  if api GET "realms/$(urlencode "${realm}")/users/${user_id_value}/groups" |
+    jq -e --arg group_id "${group_id_value}" 'any(.[]; .id == $group_id)' >/dev/null; then
+    return 0
+  fi
   api PUT "realms/$(urlencode "${realm}")/users/${user_id_value}/groups/${group_id_value}" >/dev/null
 }
 
@@ -643,6 +719,10 @@ assign_group_client_role() {
     return 0
   fi
   client_id_value="$(client_uuid "${realm}" "${client_identifier}")"
+  if api GET "realms/$(urlencode "${realm}")/groups/${group_id_value}/role-mappings/clients/${client_id_value}" |
+    jq -e --arg role_name "${role_name}" 'any(.[]; .name == $role_name)' >/dev/null; then
+    return 0
+  fi
   role_payload="${TMPDIR}/role-map-${realm}-${group_name}-${client_identifier}-${role_name}.json"
   role_json "${realm}" "${client_id_value}" "${role_name}" | jq '[.]' > "${role_payload}"
   api POST "realms/$(urlencode "${realm}")/groups/${group_id_value}/role-mappings/clients/${client_id_value}" "${role_payload}" >/dev/null
@@ -655,6 +735,10 @@ assign_group_realm_management_role() {
   local realm_management_client_id
   local role_payload
   realm_management_client_id="$(client_uuid "${realm}" "realm-management")"
+  if api GET "realms/$(urlencode "${realm}")/groups/${group_id_value}/role-mappings/clients/${realm_management_client_id}" |
+    jq -e --arg role_name "${role_name}" 'any(.[]; .name == $role_name)' >/dev/null; then
+    return 0
+  fi
   role_payload="${TMPDIR}/realm-management-${realm}-${group_id_value}-${role_name}.json"
   role_json "${realm}" "${realm_management_client_id}" "${role_name}" | jq '[.]' > "${role_payload}"
   api POST "realms/$(urlencode "${realm}")/groups/${group_id_value}/role-mappings/clients/${realm_management_client_id}" "${role_payload}" >/dev/null

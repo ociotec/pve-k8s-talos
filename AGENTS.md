@@ -192,6 +192,9 @@ For any non-trivial change:
 - Errors must always be shown in console output.
 - Keep progress output minimal in normal mode.
 - Emit detailed progress/debug logs only in verbose/debug mode.
+- `scripts/deploy.sh` hides passwords and tokens unless `--show-secrets` is
+  passed. Agents must not pass that flag or reproduce its output unless the
+  user explicitly authorizes secret display for that deployment.
 - In deployment scripts, format user-facing URLs consistently with the existing URL style variables instead of printing raw URLs.
 
 ## Repo-Specific Agent Workflows

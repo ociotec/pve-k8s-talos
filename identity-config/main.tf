@@ -34,7 +34,6 @@ resource "terraform_data" "keycloak_realms" {
     keycloak_url     = local.keycloak_url
     master_realm_sha = sha256(jsonencode(local.keycloak_master_realm_settings))
     realms_sha       = sha256(jsonencode(local.keycloak_realms))
-    run_id           = timestamp()
     script_sha       = filesha256("${path.module}/configure-keycloak-realms.sh")
   }
 

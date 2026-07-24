@@ -27,6 +27,7 @@ Options:
                             Requires --destroy or --destroy-only.
   -v, --verbose             Show all command output (do not silence tofu/kubectl).
   -g, --debug               Enable shell tracing + verbose output (sets TF_LOG=DEBUG).
+      --show-secrets        Show service passwords and tokens in console output.
   -c, --skip-ceph           Skip all Rook Ceph steps (operator, cluster, dashboard, CSI).
   -n, --skip-k8s-net        Skip k8s networking and ingress (k8s-net) steps (ingress, MetalLB, cert-manager).
   -i, --skip-identity       Skip identity services (Keycloak and its database).
@@ -53,6 +54,7 @@ purge_external_ceph=false
 purge_credentials=false
 debug=false
 verbose=false
+show_secrets=false
 skip_ceph=false
 skip_k8s_net=false
 skip_identity=false
@@ -81,6 +83,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --purge-credentials)
       purge_credentials=true
+      shift
+      ;;
+    --show-secrets)
+      show_secrets=true
       shift
       ;;
     -c|--skip-ceph)
@@ -1056,6 +1062,153 @@ kubernetes_resource_changed() {
   local after="$2"
 
   [[ -n "${before}" && -n "${after}" && "${before}" != "${after}" ]]
+}
+
+rook_external_csi_configuration_sha256() {
+  if ! kubectl get namespace rook-ceph >/dev/null 2>&1; then
+    printf "absent"
+    return 0
+  fi
+
+  kubectl -n rook-ceph get configmap,secret -o json |
+    jq -c '
+      [
+        .items[]
+        | select(
+            .metadata.name == "rook-ceph-mon"
+            or .metadata.name == "rook-ceph-mon-endpoints"
+            or .metadata.name == "rook-ceph-csi-config"
+            or (.metadata.name | startswith("rook-csi-"))
+          )
+        | {
+            kind,
+            name: .metadata.name,
+            data: (.data // {})
+          }
+      ]
+      | sort_by(.kind, .name)
+    ' |
+    sha256sum |
+    awk '{ print $1 }'
+}
+
+wait_for_metallb_available() {
+  local timeout_seconds=300
+  local deadline=$((SECONDS + timeout_seconds))
+
+  wait_for_rollout_ready "metallb-system" "deployment/controller" "${timeout_seconds}s"
+  wait_for_service_endpoints "metallb-system" "${timeout_seconds}" "metallb-webhook-service"
+
+  while true; do
+    if kubectl apply --dry-run=server -f - >/dev/null <<'EOF'
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: webhook-ready-check
+  namespace: metallb-system
+spec:
+  addresses:
+  - 203.0.113.10-203.0.113.10
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: webhook-ready-check
+  namespace: metallb-system
+spec: {}
+EOF
+    then
+      return 0
+    fi
+    if (( SECONDS >= deadline )); then
+      error "MetalLB webhook did not become available within ${timeout_seconds}s." >&2
+      return 1
+    fi
+    sleep 5
+  done
+}
+
+wait_for_ingress_nginx_available() {
+  local timeout_seconds=300
+  local deadline=$((SECONDS + timeout_seconds))
+  local ca_bundle
+
+  wait_for_rollout_ready "ingress-nginx" "deployment/ingress-nginx-controller" "${timeout_seconds}s"
+  wait_for_service_endpoints "ingress-nginx" "${timeout_seconds}" "ingress-nginx-controller-admission"
+
+  while true; do
+    ca_bundle="$(
+      kubectl get validatingwebhookconfiguration ingress-nginx-admission \
+        -o jsonpath='{.webhooks[0].clientConfig.caBundle}' 2>/dev/null || true
+    )"
+    if [[ -n "${ca_bundle}" ]]; then
+      return 0
+    fi
+    if (( SECONDS >= deadline )); then
+      error "ingress-nginx admission webhook did not become available within ${timeout_seconds}s." >&2
+      return 1
+    fi
+    sleep 5
+  done
+}
+
+reconcile_ingress_nginx_admission_jobs() {
+  local expected_hash
+  local current_hash
+  local jobs_file
+  local job_file
+  local job_name
+
+  expected_hash="$(
+    tofu -chdir="${cluster_k8s_net_workspace}" output -raw ingress_nginx_admission_config_sha256
+  )"
+  current_hash="$(
+    kubectl -n ingress-nginx get secret ingress-nginx-admission \
+      -o jsonpath='{.metadata.annotations.pve-k8s-talos/ingress-nginx-admission-config-sha256}' \
+      2>/dev/null || true
+  )"
+
+  if kubectl -n ingress-nginx get secret ingress-nginx-admission >/dev/null 2>&1 \
+    && [[ -n "${expected_hash}" && "${current_hash}" == "${expected_hash}" ]]; then
+    message "ingress-nginx admission certificate and configuration are current; skipping bootstrap jobs."
+    wait_for_ingress_nginx_available
+    return 0
+  fi
+
+  message "Reconciling ingress-nginx admission certificate and webhook configuration..."
+  jobs_file="$(mktemp)"
+  tofu -chdir="${cluster_k8s_net_workspace}" output -json ingress_nginx_admission_jobs >"${jobs_file}"
+
+  for job_name in ingress-nginx-admission-create ingress-nginx-admission-patch; do
+    job_file="$(mktemp)"
+    jq --arg job_name "${job_name}" \
+      '.[] | select(.metadata.name == $job_name)' \
+      "${jobs_file}" >"${job_file}"
+    if [[ ! -s "${job_file}" ]]; then
+      rm -f "${job_file}" "${jobs_file}"
+      error "Rendered ingress-nginx admission job ${job_name} was not found." >&2
+      return 1
+    fi
+
+    kubectl -n ingress-nginx delete job "${job_name}" --ignore-not-found --wait=true >/dev/null
+    kubectl apply -f "${job_file}" >/dev/null
+    kubectl -n ingress-nginx wait \
+      --for=condition=complete "job/${job_name}" \
+      --timeout=180s >/dev/null
+    rm -f "${job_file}"
+  done
+  rm -f "${jobs_file}"
+
+  kubectl -n ingress-nginx annotate secret ingress-nginx-admission \
+    "pve-k8s-talos/ingress-nginx-admission-config-sha256=${expected_hash}" \
+    --overwrite >/dev/null
+  kubectl -n ingress-nginx delete job \
+    ingress-nginx-admission-create \
+    ingress-nginx-admission-patch \
+    --ignore-not-found \
+    --wait=false >/dev/null
+
+  wait_for_ingress_nginx_available
 }
 
 wait_for_prometheus_config_hash() {
@@ -2253,11 +2406,16 @@ else
   run tofu -chdir="${cluster_k8s_net_workspace}" apply -auto-approve \
     -target=kubernetes_manifest.cert_manager_crds \
     -target=kubernetes_manifest.metallb_native_crds \
+    -target=kubernetes_manifest.metallb_native_namespace \
+    -target=kubernetes_manifest.metallb_native \
     -target=local_file.cert_manager_ca_cert \
     -target=local_file.cert_manager_ca_key \
     -var="skip_ceph=${skip_ceph}"
+  message "Checking MetalLB controller and webhook availability..."
+  wait_for_metallb_available
   tofu -chdir="${cluster_k8s_net_workspace}" apply -auto-approve \
     -var="skip_ceph=${skip_ceph}" 1>/dev/null
+  reconcile_ingress_nginx_admission_jobs
 
   record_deployment_status "k8s-net"
   finish_deploy_section "k8s-net"
@@ -2270,6 +2428,10 @@ if [[ "${skip_ceph}" == "true" ]]; then
 else
   prepare_rook_workspaces
   ceph_mode_value="$(ceph_mode_from_constants "${cluster_ceph_constants_path}")"
+  external_csi_config_hash_before=""
+  if [[ "${ceph_mode_value}" == "external" ]]; then
+    external_csi_config_hash_before="$(rook_external_csi_configuration_sha256)"
+  fi
   ceph_phase="$(kubectl -n rook-ceph get cephcluster rook-ceph -o jsonpath='{.status.phase}' 2>/dev/null || true)"
   if [[ "${ceph_phase}" == "Ready" || ("${ceph_mode_value}" == "external" && "${ceph_phase}" == "Connected") ]]; then
     message "Rook Ceph cluster already healthy (phase=${ceph_phase}); reconciling cluster spec without operator bootstrap..."
@@ -2296,49 +2458,29 @@ else
   run_tofu_init "${cluster_rook_04_workspace}"
   run tofu -chdir="${cluster_rook_04_workspace}" apply -auto-approve
   if [[ "${ceph_mode_value}" == "external" ]]; then
-    message "Waiting for Rook Ceph CSI resources to appear before restart..."
+    message "Waiting for Rook Ceph CSI resources..."
     wait_for_resource_existence "rook-ceph" "deploy/csi-cephfsplugin-provisioner" 120
     wait_for_resource_existence "rook-ceph" "deploy/csi-rbdplugin-provisioner" 120
     wait_for_resource_existence "rook-ceph" "daemonset/csi-cephfsplugin" 120
     wait_for_resource_existence "rook-ceph" "daemonset/csi-rbdplugin" 120
 
-    message "Checking current Rook Ceph CSI rollout state before restart..."
-    if ! check_rollout_status "rook-ceph" "deploy/csi-cephfsplugin-provisioner" "120s"; then
-      message "CSI CephFS provisioner was not yet stable before restart; proceeding with restart."
-    fi
-    if ! check_rollout_status "rook-ceph" "deploy/csi-rbdplugin-provisioner" "120s"; then
-      message "CSI RBD provisioner was not yet stable before restart; proceeding with restart."
-    fi
-    if ! check_rollout_status "rook-ceph" "daemonset/csi-cephfsplugin" "120s"; then
-      message "CSI CephFS daemonset was not yet stable before restart; proceeding with restart."
-    fi
-    if ! check_rollout_status "rook-ceph" "daemonset/csi-rbdplugin" "120s"; then
-      message "CSI RBD daemonset was not yet stable before restart; proceeding with restart."
+    external_csi_config_hash_after="$(rook_external_csi_configuration_sha256)"
+    if kubernetes_resource_changed \
+      "${external_csi_config_hash_before}" \
+      "${external_csi_config_hash_after}"; then
+      message "External Ceph CSI configuration changed; restarting CSI components..."
+      kubectl -n rook-ceph rollout restart deploy/csi-cephfsplugin-provisioner 1>/dev/null
+      kubectl -n rook-ceph rollout restart deploy/csi-rbdplugin-provisioner 1>/dev/null
+      kubectl -n rook-ceph rollout restart daemonset/csi-cephfsplugin 1>/dev/null
+      kubectl -n rook-ceph rollout restart daemonset/csi-rbdplugin 1>/dev/null
+    else
+      message "External Ceph CSI configuration is unchanged; skipping CSI restart."
     fi
 
-    message "Allowing a short stabilization window before restarting Rook Ceph CSI components..."
-    sleep 15
-
-    message "Restarting Rook Ceph CSI components to reload external Ceph configuration..."
-    kubectl -n rook-ceph rollout restart deploy/csi-cephfsplugin-provisioner 1>/dev/null
-    kubectl -n rook-ceph rollout restart deploy/csi-rbdplugin-provisioner 1>/dev/null
-    kubectl -n rook-ceph rollout restart daemonset/csi-cephfsplugin 1>/dev/null
-    kubectl -n rook-ceph rollout restart daemonset/csi-rbdplugin 1>/dev/null
     wait_for_rollout_ready "rook-ceph" "deploy/csi-cephfsplugin-provisioner" "300s"
     wait_for_rollout_ready "rook-ceph" "deploy/csi-rbdplugin-provisioner" "180s"
     wait_for_rollout_ready "rook-ceph" "daemonset/csi-cephfsplugin" "300s"
     wait_for_rollout_ready "rook-ceph" "daemonset/csi-rbdplugin" "300s"
-    message "Clearing Rook Ceph CSI leader-election leases after restart..."
-    kubectl -n rook-ceph delete lease \
-      rook-ceph-cephfs-csi-ceph-com \
-      rook-ceph-rbd-csi-ceph-com \
-      external-attacher-leader-rook-ceph-cephfs-csi-ceph-com \
-      external-attacher-leader-rook-ceph-rbd-csi-ceph-com \
-      external-resizer-rook-ceph-cephfs-csi-ceph-com \
-      external-resizer-rook-ceph-rbd-csi-ceph-com \
-      external-snapshotter-leader-rook-ceph-cephfs-csi-ceph-com \
-      external-snapshotter-leader-rook-ceph-rbd-csi-ceph-com \
-      --ignore-not-found 1>/dev/null
   fi
   kubectl -n rook-ceph get storageclasses.storage.k8s.io
   record_deployment_status "ceph"
@@ -2354,8 +2496,6 @@ else
   prepare_identity_config_workspace
   message "Deploying identity services..."
   run_tofu_init "${cluster_identity_workspace}"
-  message "Refreshing one-shot Keycloak jobs before apply..."
-  kubectl -n identity delete job keycloak-bootstrap-admin keycloak-configure-realms --ignore-not-found >/dev/null 2>&1 || true
   run tofu -chdir="${cluster_identity_workspace}" apply -auto-approve
   message "Waiting for identity PVCs, workloads, and endpoints to become ready..."
   wait_for_pvcs_bound "identity" "600" "keycloak-postgres-data"
@@ -2366,11 +2506,13 @@ else
   run tofu -chdir="${cluster_identity_config_workspace}" apply -auto-approve
   keycloak_url="$(tofu -chdir="${cluster_identity_workspace}" output -raw keycloak_url)"
   keycloak_admin_user="$(tofu -chdir="${cluster_identity_workspace}" output -raw keycloak_admin_user)"
-  keycloak_admin_password="$(tofu -chdir="${cluster_identity_workspace}" output -raw keycloak_admin_password)"
   keycloak_realm_console_summary="$(tofu -chdir="${cluster_identity_workspace}" output -raw keycloak_realm_console_summary)"
   message "Keycloak URL: ${URL_FMT_START}${keycloak_url}${URL_FMT_END}"
   message "Keycloak admin user: ${DATA_FMT_START}${keycloak_admin_user}${DATA_FMT_END}"
-  message "Keycloak admin password: ${DATA_FMT_START}${keycloak_admin_password}${DATA_FMT_END}"
+  if [[ "${show_secrets}" == "true" ]]; then
+    keycloak_admin_password="$(tofu -chdir="${cluster_identity_workspace}" output -raw keycloak_admin_password)"
+    message "Keycloak admin password: ${DATA_FMT_START}${keycloak_admin_password}${DATA_FMT_END}"
+  fi
   if [[ -n "${keycloak_realm_console_summary}" ]]; then
     message "Configured Keycloak realms:"
     while IFS= read -r keycloak_realm_console_line; do
@@ -2412,12 +2554,14 @@ else
   garage_internal_s3_endpoint_url="$(tofu -chdir="${cluster_s3_storage_workspace}" output -raw garage_internal_s3_endpoint_url)"
   garage_console_url="$(tofu -chdir="${cluster_s3_storage_workspace}" output -raw garage_console_url)"
   garage_s3_region="$(tofu -chdir="${cluster_s3_storage_workspace}" output -raw garage_s3_region)"
-  garage_admin_token="$(tofu -chdir="${cluster_s3_storage_workspace}" output -raw garage_admin_token)"
   message "S3 endpoint URL: ${URL_FMT_START}${garage_s3_endpoint_url}${URL_FMT_END}"
   message "S3 internal endpoint URL: ${URL_FMT_START}${garage_internal_s3_endpoint_url}${URL_FMT_END}"
   message "S3 region: ${DATA_FMT_START}${garage_s3_region}${DATA_FMT_END}"
   message "S3 Console URL: ${URL_FMT_START}${garage_console_url}${URL_FMT_END}"
-  message "Garage admin token: ${DATA_FMT_START}${garage_admin_token}${DATA_FMT_END}"
+  if [[ "${show_secrets}" == "true" ]]; then
+    garage_admin_token="$(tofu -chdir="${cluster_s3_storage_workspace}" output -raw garage_admin_token)"
+    message "Garage admin token: ${DATA_FMT_START}${garage_admin_token}${DATA_FMT_END}"
+  fi
   record_deployment_status "s3"
   finish_deploy_section "S3 storage"
 fi
@@ -2520,16 +2664,18 @@ else
   prometheus_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw prometheus_url)"
   prometheus_api_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw prometheus_api_url)"
   prometheus_api_user="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw prometheus_api_basic_auth_user)"
-  prometheus_api_password="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw prometheus_api_basic_auth_password)"
   grafana_user="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw grafana_admin_user)"
-  grafana_password="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw grafana_admin_password)"
   message "Grafana URL: ${URL_FMT_START}${grafana_url}${URL_FMT_END}"
   message "Prometheus URL: ${URL_FMT_START}${prometheus_url}${URL_FMT_END}"
   message "Prometheus API URL: ${URL_FMT_START}${prometheus_api_url}${URL_FMT_END}"
   message "Prometheus API user: ${DATA_FMT_START}${prometheus_api_user}${DATA_FMT_END}"
-  message "Prometheus API password: ${DATA_FMT_START}${prometheus_api_password}${DATA_FMT_END}"
   message "Grafana admin user: ${DATA_FMT_START}${grafana_user}${DATA_FMT_END}"
-  message "Grafana admin password: ${DATA_FMT_START}${grafana_password}${DATA_FMT_END}"
+  if [[ "${show_secrets}" == "true" ]]; then
+    prometheus_api_password="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw prometheus_api_basic_auth_password)"
+    grafana_password="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw grafana_admin_password)"
+    message "Prometheus API password: ${DATA_FMT_START}${prometheus_api_password}${DATA_FMT_END}"
+    message "Grafana admin password: ${DATA_FMT_START}${grafana_password}${DATA_FMT_END}"
+  fi
   record_deployment_status "monitoring"
   finish_deploy_section "monitoring"
 fi
@@ -2548,18 +2694,22 @@ else
   wait_for_deployments_ready "portainer" "600s" "portainer"
   wait_for_service_endpoints "portainer" "600" "portainer"
   portainer_url="$(tofu -chdir="${cluster_platform_workspace}" output -raw portainer_url)"
-  portainer_admin_password="$(tofu -chdir="${cluster_platform_workspace}" output -raw portainer_admin_password)"
   message "Portainer URL: ${URL_FMT_START}${portainer_url}${URL_FMT_END}"
-  message "Portainer bootstrap admin password: ${DATA_FMT_START}${portainer_admin_password}${DATA_FMT_END}"
+  if [[ "${show_secrets}" == "true" ]]; then
+    portainer_admin_password="$(tofu -chdir="${cluster_platform_workspace}" output -raw portainer_admin_password)"
+    message "Portainer bootstrap admin password: ${DATA_FMT_START}${portainer_admin_password}${DATA_FMT_END}"
+  fi
   rancher_enabled="$(tofu -chdir="${cluster_platform_workspace}" output -raw rancher_enabled)"
   if [[ "${rancher_enabled}" == "true" ]]; then
     message "Waiting for Rancher workload and endpoints to become ready..."
     wait_for_deployments_ready "cattle-system" "900s" "rancher"
     wait_for_service_endpoints "cattle-system" "900" "rancher"
     rancher_url="$(tofu -chdir="${cluster_platform_workspace}" output -raw rancher_url)"
-    rancher_bootstrap_password="$(tofu -chdir="${cluster_platform_workspace}" output -raw rancher_bootstrap_password)"
     message "Rancher URL: ${URL_FMT_START}${rancher_url}${URL_FMT_END}"
-    message "Rancher bootstrap password: ${DATA_FMT_START}${rancher_bootstrap_password}${DATA_FMT_END}"
+    if [[ "${show_secrets}" == "true" ]]; then
+      rancher_bootstrap_password="$(tofu -chdir="${cluster_platform_workspace}" output -raw rancher_bootstrap_password)"
+      message "Rancher bootstrap password: ${DATA_FMT_START}${rancher_bootstrap_password}${DATA_FMT_END}"
+    fi
   fi
   record_deployment_status "platform"
   finish_deploy_section "platform"
@@ -2638,19 +2788,22 @@ else
   dashboard_nodeport=$(kubectl -n rook-ceph get svc rook-ceph-mgr-dashboard-external-https -o jsonpath='{.spec.ports[?(@.name=="dashboard")].nodePort}')
   worker_ip="$(first_worker_ip)"
   message "Rook Ceph Dashboard is also available at ${URL_FMT_START}https://${worker_ip}:${dashboard_nodeport}/${URL_FMT_END}"
-  dashboard_password=""
-  for _ in {1..12}; do
-    if kubectl -n rook-ceph get secret rook-ceph-dashboard-password 1>/dev/null 2>&1; then
-      dashboard_password=$(kubectl -n rook-ceph get secret rook-ceph-dashboard-password -o jsonpath='{.data.password}' | base64 --decode)
-      break
+  message "Rook Ceph Dashboard user: ${DATA_FMT_START}admin${DATA_FMT_END}"
+  if [[ "${show_secrets}" == "true" ]]; then
+    dashboard_password=""
+    for _ in {1..12}; do
+      if kubectl -n rook-ceph get secret rook-ceph-dashboard-password 1>/dev/null 2>&1; then
+        dashboard_password=$(kubectl -n rook-ceph get secret rook-ceph-dashboard-password -o jsonpath='{.data.password}' | base64 --decode)
+        break
+      fi
+      sleep 5
+    done
+    if [[ -n "${dashboard_password}" ]]; then
+      message "Rook Ceph Dashboard password: ${DATA_FMT_START}${dashboard_password}${DATA_FMT_END}"
+    else
+      error "Dashboard password secret not found yet. Retry: kubectl -n rook-ceph get secret rook-ceph-dashboard-password"
+      exit 1
     fi
-    sleep 5
-  done
-  if [[ -n "${dashboard_password}" ]]; then
-    message "Login with username '${DATA_FMT_START}admin${DATA_FMT_END}' and the following password: ${DATA_FMT_START}${dashboard_password}${DATA_FMT_END}"
-  else
-    error "Dashboard password secret not found yet. Retry: kubectl -n rook-ceph get secret rook-ceph-dashboard-password"
-    exit 1
   fi
   finish_deploy_section "Rook Ceph dashboard"
 fi

@@ -594,7 +594,7 @@ spec:
         kubernetes.io/os: linux
       restartPolicy: OnFailure
       serviceAccountName: ingress-nginx-admission
-  ttlSecondsAfterFinished: 0
+  ttlSecondsAfterFinished: 300
 ---
 apiVersion: batch/v1
 kind: Job
@@ -658,7 +658,7 @@ spec:
         kubernetes.io/os: linux
       restartPolicy: OnFailure
       serviceAccountName: ingress-nginx-admission
-  ttlSecondsAfterFinished: 0
+  ttlSecondsAfterFinished: 300
 ---
 apiVersion: networking.k8s.io/v1
 kind: IngressClass

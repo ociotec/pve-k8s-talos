@@ -202,14 +202,14 @@ locals {
   ])
   rancher_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/rancher.yaml", {
-      rancher_hostname           = local.rancher_hostname_value
-      rancher_replicas           = tostring(local.rancher_replicas_value)
-      rancher_version            = tostring(local.rancher_version_value)
-      rancher_debug              = local.rancher_debug_value
-      rancher_cpu_request        = local.rancher_cpu_request_value
-      rancher_cpu_limit          = local.rancher_cpu_limit_value
-      rancher_mem_request        = local.rancher_mem_request_value
-      rancher_mem_limit          = local.rancher_mem_limit_value
+      rancher_hostname               = local.rancher_hostname_value
+      rancher_replicas               = tostring(local.rancher_replicas_value)
+      rancher_version                = tostring(local.rancher_version_value)
+      rancher_debug                  = local.rancher_debug_value
+      rancher_cpu_request            = local.rancher_cpu_request_value
+      rancher_cpu_limit              = local.rancher_cpu_limit_value
+      rancher_mem_request            = local.rancher_mem_request_value
+      rancher_mem_limit              = local.rancher_mem_limit_value
       rancher_imperative_api_enabled = local.rancher_version_is_v214plus
     })) :
     merge(
@@ -793,16 +793,26 @@ resource "kubernetes_manifest" "platform_namespaces" {
 resource "kubernetes_manifest" "platform_other" {
   for_each = { for i, m in local.platform_other : i => m }
   manifest = each.value
-  computed_fields = [
-    "globalDefault",
-    "metadata.annotations",
-    "metadata.annotations[\"deprecated.daemonset.template.generation\"]",
-    "spec.template.spec.containers[0].resources.limits.cpu",
-    "spec.template.spec.nodeSelector",
-  ]
+  computed_fields = concat(
+    [
+      "globalDefault",
+      "metadata.annotations",
+      "metadata.annotations[\"deprecated.daemonset.template.generation\"]",
+      "spec.template.spec.containers[0].resources.limits.cpu",
+      "spec.template.spec.nodeSelector",
+    ],
+    try(each.value.kind, "") == "Deployment" && try(each.value.metadata.name, "") == "rancher" ? [
+      "object.metadata.annotations",
+      "object.metadata.annotations[\"deployment.kubernetes.io/revision\"]",
+      "object.metadata.annotations[\"field.cattle.io/publicEndpoints\"]",
+    ] : [],
+  )
   lifecycle {
     ignore_changes = [
       manifest.metadata.annotations,
+      object.metadata.annotations,
+      object.metadata.annotations["deployment.kubernetes.io/revision"],
+      object.metadata.annotations["field.cattle.io/publicEndpoints"],
     ]
   }
   depends_on = [
