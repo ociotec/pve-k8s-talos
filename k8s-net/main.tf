@@ -379,16 +379,11 @@ resource "kubernetes_manifest" "metallb_native" {
   computed_fields = [
     "metadata.annotations",
     "metadata.annotations[\"deprecated.daemonset.template.generation\"]",
-    "object.metadata.annotations",
-    "object.metadata.annotations[\"deprecated.daemonset.template.generation\"]",
   ]
   lifecycle {
     ignore_changes = [
       manifest.metadata.annotations,
       manifest.metadata.annotations["deprecated.daemonset.template.generation"],
-      object.metadata.annotations,
-      object.metadata.annotations["deprecated.daemonset.template.generation"],
-      object.metadata.creationTimestamp,
     ]
   }
   field_manager {
