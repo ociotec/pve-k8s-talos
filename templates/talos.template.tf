@@ -111,8 +111,17 @@ resource "talos_machine_configuration_apply" "worker_config_apply" {
   node                        = each.value.ip
 }
 
+resource "local_sensitive_file" "controlplane_machine_config" {
+  for_each        = local.controlplane_vms
+  filename        = "${path.module}/machineconfig-${each.key}.yaml"
+  file_permission = "0600"
+  content         = local.controlplane_machine_config[each.key]
+}
+
+# Preserve the historical resource address while ensuring every worker has a
+# rendered steady-state config, including workers without a secondary network.
 resource "local_sensitive_file" "secondary_network_worker_machine_config" {
-  for_each        = local.secondary_network_worker_vms
+  for_each        = local.worker_vms
   filename        = "${path.module}/machineconfig-${each.key}.yaml"
   file_permission = "0600"
   content         = local.worker_machine_config[each.key]

@@ -252,6 +252,7 @@ network2_vlan_tag="$(read_constant_map_value "network2" "vlan_tag")"
 talos_version="$(awk -F'"' '/"version"/ { print $4; exit }' "${constants_path}")"
 talos_factory_image_id="$(awk -F'"' '/"factory_image_id"/ { print $4; exit }' "${constants_path}")"
 talos_discovery_service_disabled="$(awk -F'"' '/"discovery_service_disabled"/ { print $4; exit }' "${constants_path}")"
+talos_discovery_service_bootstrap_only="$(awk -F'"' '/"discovery_service_bootstrap_only"/ { print $4; exit }' "${constants_path}")"
 talos_discovery_service_endpoint="$(awk -F'"' '/"discovery_service_endpoint"/ { print $4; exit }' "${constants_path}")"
 talos_max_pods="$(awk -F'"' '/"max_pods"/ { print $4; exit }' "${constants_path}")"
 controlplane_vip="$(awk -F'"' '/"controlplane_vip"/ { print $4; exit }' "${constants_path}")"
@@ -276,6 +277,10 @@ fi
 
 if [[ -z "${talos_discovery_service_disabled}" ]]; then
   talos_discovery_service_disabled="true"
+fi
+
+if [[ -z "${talos_discovery_service_bootstrap_only}" ]]; then
+  talos_discovery_service_bootstrap_only="false"
 fi
 
 if [[ -z "${disk_by_id_prefix}" ]]; then
@@ -514,6 +519,7 @@ cert_files_raw="$(trim "${cert_files_raw}")"
 extra_host_entries_raw="$(trim "${extra_host_entries_raw}")"
 legacy_proxy_ca_path="$(trim "${legacy_proxy_ca_path}")"
 talos_discovery_service_disabled="$(trim "${talos_discovery_service_disabled}")"
+talos_discovery_service_bootstrap_only="$(trim "${talos_discovery_service_bootstrap_only}")"
 talos_discovery_service_endpoint="$(trim "${talos_discovery_service_endpoint}")"
 talos_max_pods="$(trim "${talos_max_pods}")"
 network2_net_size="$(trim "${network2_net_size}")"
@@ -550,6 +556,22 @@ case "${talos_discovery_service_disabled,,}" in
     exit 1
     ;;
 esac
+
+case "${talos_discovery_service_bootstrap_only,,}" in
+  "true"|"false")
+    ;;
+  *)
+    echo "Error: talos.discovery_service_bootstrap_only must be \"true\" or \"false\" (got ${talos_discovery_service_bootstrap_only})." >&2
+    echo "Fix: set discovery_service_bootstrap_only to \"true\" or \"false\" in constants.auto.tfvars." >&2
+    exit 1
+    ;;
+esac
+
+if [[ "${talos_discovery_service_bootstrap_only,,}" == "true" && "${talos_discovery_service_disabled,,}" == "true" ]]; then
+  echo "Error: talos.discovery_service_bootstrap_only requires discovery_service_disabled to be \"false\"." >&2
+  echo "Fix: enable the service registry for bootstrap, or disable bootstrap-only mode." >&2
+  exit 1
+fi
 
 if [[ -n "${talos_discovery_service_endpoint}" ]]; then
   if [[ ! "${talos_discovery_service_endpoint}" =~ ^https:// ]]; then
@@ -621,7 +643,12 @@ if [[ -n "${extra_host_entries_raw}" ]]; then
   fi
 fi
 
-talos_discovery_service_section="        disabled: ${talos_discovery_service_disabled,,}"
+talos_discovery_service_effective_disabled="${talos_discovery_service_disabled,,}"
+if [[ "${talos_discovery_service_bootstrap_only,,}" == "true" && -f "${cluster_out_dir}/.talos-bootstrap-complete" ]]; then
+  talos_discovery_service_effective_disabled="true"
+fi
+
+talos_discovery_service_section="        disabled: ${talos_discovery_service_effective_disabled}"
 if [[ -n "${talos_discovery_service_endpoint}" ]]; then
   talos_discovery_service_section+=$'\n        endpoint: "'"$(yaml_escape "${talos_discovery_service_endpoint}")"$'"'
 fi

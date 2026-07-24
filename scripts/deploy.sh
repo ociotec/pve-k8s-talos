@@ -2071,6 +2071,29 @@ cluster_node_ips() {
   ' "${vms_file}"
 }
 
+cluster_node_name_ip_pairs() {
+  local vms_file="${1:-${cluster_vms_path}}"
+
+  awk '
+    /^[[:space:]]*#/ { next }
+    match($0, /"[^"]+"[[:space:]]*=[[:space:]]*{/) {
+      name = $0
+      sub(/^[^"]*"/, "", name)
+      sub(/".*/, "", name)
+      in_block = 1
+      next
+    }
+    in_block && /^[[:space:]]*ip[[:space:]]*=[[:space:]]*"[^"]+"/ {
+      ip = $0
+      sub(/^[^"]*"/, "", ip)
+      sub(/".*/, "", ip)
+      print name "|" ip
+      in_block = 0
+    }
+    in_block && /}/ { in_block = 0 }
+  ' "${vms_file}"
+}
+
 append_no_proxy_entry() {
   local entry="$1"
   local current
@@ -2140,6 +2163,105 @@ disk_by_id_prefix() {
 
 talos_max_pods() {
   awk -F'"' '/"max_pods"/ { print $4; exit }' "$1"
+}
+
+talos_discovery_service_bootstrap_only() {
+  local value
+
+  value="$(tf_map_string_value "${1:-${cluster_constants_path}}" "talos" "discovery_service_bootstrap_only")"
+  [[ "${value,,}" == "true" ]]
+}
+
+talos_discovery_service_registry_enabled() {
+  local node_ip="$1"
+  local enabled
+
+  if ! enabled="$(
+    talosctl --talosconfig "${cluster_talosconfig_path}" \
+      -n "${node_ip}" \
+      get discoveryconfig cluster \
+      -o json 2>/dev/null |
+      jq -er '.spec.registryServiceEnabled | tostring'
+  )"; then
+    return 1
+  fi
+
+  case "${enabled}" in
+    true|false)
+      printf '%s' "${enabled}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+reconcile_talos_discovery_service_steady_state() {
+  local node_lines=()
+  local line
+  local node_name
+  local node_ip
+  local machineconfig_path
+  local registry_enabled
+  local changed=0
+  local start
+
+  if ! talos_discovery_service_bootstrap_only; then
+    return 0
+  fi
+
+  require_cmd jq
+  require_cmd talosctl
+  mapfile -t node_lines < <(cluster_node_name_ip_pairs)
+  if [[ "${#node_lines[@]}" -eq 0 ]]; then
+    error "No Talos nodes were found while reconciling bootstrap-only Discovery Service." >&2
+    return 1
+  fi
+
+  message "Ensuring Talos Discovery Service is disabled after bootstrap..."
+  for line in "${node_lines[@]}"; do
+    IFS='|' read -r node_name node_ip <<<"${line}"
+
+    if ! registry_enabled="$(talos_discovery_service_registry_enabled "${node_ip}")"; then
+      error "Failed to read the effective Discovery Service state from ${node_name}." >&2
+      return 1
+    fi
+    if [[ "${registry_enabled}" == "false" ]]; then
+      continue
+    fi
+
+    machineconfig_path="${cluster_root_workspace}/machineconfig-${node_name}.yaml"
+    if [[ ! -f "${machineconfig_path}" ]]; then
+      error "Missing steady-state Talos machine configuration for ${node_name}: ${machineconfig_path}" >&2
+      return 1
+    fi
+
+    run talosctl --talosconfig "${cluster_talosconfig_path}" \
+      -n "${node_ip}" \
+      apply-config \
+      --mode no-reboot \
+      --file "${machineconfig_path}"
+    changed=$((changed + 1))
+
+    start="$(date +%s)"
+    while true; do
+      registry_enabled="$(talos_discovery_service_registry_enabled "${node_ip}" || true)"
+      if [[ "${registry_enabled}" == "false" ]]; then
+        break
+      fi
+      if (( $(date +%s) - start >= 60 )); then
+        error "Timed out waiting for ${node_name} to disable Talos Discovery Service." >&2
+        return 1
+      fi
+      sleep 2
+    done
+  done
+
+  if (( changed == 0 )); then
+    message "Talos Discovery Service is already disabled on every node."
+  else
+    message "Disabled Talos Discovery Service on ${changed} node(s) without reboot."
+  fi
 }
 
 talos_kubernetes_version() {
@@ -2411,10 +2533,20 @@ else
   fi
 
   message "Deploying the Talos cluster ${cluster_name} (PVE VMs creation, Talos cluster initialization, k8s bootstrapping)..."
+  talos_bootstrap_marker_was_present=false
+  if [[ -f "${cluster_out_dir}/.talos-bootstrap-complete" ]]; then
+    talos_bootstrap_marker_was_present=true
+  fi
   run_gen_talos_assets
   run_tofu_init "${cluster_root_workspace}"
   mapfile -t root_apply_extra_args < <(root_apply_args)
   run tofu -chdir="${cluster_root_workspace}" apply -auto-approve "${root_apply_extra_args[@]}"
+
+  if talos_discovery_service_bootstrap_only && [[ "${talos_bootstrap_marker_was_present}" == "false" ]]; then
+    message "Initial bootstrap completed; reconciling the root workspace with Talos Discovery Service disabled..."
+    run_gen_talos_assets
+    run tofu -chdir="${cluster_root_workspace}" apply -auto-approve "${root_apply_extra_args[@]}"
+  fi
 
   if [[ ! -f "${cluster_talosconfig_path}" ]]; then
     if ! tofu -chdir="${cluster_root_workspace}" output -raw talosconfig > "${cluster_talosconfig_path}" 2>/dev/null; then
@@ -2476,6 +2608,7 @@ else
   fi
   stage_secondary_network_worker_configs
   reconcile_secondary_network_workers
+  reconcile_talos_discovery_service_steady_state
   wait_for_kubernetes_version_convergence "${cluster_constants_path}"
   reboot_nodes_with_pending_kubelet_max_pods "${cluster_constants_path}"
   message "k8s cluster is up and running. Current nodes:"

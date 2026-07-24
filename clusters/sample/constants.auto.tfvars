@@ -83,6 +83,9 @@ constants = {
     # Disable Talos public discovery service by default. Set to "false" if you
     # explicitly want the external discovery registry or a private endpoint.
     "discovery_service_disabled" = "true"
+    # When true, enable the service registry only until the initial cluster
+    # bootstrap completes, then reconcile every node with it disabled.
+    "discovery_service_bootstrap_only" = "false"
     # Optional private Talos discovery service endpoint. When set, this must be
     # HTTPS and discovery_service_disabled must be "false".
     "discovery_service_endpoint" = ""
