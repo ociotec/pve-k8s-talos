@@ -108,10 +108,11 @@ When rendering values:
 3. Read worker inventory and declared worker capacity from:
    - `clusters/<cluster>/vms.auto.tfvars`
    - `clusters/<cluster>/resources.auto.tfvars`
-4. Confirm repo-stamp status for each real cluster:
-   - inspect `clusters/<cluster>/.repo-status.json`
-   - compare its `repo_commit` with `git rev-parse HEAD`
-   - if the stamp differs, follow the drift rules from `AGENTS.md`
+4. Confirm deployment status for each real cluster:
+   - inspect the cluster-side status from `scripts/deployment-status.sh show`
+   - compare the relevant section's `platform` and `cluster` revisions with the
+     corresponding repository `HEAD`
+   - if a revision differs, follow the drift rules from `AGENTS.md`
 5. Resolve the live monitoring pods:
    - run from `clusters/<cluster>`
    - use `direnv exec . kubectl -n monitoring get pods -o custom-columns=NAME:.metadata.name,APP:.metadata.labels.app --no-headers`

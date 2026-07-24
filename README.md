@@ -680,6 +680,34 @@ For faster iterative deploys after the Talos VMs and kubeconfig already exist, u
 ../../scripts/deploy.sh --services-only
 ```
 
+### Inspect deployed repository revisions
+
+Successful deployment sections record their `platform` and cluster repository
+revisions in the Kubernetes ConfigMap
+`kube-system/pve-k8s-talos-deployment-status`. Skipped sections retain their
+previous revisions.
+
+From a real cluster directory with its environment loaded:
+
+```bash
+../../scripts/deployment-status.sh show
+```
+
+The canonical sections are `k8s`, `k8s-net`, `ceph`, `identity`, `s3`,
+`monitoring`, `platform`, `kafka`, and `benchmark`. See
+[`docs/deployment-status.md`](docs/deployment-status.md) for schema, baseline,
+and availability details.
+
+This status does not replace OpenTofu state or deployment locking. When a
+private cluster repository versions runtime state, include
+`out/**/terraform.tfstate`, `out/kubeconfig`, `out/talosconfig`, and
+`out/.talos-bootstrap-complete`. The last file is the stable lifecycle marker
+that prevents an existing Talos cluster from being bootstrapped again. Run
+operations from only one PC at a time, pull with fast-forward only before
+starting, and commit/push every changed state before switching PCs. See
+[`docs/deployment-status.md`](docs/deployment-status.md) for the serialized
+workflow.
+
 ### Inspect service URLs and credentials
 
 After deploying a cluster, use [`scripts/urls-and-credentials.sh`](scripts/urls-and-credentials.sh) to print the URLs and access credentials for installed services:

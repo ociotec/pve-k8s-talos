@@ -29,12 +29,10 @@ Use `clusters/sample` as the authoritative template for the current repository
 shape. Assume `clusters/sample` is aligned with the repository version being
 worked on.
 
-Maintain a local, ignored repository status stamp for real clusters:
-
-- `clusters/<cluster>/.repo-status.json`
-
-This file is local runtime metadata. It is not committed because real cluster
-directories are ignored by Git.
+Live deployment provenance is stored in the cluster-side ConfigMap documented
+in `docs/deployment-status.md`. The legacy local
+`clusters/<cluster>/.repo-status.json` file is deprecated and is not
+authoritative.
 
 ## Required Behavior
 
@@ -67,48 +65,40 @@ directories are ignored by Git.
   `scripts/ensure-credentials.sh` only for values that still need generation.
   Do not copy sample placeholder values. Treat `--purge-credentials` as explicit
   credential rotation and do not recommend it for normal cluster refreshes.
-- Do not update `.repo-status.json` merely because a new repository commit was
-  detected. Update it only after this workflow completes successfully, or after
-  explicit user confirmation that the relevant deployment was already applied.
-- When comparing `.repo-status.json.repo_commit` with `git rev-parse HEAD`,
+- Do not update cluster-side deployment status merely because new platform or
+  cluster repository commits were detected or because local validation
+  succeeded. Successful `scripts/deploy.sh` sections update their own status.
+- When comparing a recorded revision with the corresponding repository `HEAD`,
   inspect the changed paths between the two commits. If the difference is only
   documentation or agent-operation guidance, such as `README.md`, `docs/**`, or
   `AGENTS.md`, report it as documentation-only drift and do not treat it as a
   cluster update or deployment requirement by itself.
+- In the cluster repository, changes limited to `out/**/terraform.tfstate`,
+  `out/kubeconfig`, `out/talosconfig`, or
+  `out/.talos-bootstrap-complete` are runtime-state-only drift. Do not treat
+  those paths as source configuration changes.
 
-## Repository Status Stamp
+## Deployment Status
 
-When this workflow completes its update and validation successfully, write or
-update `clusters/<cluster>/.repo-status.json` with at least:
+Read the cluster-side status with:
 
-```json
-{
-  "repo_commit": "<git rev-parse HEAD>",
-  "repo_dirty": false,
-  "updated_at": "<ISO-8601 timestamp>",
-  "workflow": "update-cluster-from-repo",
-  "validated_workspaces": ["out/root"],
-  "deployment_command": "cd clusters/<cluster> && ../../scripts/deploy.sh ...",
-  "deployment_confirmed": false
-}
+```bash
+../../scripts/deployment-status.sh show
 ```
 
-Stamp semantics:
+Compare both sources independently:
 
-- `repo_commit` means the cluster directory was updated and validated against
-  that repository commit.
-- It does not prove that the live cluster has applied the commit.
-- `repo_dirty = false` is required for the stamp to represent a clean sync.
-- If the repo has uncommitted changes, validation may still run, but do not write
-  a clean sync stamp; report that a clean stamp was skipped because the repo was
-  dirty.
-- If the user explicitly states that they already ran the recommended deployment
-  successfully, the agent may set `deployment_confirmed = true`.
-- If validation fails, do not update `.repo-status.json`.
-- Documentation-only drift may be ignored for deciding whether a live cluster is
-  operationally stale. Do not update `.repo-status.json` solely to advance past
-  documentation-only commits unless the user explicitly asks for that metadata
-  update.
+- `platform` against the top-level `pve-k8s-talos` repository
+- `cluster` against the independent real cluster repository
+
+Each deployment section can have different revisions because deployments may
+use skip flags. Local update and validation do not prove that any live section
+has applied the changes, so this workflow must leave deployment status
+unchanged. If the Kubernetes API is unavailable, report live status as unknown.
+
+An operator-confirmed baseline is only for initial adoption of the status
+mechanism. It requires explicit confirmation of the exact cluster, repositories,
+commits, and section list; it is not a normal completion step for this workflow.
 
 ## Confirmation Report
 
@@ -126,11 +116,16 @@ Use these classifications:
 - `user decision`: an environment-specific value must be supplied or confirmed.
 - `generated stale`: generated `out/*` content is missing, stale, or not linked
   to current repo sources.
-- `stamp mismatch`: `.repo-status.json.repo_commit` is missing or differs from
-  `git rev-parse HEAD` and the commit range includes non-documentation changes.
-- `documentation-only drift`: `.repo-status.json.repo_commit` differs from
-  `git rev-parse HEAD`, but every changed path in the range is documentation or
-  agent-operation guidance, such as `README.md`, `docs/**`, or `AGENTS.md`.
+- `deployment revision mismatch`: a relevant section has no deployment record,
+  or its `platform` or `cluster` revision differs from the corresponding `HEAD`
+  and the commit range includes non-documentation changes.
+- `documentation-only drift`: a recorded revision differs from its corresponding
+  `HEAD`, but every changed path in the range is documentation or agent-operation
+  guidance, such as `README.md`, `docs/**`, or `AGENTS.md`.
+- `runtime-state-only drift`: the cluster revision differs, but every changed
+  path is tracked runtime state such as `out/**/terraform.tfstate`,
+  `out/kubeconfig`, `out/talosconfig`, or
+  `out/.talos-bootstrap-complete`.
 
 The confirmation message must also list:
 
@@ -141,7 +136,7 @@ The confirmation message must also list:
   no section changes are detected; do not assume the section set is unchanged
   without checking
 - `TODO` comments that will be added
-- whether `.repo-status.json` will be updated
+- whether cluster-side deployment status will remain unchanged
 - the recommended `scripts/deploy.sh` command, if deployment is needed
 
 If the user does not confirm, stop after the report and make no changes.
@@ -153,11 +148,13 @@ If the user does not confirm, stop after the report and make no changes.
 2. Preflight without editing:
    - inspect `git status --short`
    - record `git rev-parse HEAD`
-   - read `clusters/<cluster>/.repo-status.json` if present
-   - compare the stamp commit with the current repo commit
-   - when the commits differ, inspect `git diff --name-only <stamp>..HEAD` and
-     distinguish documentation-only drift from operational source/config changes
-   - verify whether the repository is clean enough for a clean sync stamp
+   - read cluster-side deployment status when Kubernetes is available
+   - compare each relevant section's `platform` and `cluster` revisions with the
+     corresponding repository `HEAD`
+   - when commits differ, inspect `git diff --name-only <recorded>..HEAD` in the
+     correct repository and distinguish documentation-only drift from
+     operational source/config changes
+   - inspect both repositories for uncommitted changes
 3. Compare the cluster directory with `clusters/sample` without editing:
    - identify missing constants files
    - identify missing top-level locals in `*_constants.tf`
@@ -194,7 +191,7 @@ If the user does not confirm, stop after the report and make no changes.
      names, Ceph external credentials, VM placement, or Proxmox details.
    - **Generated stale**: missing or outdated generated workspaces, generated
      manifests, Talos assets, or symlinks.
-   - **Stamp mismatch**: missing or stale `.repo-status.json`.
+   - **Deployment revision mismatch**: missing or stale section provenance.
 7. Present the confirmation report and wait for explicit user confirmation before
    editing anything.
 8. Apply the smallest confirmed cluster-local edits needed:
@@ -216,15 +213,13 @@ If the user does not confirm, stop after the report and make no changes.
      exist, validate only the affected service workspaces
    - if a required workspace does not exist yet, say so and give the generation
      command that will create it
-11. If validation succeeds and the repository is clean, write
-    `clusters/<cluster>/.repo-status.json` with the current repo commit,
-    validation metadata, recommended deployment command, and
-    `deployment_confirmed = false`.
+11. Leave cluster-side deployment status unchanged. Validation confirms the
+    proposed local source but does not prove it was applied to the live cluster.
 12. Produce a final report:
    - changed files
    - validation commands run and their result
    - every `TODO` the user must edit, with clickable file links and line numbers
-   - whether `.repo-status.json` was updated or intentionally skipped
+   - that cluster-side deployment status remains unchanged until deployment
    - the deployment command the user should run, or state that no deployment is
      needed
 
@@ -263,8 +258,8 @@ Follow normal repository rules from `AGENTS.md`:
 If validation requires network access or local credentials and cannot be run,
 state exactly which command was skipped and why.
 
-If validation fails, leave `.repo-status.json` unchanged and state that the
-cluster directory has not been marked as updated for the current repo commit.
+If validation fails, leave cluster-side deployment status unchanged and state
+that no live deployment provenance was advanced.
 
 ## Deployment Command Guidance
 
@@ -301,5 +296,5 @@ Typical user requests that should trigger this workflow:
 - `Bring clusters/prod in line with clusters/sample`
 - `Add any new constants this repo now requires for my cluster`
 - `Check what changed before updating cluster gcs-demo`
-- `Why does gcs-demo have an old repo commit stamp?`
+- `Why does gcs-demo show an old deployment revision?`
 - `Follow docs/agent-workflows/update-cluster-from-repo.md for gcs-demo`

@@ -154,11 +154,30 @@ For any non-trivial change:
 
 ## Safety Rules
 
-- Never commit real secrets or private keys.
-- Keep cert files under `clusters/<cluster>/certs/` and out of version control unless explicitly intended.
+- Never commit real secrets, private keys, kubeconfigs, Talos configs, or
+  OpenTofu state to the shared `pve-k8s-talos` repository, `clusters/sample`, or
+  `infra-vms/sample`.
+- A separately access-controlled real cluster repository may intentionally
+  version its own `out/kubeconfig`, `out/talosconfig`,
+  `out/**/terraform.tfstate`, `out/.talos-bootstrap-complete`, credentials, and
+  certificates when that is the operator-approved distribution model. Treat
+  the entire repository as sensitive. Do not print those values or copy them
+  into shared/versioned platform content.
+- Do not version `terraform.tfstate.backup`, `.terraform/`, or
+  `.terraform.tfstate.lock.info`. When a real cluster repository versions local
+  state, serialize all operations: pull with fast-forward only before starting,
+  use one PC at a time, and commit/push every changed state before switching PCs.
+- Keep cert files under `clusters/<cluster>/certs/`; version them only in the
+  separately access-controlled real cluster repository when explicitly intended.
 - Real cluster service credentials live in `clusters/<cluster>/secrets/credentials.json` and are intentionally outside `out/` so purging generated workspaces does not rotate passwords or OIDC client secrets. Use `scripts/extract-credentials-from-state.sh` to recover this file from existing local state before deleting `out/`. Do not print secret values. Do not delete this file or generated internal root CA files under `certs/` unless the user explicitly requests credential rotation or uses `scripts/deploy.sh --purge-credentials` with a destroy flow.
 - `clusters/<cluster>/secrets/credentials_and_urls.md` is generated after deployment and contains service URLs plus credentials. Treat it as sensitive and do not print its secret values.
-- Do not use real private URLs, private domains, internal hostnames, or private IPs in documentation, `clusters/sample`, `infra-vms/sample`, shared modules, scripts, templates, or any other versioned repository content. Use reserved/example values instead (`example.com`, `example.net`, `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`). Real private endpoints are only allowed in ignored files under real cluster or infra VM directories such as `clusters/<cluster>/` and `infra-vms/<name>/`.
+- Do not use real private URLs, private domains, internal hostnames, or private
+  IPs in documentation, `clusters/sample`, `infra-vms/sample`, shared modules,
+  scripts, templates, or other shared platform content. Use reserved/example
+  values instead (`example.com`, `example.net`, `192.0.2.0/24`,
+  `198.51.100.0/24`, `203.0.113.0/24`). Real private endpoints are allowed only
+  in real cluster or infra VM runtime data, including their separately
+  access-controlled repositories.
 - Do not edit `clusters/sample` as if it were an active cluster runtime; use it as template/reference.
 - Prefer additive, reversible edits; call out destructive implications explicitly.
 
@@ -183,17 +202,24 @@ For any non-trivial change:
 - When the user asks to run, stop, or size benchmark workloads by target CPU or memory utilization, follow `docs/agent-workflows/targeted-benchmarks.md`.
 - When the user discusses S3-compatible storage alternatives, evaluation criteria, final candidates, or selection decisions, update `docs/s3-storage-evaluation.md` in the same change or explicitly state why no update is needed. When editing that document, keep inline source links and the final `References` section coherent with each other, and write final reference URLs as Markdown autolinks (`<https://example.com>`) so they remain clickable in the generated PDF. Regenerate `docs/s3-storage-evaluation.pdf` from the Markdown in the same directory. Keep the visual status markers `🟢`, `🟡`, and `🔴` in the Markdown. Generate the PDF directly with Pandoc and XeLaTeX, using `docs/s3-storage-evaluation.lua` to convert the emoji markers to colored LaTeX bullets and `docs/s3-storage-evaluation.tex` for A4 landscape pages, reduced margins, and compact long tables. Render PDF links visibly with blue link text. Before generating the PDF, check whether `pandoc`, `xelatex`, `xcolor.sty`, `longtable.sty`, and `etoolbox.sty` are installed. If any dependency is missing, tell the user to install them with `sudo apt update` and `sudo apt install pandoc texlive-xetex texlive-latex-extra`, and show the intended generation command: `pandoc docs/s3-storage-evaluation.md -o docs/s3-storage-evaluation.pdf --pdf-engine=xelatex --lua-filter=docs/s3-storage-evaluation.lua -H docs/s3-storage-evaluation.tex -V geometry:a4paper -V geometry:landscape -V geometry:margin=8mm -V fontsize=8pt -V colorlinks=true -V linkcolor=blue -V urlcolor=blue`.
 - When the user indicates they are working with a specific real cluster, inspect
-  `clusters/<cluster>/.repo-status.json` if it exists and compare its
-  `repo_commit` with `git rev-parse HEAD`. If the stamp is missing or differs,
-  inspect the changed paths between the stamped commit and `HEAD`. If the range
-  only contains documentation or agent-operation guidance, such as `README.md`,
-  `docs/**`, or `AGENTS.md`, report it as documentation-only drift and do not
-  treat the cluster as operationally stale on that basis alone. Otherwise, tell
-  the user before other work that the cluster has no repo validation stamp, or
-  that it was last validated against the old commit and the repo is now at the
-  new commit. Do not update the stamp just because a new commit is detected;
-  only update it after a successful `update-cluster-from-repo` run, or after
-  explicit user confirmation that the relevant deployment already succeeded.
+  the cluster-side deployment status described in `docs/deployment-status.md`
+  when Kubernetes access is available. Compare both the `platform` revision
+  against the top-level repository and the `cluster` revision against the
+  independent `clusters/<cluster>` repository for each relevant section. When a
+  revision differs, inspect the changed paths between the recorded commit and
+  the corresponding repository `HEAD`. If the range only contains documentation
+  or agent-operation guidance, such as `README.md`, `docs/**`, or `AGENTS.md`,
+  report it as documentation-only drift and do not treat that section as
+  operationally stale on that basis alone. Likewise, changes limited to tracked
+  cluster runtime files such as `out/**/terraform.tfstate`, `out/kubeconfig`,
+  `out/talosconfig`, or `out/.talos-bootstrap-complete` are runtime-state-only
+  drift and do not make deployment sections stale. Otherwise, tell the user
+  before other work that the section has no deployment record or was last
+  deployed from an older platform or cluster revision. If the Kubernetes API is unavailable, report live deployment
+  status as unknown; do not treat the deprecated local `.repo-status.json` as
+  authoritative evidence. Do not advance deployment status merely because a new
+  commit is detected. It is updated by successful `scripts/deploy.sh` sections
+  or by an explicitly confirmed initial baseline.
 - Treat files under `docs/agent-workflows/` as repo-local operating procedures for agents:
   - use them when the user request clearly matches the workflow
   - apply them together with this `AGENTS.md`, not instead of it
@@ -204,7 +230,9 @@ For any non-trivial change:
 ## Cluster Directory Hygiene
 
 - Each real cluster must have its own dedicated directory under `clusters/<cluster>/`.
-- Real cluster directories and real infra VM directories are local runtime data and should not be committed to Git.
+- Real cluster and infra VM directories must not be committed to the shared
+  platform repository. They may be independent, access-controlled repositories
+  for distributing their own sensitive configuration and runtime state.
 - Keep `infra-vms/sample/` as the versioned reference for bootstrap VMs.
 - Keep per-cluster constants files as small as possible:
   - only cluster-specific values

@@ -159,6 +159,47 @@ setup_cluster_context "${script_dir}" ""
 
 controlplane_vip="$(awk -F'"' '/"controlplane_vip"/ { print $4; exit }' "${cluster_constants_path}")"
 
+deployment_status_enabled=false
+deployment_id=""
+deployment_platform_commit=""
+deployment_cluster_commit=""
+deployment_platform_dirty=false
+deployment_cluster_dirty=false
+cluster_git_root="$(git -C "${cluster_dir}" rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -n "${cluster_git_root}" && "$(cd "${cluster_git_root}" && pwd -P)" == "${cluster_dir}" ]]; then
+  deployment_status_enabled=true
+  deployment_platform_commit="$(git -C "${repo_root}" rev-parse HEAD)"
+  deployment_cluster_commit="$(git -C "${cluster_dir}" rev-parse HEAD)"
+  if [[ -n "$(git -C "${repo_root}" status --porcelain=v1 --untracked-files=normal)" ]]; then
+    deployment_platform_dirty=true
+  fi
+  if [[ -n "$(git -C "${cluster_dir}" status --porcelain=v1 --untracked-files=normal)" ]]; then
+    deployment_cluster_dirty=true
+  fi
+  deployment_id="$(
+    printf '%s-%06x' \
+      "$(date -u +'%Y%m%dT%H%M%SZ')" \
+      "$(( (RANDOM << 8) ^ RANDOM ))"
+  )"
+else
+  message "warning: deployment provenance will not be recorded because ${cluster_name} is not an independent Git repository."
+fi
+
+record_deployment_status() {
+  local section="$1"
+
+  if [[ "${deployment_status_enabled}" != "true" ]]; then
+    return 0
+  fi
+  "${script_dir}/deployment-status.sh" record \
+    --section "${section}" \
+    --deployment-id "${deployment_id}" \
+    --platform-commit "${deployment_platform_commit}" \
+    --cluster-commit "${deployment_cluster_commit}" \
+    --platform-dirty "${deployment_platform_dirty}" \
+    --cluster-dirty "${deployment_cluster_dirty}"
+}
+
 check_integer_cpu_millicores() {
   local paths=("$@")
   local matches
@@ -397,6 +438,23 @@ clear_stale_lock_if_present() {
 state_dir_has_state() {
   local state_dir="$1"
   [[ -f "${state_dir}/terraform.tfstate" || -f "${state_dir}/terraform.tfstate.backup" ]]
+}
+
+ensure_talos_bootstrap_marker_consistency() {
+  local bootstrap_marker="${cluster_out_dir}/.talos-bootstrap-complete"
+
+  if [[ -f "${bootstrap_marker}" ]]; then
+    return 0
+  fi
+
+  if state_dir_has_state "${cluster_root_workspace}" \
+    && [[ -f "${cluster_kubeconfig_path}" ]] \
+    && [[ -f "${cluster_talosconfig_path}" ]]; then
+    error "Existing Talos state, kubeconfig, and talosconfig were found, but ${bootstrap_marker} is missing." >&2
+    error "Refusing to apply the root workspace because it would attempt to bootstrap the existing cluster again." >&2
+    error "Restore the tracked marker, or verify cluster health and recreate it with the exact content 'ok' before retrying." >&2
+    exit 1
+  fi
 }
 
 hydrate_workspace_providers_from_cluster_cache() {
@@ -673,13 +731,15 @@ node_has_secondary_ip_active() {
   local node_ip="$1"
   local ip2="$2"
 
-  talosctl --talosconfig "${cluster_talosconfig_path}" -n "${node_ip}" get addresses -o yaml 2>/dev/null | grep -q "${ip2}/"
+  talosctl --talosconfig "${cluster_talosconfig_path}" -n "${node_ip}" get addresses -o yaml 2>/dev/null \
+    | grep -F "${ip2}/" >/dev/null
 }
 
 node_primary_default_route_ok() {
   local node_ip="$1"
 
-  talosctl --talosconfig "${cluster_talosconfig_path}" -n "${node_ip}" get routespecs -o yaml 2>/dev/null | grep -q 'outLinkName: eth0'
+  talosctl --talosconfig "${cluster_talosconfig_path}" -n "${node_ip}" get routespecs -o yaml 2>/dev/null \
+    | grep -F 'outLinkName: eth0' >/dev/null
 }
 
 secondary_network_machineconfig_path() {
@@ -825,7 +885,7 @@ reconcile_secondary_network_workers() {
       exit 1
     fi
 
-    boot_id_before="$(talos_boot_id "${worker_ip}")"
+    boot_id_before="$(talos_boot_id "${worker_ip}" || true)"
     if [[ -z "${boot_id_before}" ]]; then
       error "Failed to read boot ID from ${worker_name} before reset." >&2
       exit 1
@@ -835,8 +895,13 @@ reconcile_secondary_network_workers() {
 
     start="$(date +%s)"
     while true; do
-      boot_id_after="$(talos_boot_id "${worker_ip}")"
+      boot_id_after="$(talos_boot_id "${worker_ip}" || true)"
       if [[ -n "${boot_id_after}" && "${boot_id_after}" != "${boot_id_before}" ]]; then
+        break
+      fi
+      if ! node_has_persistent_machineconfig "${worker_ip}" \
+        && node_has_secondary_ip_active "${worker_ip}" "${worker_ip2}" \
+        && node_primary_default_route_ok "${worker_ip}"; then
         break
       fi
       if (( $(date +%s) - start >= 600 )); then
@@ -2008,6 +2073,9 @@ if [[ "${services_only}" == "true" ]]; then
   require_cluster_file "${cluster_talosconfig_path}" "generated talosconfig"
   require_cluster_file "${cluster_kubeconfig_path}" "generated kubeconfig"
 else
+  if [[ "${destroy_first}" != "true" ]]; then
+    ensure_talos_bootstrap_marker_consistency
+  fi
   prepare_root_workspace
   run_gen_talos_assets
   run_tofu_init "${cluster_root_workspace}"
@@ -2115,6 +2183,7 @@ else
   reboot_nodes_with_pending_kubelet_max_pods "${cluster_constants_path}"
   message "k8s cluster is up and running. Current nodes:"
   "${script_dir}/render-k8s-nodes.sh" --kubeconfig "${active_kubeconfig_path}"
+  record_deployment_status "k8s"
   finish_deploy_section "Talos/Kubernetes"
 fi
 
@@ -2135,6 +2204,7 @@ else
   tofu -chdir="${cluster_k8s_net_workspace}" apply -auto-approve \
     -var="skip_ceph=${skip_ceph}" 1>/dev/null
 
+  record_deployment_status "k8s-net"
   finish_deploy_section "k8s-net"
 fi
 
@@ -2216,6 +2286,7 @@ else
       --ignore-not-found 1>/dev/null
   fi
   kubectl -n rook-ceph get storageclasses.storage.k8s.io
+  record_deployment_status "ceph"
   finish_deploy_section "Rook Ceph"
 fi
 
@@ -2251,6 +2322,7 @@ else
       message_keycloak_realm_console_line "${keycloak_realm_console_line}"
     done <<< "${keycloak_realm_console_summary}"
   fi
+  record_deployment_status "identity"
   finish_deploy_section "identity"
 fi
 
@@ -2291,6 +2363,7 @@ else
   message "S3 region: ${DATA_FMT_START}${garage_s3_region}${DATA_FMT_END}"
   message "S3 Console URL: ${URL_FMT_START}${garage_console_url}${URL_FMT_END}"
   message "Garage admin token: ${DATA_FMT_START}${garage_admin_token}${DATA_FMT_END}"
+  record_deployment_status "s3"
   finish_deploy_section "S3 storage"
 fi
 
@@ -2402,6 +2475,7 @@ else
   message "Prometheus API password: ${DATA_FMT_START}${prometheus_api_password}${DATA_FMT_END}"
   message "Grafana admin user: ${DATA_FMT_START}${grafana_user}${DATA_FMT_END}"
   message "Grafana admin password: ${DATA_FMT_START}${grafana_password}${DATA_FMT_END}"
+  record_deployment_status "monitoring"
   finish_deploy_section "monitoring"
 fi
 
@@ -2432,6 +2506,7 @@ else
     message "Rancher URL: ${URL_FMT_START}${rancher_url}${URL_FMT_END}"
     message "Rancher bootstrap password: ${DATA_FMT_START}${rancher_bootstrap_password}${DATA_FMT_END}"
   fi
+  record_deployment_status "platform"
   finish_deploy_section "platform"
 fi
 
@@ -2463,6 +2538,7 @@ else
   fi
   redpanda_console_url="$(tofu -chdir="${cluster_kafka_workspace}" output -raw redpanda_console_url)"
   message "Redpanda Console URL: ${URL_FMT_START}${redpanda_console_url}${URL_FMT_END}"
+  record_deployment_status "kafka"
   finish_deploy_section "Kafka/Redpanda"
 fi
 
@@ -2485,6 +2561,7 @@ else
   if [[ -n "${benchmark_disk_workloads}" ]]; then
     message "Disk benchmarks: ${DATA_FMT_START}${benchmark_disk_workloads}${DATA_FMT_END}"
   fi
+  record_deployment_status "benchmark"
   finish_deploy_section "benchmark"
 fi
 
