@@ -41,6 +41,10 @@ data "terraform_remote_state" "identity" {
 
 provider "kubernetes" {
   config_path = abspath("${path.module}/${var.kubeconfig_path}")
+  ignore_annotations = [
+    "^deployment\\.kubernetes\\.io/revision$",
+    "^field\\.cattle\\.io/publicEndpoints$",
+  ]
 }
 
 locals {
@@ -797,14 +801,11 @@ resource "kubernetes_manifest" "platform_other" {
     [
       "globalDefault",
     ],
-    try(each.value.kind, "") == "Deployment" && try(each.value.metadata.name, "") == "rancher" ? [
-      "metadata.annotations[\"deployment.kubernetes.io/revision\"]",
-      "metadata.annotations[\"field.cattle.io/publicEndpoints\"]",
-      ] : [
+    try(each.value.kind, "") == "Deployment" && try(each.value.metadata.name, "") == "rancher" ? [] : [
       "metadata.annotations",
+      "metadata.annotations[\"deprecated.daemonset.template.generation\"]",
     ],
     [
-      "metadata.annotations[\"deprecated.daemonset.template.generation\"]",
       "spec.template.spec.containers[0].resources.limits.cpu",
       "spec.template.spec.nodeSelector",
     ],
