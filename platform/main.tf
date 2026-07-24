@@ -793,20 +793,13 @@ resource "kubernetes_manifest" "platform_namespaces" {
 resource "kubernetes_manifest" "platform_other" {
   for_each = { for i, m in local.platform_other : i => m }
   manifest = each.value
-  computed_fields = concat(
-    [
-      "globalDefault",
-      "metadata.annotations",
-      "metadata.annotations[\"deprecated.daemonset.template.generation\"]",
-      "spec.template.spec.containers[0].resources.limits.cpu",
-      "spec.template.spec.nodeSelector",
-    ],
-    try(each.value.kind, "") == "Deployment" && try(each.value.metadata.name, "") == "rancher" ? [
-      "object.metadata.annotations",
-      "object.metadata.annotations[\"deployment.kubernetes.io/revision\"]",
-      "object.metadata.annotations[\"field.cattle.io/publicEndpoints\"]",
-    ] : [],
-  )
+  computed_fields = [
+    "globalDefault",
+    "metadata.annotations",
+    "metadata.annotations[\"deprecated.daemonset.template.generation\"]",
+    "spec.template.spec.containers[0].resources.limits.cpu",
+    "spec.template.spec.nodeSelector",
+  ]
   lifecycle {
     ignore_changes = [
       manifest.metadata.annotations,

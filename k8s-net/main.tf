@@ -376,17 +376,12 @@ resource "kubernetes_manifest" "metallb_native_namespace" {
 resource "kubernetes_manifest" "metallb_native" {
   for_each = { for i, m in local.metallb_native_other : i => m }
   manifest = each.value
-  computed_fields = concat(
-    [
-      "metadata.annotations",
-      "metadata.annotations[\"deprecated.daemonset.template.generation\"]",
-      "object.metadata.annotations",
-      "object.metadata.annotations[\"deprecated.daemonset.template.generation\"]",
-    ],
-    try(each.value.kind, "") == "ValidatingWebhookConfiguration" ? [
-      "object.metadata.creationTimestamp",
-    ] : [],
-  )
+  computed_fields = [
+    "metadata.annotations",
+    "metadata.annotations[\"deprecated.daemonset.template.generation\"]",
+    "object.metadata.annotations",
+    "object.metadata.annotations[\"deprecated.daemonset.template.generation\"]",
+  ]
   lifecycle {
     ignore_changes = [
       manifest.metadata.annotations,
