@@ -279,10 +279,6 @@ if [[ -z "${talos_discovery_service_disabled}" ]]; then
   talos_discovery_service_disabled="true"
 fi
 
-if [[ -z "${talos_discovery_service_bootstrap_only}" ]]; then
-  talos_discovery_service_bootstrap_only="false"
-fi
-
 if [[ -z "${disk_by_id_prefix}" ]]; then
   echo "Error: missing disk_by_id_prefix in constants.auto.tfvars." >&2
   echo "Fix: set vm.disk_by_id_prefix to match /dev/disk/by-id prefix (for example scsi-0QEMU_QEMU_HARDDISK_drive-scsi)." >&2
@@ -521,6 +517,13 @@ legacy_proxy_ca_path="$(trim "${legacy_proxy_ca_path}")"
 talos_discovery_service_disabled="$(trim "${talos_discovery_service_disabled}")"
 talos_discovery_service_bootstrap_only="$(trim "${talos_discovery_service_bootstrap_only}")"
 talos_discovery_service_endpoint="$(trim "${talos_discovery_service_endpoint}")"
+if [[ -z "${talos_discovery_service_bootstrap_only}" ]]; then
+  if [[ -n "${talos_discovery_service_endpoint}" ]]; then
+    talos_discovery_service_bootstrap_only="true"
+  else
+    talos_discovery_service_bootstrap_only="false"
+  fi
+fi
 talos_max_pods="$(trim "${talos_max_pods}")"
 network2_net_size="$(trim "${network2_net_size}")"
 network2_bridge_device="$(trim "${network2_bridge_device}")"

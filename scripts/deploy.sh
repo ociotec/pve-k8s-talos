@@ -2167,8 +2167,14 @@ talos_max_pods() {
 
 talos_discovery_service_bootstrap_only() {
   local value
+  local endpoint
 
   value="$(tf_map_string_value "${1:-${cluster_constants_path}}" "talos" "discovery_service_bootstrap_only")"
+  if [[ -z "${value}" ]]; then
+    endpoint="$(tf_map_string_value "${1:-${cluster_constants_path}}" "talos" "discovery_service_endpoint")"
+    [[ -n "${endpoint}" ]]
+    return
+  fi
   [[ "${value,,}" == "true" ]]
 }
 

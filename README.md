@@ -58,7 +58,7 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
   - Talos version and factory image ID (used to render `patches/qemu.yaml`).
   - Optional `talos.max_pods` (kubelet `maxPods`) to override per-node pod density. Leave empty to keep Kubernetes default (`110`).
   - Optional `talos.discovery_service_disabled` toggle (`"true"` by default) to disable Talos public discovery service.
-  - Optional `talos.discovery_service_bootstrap_only` toggle to use the configured service registry only until the initial cluster bootstrap completes.
+  - Optional `talos.discovery_service_bootstrap_only` override. When omitted, private endpoints are bootstrap-only and the public service registry is not.
   - Optional global `constants["k8s"]["labels"]` map applied to all k8s nodes (lowest precedence).
 - `vms.auto.tfvars`
   - Map of VMs on PVE with VM name as key:
@@ -237,13 +237,12 @@ For a private discovery endpoint, set both:
 
 ```hcl
 "discovery_service_disabled" = "false"
-"discovery_service_bootstrap_only" = "false"
 "discovery_service_endpoint" = "https://talos-discovery.example.com"
 ```
 
 The endpoint must be HTTPS. If the endpoint uses a private CA, include the issuing CA in `constants["network"]["cert_files"]` so Talos trusts it during first boot.
 
-Set `discovery_service_bootstrap_only = "true"` to keep that endpoint enabled during initial Talos installation and disable the external service registry on every node after the bootstrap health gate succeeds. The generated `.talos-bootstrap-complete` marker selects the steady-state machine configuration, and `deploy.sh` performs the required second root reconciliation automatically during a new bootstrap. Subsequent deployments keep the service registry disabled; deleting the cluster removes the marker, so a fresh deployment enables it again for bootstrap. The Kubernetes discovery registry remains enabled.
+When `discovery_service_bootstrap_only` is omitted, it defaults to `"true"` if `discovery_service_endpoint` is configured and to `"false"` otherwise. A private endpoint is therefore enabled during initial Talos installation and disabled on every node after the bootstrap health gate succeeds. Set the override explicitly to `"false"` only when a private Discovery Service must remain active permanently. The generated `.talos-bootstrap-complete` marker selects the steady-state machine configuration, and `deploy.sh` performs the required second root reconciliation automatically during a new bootstrap. Subsequent deployments keep the service registry disabled; deleting the cluster removes the marker, so a fresh deployment enables it again for bootstrap. The Kubernetes discovery registry remains enabled.
 
 When the public discovery service is disabled, the generated root workspace applies an early `system:talos-nodes` RBAC patch that grants Talos node identities `get`, `list`, and `watch` on Kubernetes `Node` resources. This keeps Talos' Kubernetes-backed discovery usable on modern Kubernetes releases where `system:node:*` identities are otherwise restricted from listing all nodes. The patch is applied immediately after the root workspace obtains `kubeconfig`, before the Talos cluster health gate.
 
