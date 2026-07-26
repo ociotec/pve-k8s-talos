@@ -1153,7 +1153,14 @@ if [[ -n "${proxy_url}" ]]; then
     while IFS= read -r hostname; do
       add_no_proxy_entry "${hostname}"
     done < <(
-      awk -v domain="${k8s_net_domain}" -F'"' '/_hostname[[:space:]]*=/{val=$2; gsub("\\$\\{local.domain\\}", domain, val); print val}' "${monitoring_constants_path}"
+      # OTLP's public hostname is consumed by telemetry clients, not Talos services.
+      awk -v domain="${k8s_net_domain}" -F'"' '
+        /_hostname[[:space:]]*=/ && $0 !~ /^[[:space:]]*otlp_public_hostname[[:space:]]*=/ {
+          val=$2
+          gsub("\\$\\{local.domain\\}", domain, val)
+          print val
+        }
+      ' "${monitoring_constants_path}"
     )
   fi
 
