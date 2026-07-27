@@ -783,6 +783,28 @@ secondary_network_machineconfig_path() {
   printf '%s/machineconfig-%s.yaml' "${cluster_root_workspace}" "${worker_name}"
 }
 
+node_machineconfig_matches_file() {
+  local node_ip="$1"
+  local machineconfig_path="$2"
+  local dry_run_output
+  local matches="false"
+
+  dry_run_output="$(mktemp "${TMPDIR:-/tmp}/pve-k8s-talos-machineconfig-dry-run.XXXXXX")"
+  talosctl --talosconfig "${cluster_talosconfig_path}" \
+    -n "${node_ip}" \
+    apply-config \
+    --mode no-reboot \
+    --dry-run \
+    --file "${machineconfig_path}" >"${dry_run_output}" 2>&1 || true
+
+  if grep -Fxq 'No changes.' "${dry_run_output}"; then
+    matches="true"
+  fi
+  rm -f "${dry_run_output}"
+
+  [[ "${matches}" == "true" ]]
+}
+
 wait_for_node_ready() {
   local node_name="$1"
   local timeout_seconds="${2:-600}"
@@ -845,17 +867,20 @@ stage_secondary_network_worker_configs() {
   for line in "${worker_lines[@]}"; do
     IFS='|' read -r worker_name pve_node_name vm_id worker_ip worker_ip2 <<<"${line}"
 
-    if ! node_has_persistent_machineconfig "${worker_ip}"; then
-      if node_has_secondary_ip_active "${worker_ip}" "${worker_ip2}" && node_primary_default_route_ok "${worker_ip}"; then
-        message "${worker_name} already has the secondary IP active; skipping config stage."
-        continue
-      fi
-    fi
-
     machineconfig_path="$(secondary_network_machineconfig_path "${worker_name}")"
     if [[ ! -f "${machineconfig_path}" ]]; then
       error "Missing rendered machineconfig for ${worker_name}: ${machineconfig_path}" >&2
       exit 1
+    fi
+
+    if ! node_has_persistent_machineconfig "${worker_ip}"; then
+      if node_has_secondary_ip_active "${worker_ip}" "${worker_ip2}" && node_primary_default_route_ok "${worker_ip}"; then
+        if node_machineconfig_matches_file "${worker_ip}" "${machineconfig_path}"; then
+          message "${worker_name} already has the current Talos config and secondary IP active; skipping config stage."
+          continue
+        fi
+        message "${worker_name} has the secondary IP active but its Talos config differs; staging the current rendered config."
+      fi
     fi
 
     if node_has_persistent_machineconfig "${worker_ip}"; then
