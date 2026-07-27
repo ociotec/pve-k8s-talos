@@ -2277,6 +2277,7 @@ reconcile_staged_talos_nodes() {
   local boot_id_before
   local boot_id_after
   local start
+  local reboot_timeout_seconds=900
 
   if [[ ! -f "${cluster_out_dir}/.talos-bootstrap-complete" ]]; then
     return 0
@@ -2356,7 +2357,7 @@ reconcile_staged_talos_nodes() {
       if [[ -n "${boot_id_after}" && "${boot_id_after}" != "${boot_id_before}" ]]; then
         break
       fi
-      if (( $(date +%s) - start >= 600 )); then
+      if (( $(date +%s) - start >= reboot_timeout_seconds )); then
         error "Timed out waiting for ${node_name} to reboot with its staged Talos config." >&2
         return 1
       fi
