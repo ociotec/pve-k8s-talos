@@ -16,8 +16,10 @@ locals {
   keycloak_hostname        = "keycloak.${local.domain}"
   keycloak_tls_secret_name = "keycloak-tls"
   keycloak_image_tag       = "26.6.1"
-  keycloak_tracing_enabled       = true
-  keycloak_tracing_sampler_ratio = 0.10
+  # Tracing is enabled by default. Uncomment to disable it.
+  # keycloak_tracing_enabled = false
+  # The default sampler ratio is 1 so every request is traced. Uncomment to sample 10%.
+  # keycloak_tracing_sampler_ratio = 0.10
 
   keycloak_admin_username        = "admin"
   keycloak_admin_password_length = 24

@@ -57,7 +57,7 @@ locals {
   ) : true
   ingress_nginx_tracing_sampler_ratio_value = can(regex("(?m)^\\s*ingress_nginx_tracing_sampler_ratio\\s*=\\s*([0-9.]+)\\s*$", local.constants_source)[0]) ? (
     tonumber(regex("(?m)^\\s*ingress_nginx_tracing_sampler_ratio\\s*=\\s*([0-9.]+)\\s*$", local.constants_source)[0])
-  ) : 0.10
+  ) : 1
   cert_manager = [
     for doc in split("\n---\n", file("${path.module}/cert-manager.yaml")) :
     yamldecode(doc)

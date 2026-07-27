@@ -35,7 +35,7 @@ locals {
   ) : true
   keycloak_tracing_sampler_ratio_value = can(regex("(?m)^\\s*keycloak_tracing_sampler_ratio\\s*=\\s*([0-9.]+)\\s*$", local.identity_constants_source)[0]) ? (
     tonumber(regex("(?m)^\\s*keycloak_tracing_sampler_ratio\\s*=\\s*([0-9.]+)\\s*$", local.identity_constants_source)[0])
-  ) : 0.10
+  ) : 1
   identity_credentials             = try(local.cluster_credentials.identity, {})
   identity_oidc_client_secrets     = try(local.identity_credentials.oidc_client_secrets, {})
   identity_postgres_password       = try(local.identity_credentials.postgres_password, "")

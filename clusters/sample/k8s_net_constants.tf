@@ -21,8 +21,10 @@ locals {
   ingress_nginx_controller_mem_request    = "512Mi"
   ingress_nginx_controller_mem_limit      = "512Mi"
   # The OTLP collector is provided by the monitoring deployment.
-  ingress_nginx_tracing_enabled       = true
-  ingress_nginx_tracing_sampler_ratio = 0.10
+  # Tracing is enabled by default. Uncomment to disable it.
+  # ingress_nginx_tracing_enabled = false
+  # The default sampler ratio is 1 so every request is traced. Uncomment to sample 10%.
+  # ingress_nginx_tracing_sampler_ratio = 0.10
   ingress_nginx_admission_job_cpu_request = "25m"
   ingress_nginx_admission_job_cpu_limit   = "200m"
   ingress_nginx_admission_job_mem_request = "64Mi"
