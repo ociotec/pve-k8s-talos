@@ -551,6 +551,19 @@ migrate_legacy_talos_bootstrap_marker_state() {
   message "Talos bootstrap marker state migration completed; the tracked marker was preserved."
 }
 
+restore_existing_talos_bootstrap_marker() {
+  local marker_was_present="$1"
+  local bootstrap_marker="${cluster_out_dir}/.talos-bootstrap-complete"
+
+  if [[ "${marker_was_present}" != "true" || -f "${bootstrap_marker}" ]]; then
+    return 0
+  fi
+
+  printf 'ok\n' >"${bootstrap_marker}"
+  chmod 644 "${bootstrap_marker}"
+  message "Restored the tracked Talos bootstrap marker after legacy state migration."
+}
+
 hydrate_workspace_providers_from_cluster_cache() {
   local workspace="$1"
   local target_providers="${workspace}/.terraform/providers"
@@ -2824,12 +2837,14 @@ else
   migrate_legacy_talos_bootstrap_marker_state "${cluster_root_workspace}"
   mapfile -t root_apply_extra_args < <(root_apply_args)
   run tofu -chdir="${cluster_root_workspace}" apply -auto-approve "${root_apply_extra_args[@]}"
+  restore_existing_talos_bootstrap_marker "${talos_bootstrap_marker_was_present}"
 
   if talos_discovery_service_bootstrap_only && [[ "${talos_bootstrap_marker_was_present}" == "false" ]]; then
     message "Initial bootstrap completed; reconciling the root workspace with Talos Discovery Service disabled..."
     run_gen_talos_assets
     migrate_legacy_talos_bootstrap_marker_state "${cluster_root_workspace}"
     run tofu -chdir="${cluster_root_workspace}" apply -auto-approve "${root_apply_extra_args[@]}"
+    restore_existing_talos_bootstrap_marker "true"
   fi
 
   if [[ ! -f "${cluster_talosconfig_path}" ]]; then
