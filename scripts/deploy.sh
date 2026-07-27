@@ -493,6 +493,64 @@ ensure_talos_bootstrap_marker_consistency() {
   fi
 }
 
+migrate_legacy_talos_bootstrap_marker_state() {
+  local workspace="$1"
+  local legacy_address='local_file.talos_bootstrap_complete[0]'
+  local bootstrap_marker="${cluster_out_dir}/.talos-bootstrap-complete"
+  local migration_dir
+  local working_state
+
+  require_cmd jq
+  if ! tofu -chdir="${workspace}" state list 2>/dev/null |
+    grep -Fxq "${legacy_address}"; then
+    return 0
+  fi
+
+  if [[ ! -f "${bootstrap_marker}" ]]; then
+    error "Legacy Talos bootstrap marker state exists, but ${bootstrap_marker} is absent." >&2
+    return 1
+  fi
+
+  message "Migrating the Talos bootstrap marker out of OpenTofu state..."
+  migration_dir="$(mktemp -d "${TMPDIR:-/tmp}/pve-k8s-talos-bootstrap-marker.XXXXXX")"
+  working_state="${migration_dir}/terraform.tfstate"
+  chmod 700 "${migration_dir}"
+
+  if ! tofu -chdir="${workspace}" state pull >"${working_state}"; then
+    rm -rf "${migration_dir}"
+    return 1
+  fi
+  chmod 600 "${working_state}"
+  if ! tofu -chdir="${workspace}" state rm \
+    -state="${working_state}" \
+    -backup="${migration_dir}/terraform.tfstate.backup" \
+    "${legacy_address}" >/dev/null; then
+    rm -rf "${migration_dir}"
+    return 1
+  fi
+  if ! jq -e . "${working_state}" >/dev/null; then
+    rm -rf "${migration_dir}"
+    error "Talos bootstrap marker state migration produced invalid JSON." >&2
+    return 1
+  fi
+
+  cp "${working_state}" "${workspace}/terraform.tfstate"
+  chmod 600 "${workspace}/terraform.tfstate"
+  rm -rf "${migration_dir}"
+
+  if [[ ! -f "${bootstrap_marker}" ]]; then
+    error "Talos bootstrap marker disappeared during state migration." >&2
+    return 1
+  fi
+  if tofu -chdir="${workspace}" state list 2>/dev/null |
+    grep -Fxq "${legacy_address}"; then
+    error "Legacy Talos bootstrap marker resource remains in OpenTofu state after migration." >&2
+    return 1
+  fi
+
+  message "Talos bootstrap marker state migration completed; the tracked marker was preserved."
+}
+
 hydrate_workspace_providers_from_cluster_cache() {
   local workspace="$1"
   local target_providers="${workspace}/.terraform/providers"
@@ -2118,6 +2176,200 @@ cluster_node_name_ip_pairs() {
   ' "${vms_file}"
 }
 
+wait_for_all_kubernetes_nodes_ready() {
+  local timeout_seconds="${1:-600}"
+  local excluded_node="${2:-}"
+  local start
+
+  start="$(date +%s)"
+  while true; do
+    if kubectl --kubeconfig "${cluster_kubeconfig_path}" get nodes -o json 2>/dev/null |
+      jq -e --arg excluded_node "${excluded_node}" '
+        (
+          .items
+          | map(select(.metadata.name != $excluded_node))
+        ) as $nodes
+        | (
+          ($excluded_node != "")
+          or (($nodes | length) > 0)
+        )
+        and all(
+          $nodes[];
+          any(.status.conditions[]?; .type == "Ready" and .status == "True")
+        )
+      ' >/dev/null; then
+      return 0
+    fi
+
+    if (( $(date +%s) - start >= timeout_seconds )); then
+      error "Timed out waiting for all Kubernetes nodes to become Ready." >&2
+      return 1
+    fi
+    sleep 5
+  done
+}
+
+wait_for_controlplane_etcd_ready() {
+  local node_name="$1"
+  local node_ip="$2"
+  local timeout_seconds="${3:-600}"
+  local start
+
+  start="$(date +%s)"
+  while true; do
+    if talosctl --talosconfig "${cluster_talosconfig_path}" \
+      -n "${node_ip}" etcd status >/dev/null 2>&1; then
+      return 0
+    fi
+
+    if (( $(date +%s) - start >= timeout_seconds )); then
+      error "Timed out waiting for etcd on ${node_name} after its Talos reboot." >&2
+      return 1
+    fi
+    sleep 5
+  done
+}
+
+wait_for_machineconfig_match() {
+  local node_name="$1"
+  local node_ip="$2"
+  local machineconfig_path="$3"
+  local timeout_seconds="${4:-180}"
+  local start
+
+  start="$(date +%s)"
+  while true; do
+    if node_machineconfig_matches_file "${node_ip}" "${machineconfig_path}"; then
+      return 0
+    fi
+
+    if (( $(date +%s) - start >= timeout_seconds )); then
+      error "Timed out waiting for ${node_name} to activate the desired Talos machine configuration." >&2
+      return 1
+    fi
+    sleep 5
+  done
+}
+
+reconcile_staged_talos_nodes() {
+  local node_lines=()
+  local unsorted_node_lines=()
+  local line
+  local node_name
+  local node_ip
+  local node_role
+  local primary_controlplane_ip
+  local priority
+  local machineconfig_path
+  local boot_id_before
+  local boot_id_after
+  local start
+
+  if [[ ! -f "${cluster_out_dir}/.talos-bootstrap-complete" ]]; then
+    return 0
+  fi
+
+  require_cmd jq
+  require_cmd kubectl
+  require_cmd talosctl
+  primary_controlplane_ip="$(first_controlplane_ip)"
+  while IFS='|' read -r node_name node_ip; do
+    machineconfig_path="${cluster_root_workspace}/machineconfig-${node_name}.yaml"
+    if [[ ! -f "${machineconfig_path}" ]]; then
+      error "Missing rendered machineconfig for Talos node ${node_name}: ${machineconfig_path}" >&2
+      return 1
+    fi
+    node_role="$(
+      awk '
+        $1 == "type:" && ($2 == "controlplane" || $2 == "worker") {
+          print $2
+          exit
+        }
+      ' "${machineconfig_path}"
+    )"
+    if [[ -z "${node_role}" ]]; then
+      error "Could not determine the Talos node role from ${machineconfig_path}." >&2
+      return 1
+    fi
+    if [[ "${node_role}" == "worker" ]]; then
+      priority=10
+    elif [[ "${node_ip}" == "${primary_controlplane_ip}" ]]; then
+      priority=30
+    else
+      priority=20
+    fi
+    unsorted_node_lines+=(
+      "${priority}|${node_name}|${node_ip}|${node_role}"
+    )
+  done < <(cluster_node_name_ip_pairs)
+  if [[ "${#unsorted_node_lines[@]}" -eq 0 ]]; then
+    error "No Talos nodes were found for staged configuration reconciliation." >&2
+    return 1
+  fi
+  mapfile -t node_lines < <(
+    printf '%s\n' "${unsorted_node_lines[@]}" |
+      sort -t'|' -k1,1n -k2,2
+  )
+
+  message "Reconciling staged Talos configs sequentially..."
+  for line in "${node_lines[@]}"; do
+    IFS='|' read -r priority node_name node_ip node_role <<<"${line}"
+    if ! node_has_persistent_machineconfig "${node_ip}"; then
+      continue
+    fi
+
+    machineconfig_path="${cluster_root_workspace}/machineconfig-${node_name}.yaml"
+    if [[ ! -f "${machineconfig_path}" ]]; then
+      error "Missing rendered machineconfig for staged Talos node ${node_name}: ${machineconfig_path}" >&2
+      return 1
+    fi
+
+    wait_for_all_kubernetes_nodes_ready 600 "${node_name}"
+    boot_id_before="$(talos_boot_id "${node_ip}" || true)"
+    if [[ -z "${boot_id_before}" ]]; then
+      error "Failed to read boot ID from staged Talos node ${node_name}." >&2
+      return 1
+    fi
+
+    message "Rebooting ${node_name} to activate its staged Talos config..."
+    talosctl --talosconfig "${cluster_talosconfig_path}" \
+      -n "${node_ip}" \
+      reboot \
+      --wait=false >/dev/null
+
+    start="$(date +%s)"
+    while true; do
+      boot_id_after="$(talos_boot_id "${node_ip}" || true)"
+      if [[ -n "${boot_id_after}" && "${boot_id_after}" != "${boot_id_before}" ]]; then
+        break
+      fi
+      if (( $(date +%s) - start >= 600 )); then
+        error "Timed out waiting for ${node_name} to reboot with its staged Talos config." >&2
+        return 1
+      fi
+      sleep 5
+    done
+
+    start="$(date +%s)"
+    while node_has_persistent_machineconfig "${node_ip}"; do
+      if (( $(date +%s) - start >= 600 )); then
+        error "Timed out waiting for ${node_name} to promote its staged Talos config." >&2
+        return 1
+      fi
+      sleep 5
+    done
+
+    wait_for_node_ready "${node_name}" 600
+    if [[ "${node_role}" == "controlplane" ]]; then
+      wait_for_controlplane_etcd_ready "${node_name}" "${node_ip}" 600
+    fi
+    wait_for_all_kubernetes_nodes_ready 600
+    wait_for_machineconfig_match \
+      "${node_name}" "${node_ip}" "${machineconfig_path}" 180
+    message "${node_name} recovered with the desired Talos machine configuration."
+  done
+}
+
 append_no_proxy_entry() {
   local entry="$1"
   local current
@@ -2569,12 +2821,14 @@ else
   fi
   run_gen_talos_assets
   run_tofu_init "${cluster_root_workspace}"
+  migrate_legacy_talos_bootstrap_marker_state "${cluster_root_workspace}"
   mapfile -t root_apply_extra_args < <(root_apply_args)
   run tofu -chdir="${cluster_root_workspace}" apply -auto-approve "${root_apply_extra_args[@]}"
 
   if talos_discovery_service_bootstrap_only && [[ "${talos_bootstrap_marker_was_present}" == "false" ]]; then
     message "Initial bootstrap completed; reconciling the root workspace with Talos Discovery Service disabled..."
     run_gen_talos_assets
+    migrate_legacy_talos_bootstrap_marker_state "${cluster_root_workspace}"
     run tofu -chdir="${cluster_root_workspace}" apply -auto-approve "${root_apply_extra_args[@]}"
   fi
 
@@ -2637,6 +2891,7 @@ else
     bootstrap_kubeconfig_path=""
   fi
   stage_secondary_network_worker_configs
+  reconcile_staged_talos_nodes
   reconcile_secondary_network_workers
   reconcile_talos_discovery_service_steady_state
   wait_for_kubernetes_version_convergence "${cluster_constants_path}"

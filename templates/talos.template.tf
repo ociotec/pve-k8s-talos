@@ -26,12 +26,8 @@ locals {
     if !contains(keys(local.secondary_network_worker_vms), name)
   } : local.worker_vms
   machine_configuration_apply_modes = {
-    for name, vm in var.vms : name => (
-      local.network2_enabled &&
-      var.resources[vm.type].k8s_node == "worker" &&
-      trimspace(try(vm.ip2 != null ? vm.ip2 : "", "")) != "" ?
-      "staged_if_needing_reboot" :
-      "auto"
+    for name, _ in var.vms : name => (
+      local.cluster_already_bootstrapped ? "staged_if_needing_reboot" : "auto"
     )
   }
   network_interface_patches = {
