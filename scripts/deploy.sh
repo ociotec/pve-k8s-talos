@@ -852,15 +852,14 @@ stage_secondary_network_worker_configs() {
       fi
     fi
 
-    if node_has_persistent_machineconfig "${worker_ip}"; then
-      message "${worker_name} already has staged Talos config; skipping config stage."
-      continue
-    fi
-
     machineconfig_path="$(secondary_network_machineconfig_path "${worker_name}")"
     if [[ ! -f "${machineconfig_path}" ]]; then
       error "Missing rendered machineconfig for ${worker_name}: ${machineconfig_path}" >&2
       exit 1
+    fi
+
+    if node_has_persistent_machineconfig "${worker_ip}"; then
+      message "${worker_name} already has staged Talos config; replacing it with the current rendered config."
     fi
 
     talosctl --talosconfig "${cluster_talosconfig_path}" \
