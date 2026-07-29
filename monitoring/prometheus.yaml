@@ -120,9 +120,6 @@ rules:
       - watch
   - nonResourceURLs:
       - /metrics
-    # Clear resource fields when taking over legacy roles without [] -> null provider drift.
-    apiGroups: null
-    resources: null
     verbs:
       - get
 ---
