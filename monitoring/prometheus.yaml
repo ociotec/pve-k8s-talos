@@ -120,6 +120,8 @@ rules:
       - watch
   - nonResourceURLs:
       - /metrics
+    apiGroups: []
+    resources: []
     verbs:
       - get
 ---
