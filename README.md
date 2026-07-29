@@ -134,6 +134,9 @@ Shortcut: for a one-command install, jump to [Easy deployment](#easy-deployment)
 
 Bootstrap services that must exist before a Talos cluster starts live under `infra-vms/<name>/`.
 Use this for shared, non-Kubernetes prerequisites such as a private Talos discovery service or, later, an image registry mirror.
+See [Site Bootstrap Node and Offline Delivery Architecture](docs/site-bootstrap-node.md)
+for the current capability boundary and the planned offline registry, Git,
+provider-mirror, release-bundle, and local GitOps model.
 
 Create one from the versioned sample:
 
