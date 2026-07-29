@@ -1446,6 +1446,8 @@ reset_legacy_loki_storage() {
   local live_config
   local legacy_pv
   local active_pods
+  local terminal_pod
+  local terminal_pods
   local deadline
 
   if ! grep -Eq '^[[:space:]]*store:[[:space:]]*tsdb[[:space:]]*$' "${desired_config}" \
@@ -1504,6 +1506,23 @@ reset_legacy_loki_storage() {
       fi
       sleep 5
     done
+  fi
+
+  terminal_pods="$(
+    kubectl -n monitoring get pods -l app=loki -o json 2>/dev/null \
+      | jq -r '
+          .items[]
+          | select(.status.phase == "Succeeded" or .status.phase == "Failed")
+          | select(any(.spec.volumes[]?; .persistentVolumeClaim.claimName == "loki-data"))
+          | .metadata.name
+        '
+  )"
+  if [[ -n "${terminal_pods}" ]]; then
+    message "Deleting terminal Loki pods that still reference monitoring/loki-data."
+    while IFS= read -r terminal_pod; do
+      [[ -n "${terminal_pod}" ]] || continue
+      kubectl -n monitoring delete pod "${terminal_pod}" --wait=true --timeout=120s >/dev/null
+    done <<<"${terminal_pods}"
   fi
 
   kubectl -n monitoring delete pvc loki-data --wait=true --timeout=300s >/dev/null
