@@ -826,12 +826,19 @@ wait_for_proxmox_task_completion() {
 talos_boot_id() {
   local node_ip="$1"
 
-  talosctl --talosconfig "${cluster_talosconfig_path}" -n "${node_ip}" read /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n'
+  timeout --kill-after=5s 15s \
+    talosctl --talosconfig "${cluster_talosconfig_path}" \
+      -n "${node_ip}" \
+      read /proc/sys/kernel/random/boot_id 2>/dev/null |
+    tr -d '\r\n'
 }
 
 node_has_persistent_machineconfig() {
   local node_ip="$1"
-  talosctl --talosconfig "${cluster_talosconfig_path}" -n "${node_ip}" get machineconfig persistent 1>/dev/null 2>&1
+  timeout --kill-after=5s 15s \
+    talosctl --talosconfig "${cluster_talosconfig_path}" \
+      -n "${node_ip}" \
+      get machineconfig persistent 1>/dev/null 2>&1
 }
 
 node_has_secondary_ip_active() {
@@ -861,12 +868,13 @@ node_machineconfig_matches_file() {
   local matches="false"
 
   dry_run_output="$(mktemp "${TMPDIR:-/tmp}/pve-k8s-talos-machineconfig-dry-run.XXXXXX")"
-  talosctl --talosconfig "${cluster_talosconfig_path}" \
-    -n "${node_ip}" \
-    apply-config \
-    --mode no-reboot \
-    --dry-run \
-    --file "${machineconfig_path}" >"${dry_run_output}" 2>&1 || true
+  timeout --kill-after=5s 15s \
+    talosctl --talosconfig "${cluster_talosconfig_path}" \
+      -n "${node_ip}" \
+      apply-config \
+      --mode no-reboot \
+      --dry-run \
+      --file "${machineconfig_path}" >"${dry_run_output}" 2>&1 || true
 
   if grep -Fxq 'No changes.' "${dry_run_output}"; then
     matches="true"
@@ -933,6 +941,7 @@ stage_secondary_network_worker_configs() {
   fi
 
   require_cmd talosctl
+  require_cmd timeout
 
   message "Staging secondary-network Talos config on workers..."
   for line in "${worker_lines[@]}"; do
@@ -1000,6 +1009,7 @@ reconcile_secondary_network_workers() {
   require_cmd curl
   require_cmd talosctl
   require_cmd kubectl
+  require_cmd timeout
 
   message "Reconciling staged secondary-network config on workers..."
   for line in "${worker_lines[@]}"; do
@@ -2274,10 +2284,8 @@ reconcile_staged_talos_nodes() {
   local primary_controlplane_ip
   local priority
   local machineconfig_path
-  local boot_id_before
-  local boot_id_after
   local start
-  local reboot_timeout_seconds=900
+  local activation_timeout_seconds=900
 
   if [[ ! -f "${cluster_out_dir}/.talos-bootstrap-complete" ]]; then
     return 0
@@ -2286,6 +2294,7 @@ reconcile_staged_talos_nodes() {
   require_cmd jq
   require_cmd kubectl
   require_cmd talosctl
+  require_cmd timeout
   primary_controlplane_ip="$(first_controlplane_ip)"
   while IFS='|' read -r node_name node_ip; do
     machineconfig_path="${cluster_root_workspace}/machineconfig-${node_name}.yaml"
@@ -2339,11 +2348,6 @@ reconcile_staged_talos_nodes() {
     fi
 
     wait_for_all_kubernetes_nodes_ready 600 "${node_name}"
-    boot_id_before="$(talos_boot_id "${node_ip}" || true)"
-    if [[ -z "${boot_id_before}" ]]; then
-      error "Failed to read boot ID from staged Talos node ${node_name}." >&2
-      return 1
-    fi
 
     message "Rebooting ${node_name} to activate its staged Talos config..."
     talosctl --talosconfig "${cluster_talosconfig_path}" \
@@ -2353,21 +2357,12 @@ reconcile_staged_talos_nodes() {
 
     start="$(date +%s)"
     while true; do
-      boot_id_after="$(talos_boot_id "${node_ip}" || true)"
-      if [[ -n "${boot_id_after}" && "${boot_id_after}" != "${boot_id_before}" ]]; then
+      if ! node_has_persistent_machineconfig "${node_ip}" \
+        && node_machineconfig_matches_file "${node_ip}" "${machineconfig_path}"; then
         break
       fi
-      if (( $(date +%s) - start >= reboot_timeout_seconds )); then
-        error "Timed out waiting for ${node_name} to reboot with its staged Talos config." >&2
-        return 1
-      fi
-      sleep 5
-    done
-
-    start="$(date +%s)"
-    while node_has_persistent_machineconfig "${node_ip}"; do
-      if (( $(date +%s) - start >= 600 )); then
-        error "Timed out waiting for ${node_name} to promote its staged Talos config." >&2
+      if (( $(date +%s) - start >= activation_timeout_seconds )); then
+        error "Timed out waiting for ${node_name} to reboot and activate its staged Talos config." >&2
         return 1
       fi
       sleep 5
