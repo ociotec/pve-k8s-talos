@@ -1450,6 +1450,8 @@ reset_legacy_loki_storage() {
   local terminal_pods
   local deadline
 
+  loki_storage_recreated=false
+
   if ! grep -Eq '^[[:space:]]*store:[[:space:]]*tsdb[[:space:]]*$' "${desired_config}" \
     || ! grep -Eq '^[[:space:]]*schema:[[:space:]]*v13[[:space:]]*$' "${desired_config}" \
     || ! grep -Eq '^[[:space:]]*pve-k8s-talos/storage-format:[[:space:]]*tsdb-v13[[:space:]]*$' "${desired_config}"; then
@@ -1529,6 +1531,7 @@ reset_legacy_loki_storage() {
   if [[ -n "${legacy_pv}" ]] && kubectl get "persistentvolume/${legacy_pv}" >/dev/null 2>&1; then
     kubectl wait --for=delete "persistentvolume/${legacy_pv}" --timeout=300s >/dev/null
   fi
+  loki_storage_recreated=true
 }
 
 prepare_k8s_net_workspace() {
@@ -3186,12 +3189,16 @@ else
   run tofu -chdir="${cluster_monitoring_workspace}" validate
   reset_legacy_loki_storage
   monitoring_prometheus_config_hash_before=""
+  monitoring_loki_config_hash_before=""
   monitoring_tempo_config_rv_before=""
   monitoring_grafana_datasources_rv_before=""
   monitoring_grafana_dashboard_provider_rv_before=""
   if kubectl get namespace monitoring >/dev/null 2>&1; then
     monitoring_prometheus_config_hash_before="$(
       kubernetes_configmap_key_sha256 "monitoring" "prometheus-config" "prometheus.yml"
+    )"
+    monitoring_loki_config_hash_before="$(
+      kubernetes_configmap_key_sha256 "monitoring" "loki-config" "loki.yaml"
     )"
     monitoring_tempo_config_rv_before="$(
       kubernetes_resource_version "monitoring" "configmap" "tempo-config"
@@ -3207,6 +3214,9 @@ else
   monitoring_prometheus_config_hash_after="$(
     kubernetes_configmap_key_sha256 "monitoring" "prometheus-config" "prometheus.yml"
   )"
+  monitoring_loki_config_hash_after="$(
+    kubernetes_configmap_key_sha256 "monitoring" "loki-config" "loki.yaml"
+  )"
   monitoring_tempo_config_rv_after="$(
     kubernetes_resource_version "monitoring" "configmap" "tempo-config"
   )"
@@ -3217,10 +3227,15 @@ else
     kubernetes_resource_version "monitoring" "configmap" "grafana-dashboard-provider"
   )"
   monitoring_prometheus_config_changed=false
+  monitoring_loki_restart_needed=false
   monitoring_tempo_restart_needed=false
   monitoring_grafana_restart_needed=false
   if kubernetes_resource_changed "${monitoring_prometheus_config_hash_before}" "${monitoring_prometheus_config_hash_after}"; then
     monitoring_prometheus_config_changed=true
+  fi
+  if kubernetes_resource_changed "${monitoring_loki_config_hash_before}" "${monitoring_loki_config_hash_after}" \
+    && [[ "${loki_storage_recreated}" != "true" ]]; then
+    monitoring_loki_restart_needed=true
   fi
   if kubernetes_resource_changed "${monitoring_tempo_config_rv_before}" "${monitoring_tempo_config_rv_after}"; then
     monitoring_tempo_restart_needed=true
@@ -3236,6 +3251,10 @@ else
   if [[ "${monitoring_tempo_restart_needed}" == "true" ]]; then
     message "Restarting Tempo to reload tracing metrics configuration..."
     kubectl -n monitoring rollout restart deploy/tempo 1>/dev/null
+  fi
+  if [[ "${monitoring_loki_restart_needed}" == "true" ]]; then
+    message "Restarting Loki to reload ingestion and storage configuration..."
+    kubectl -n monitoring rollout restart deploy/loki 1>/dev/null
   fi
   message "Waiting for monitoring PVCs, workloads, and endpoints to become ready..."
   monitoring_deployments=(grafana-postgres grafana loki tempo otel-collector prometheus kube-state-metrics)

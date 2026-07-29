@@ -102,6 +102,12 @@ locals {
   beyla_mem_limit_value = can(regex("(?m)^\\s*beyla_mem_limit\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]) ? (
     regex("(?m)^\\s*beyla_mem_limit\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]
   ) : "256Mi"
+  loki_ingestion_rate_mb_value = can(regex("(?m)^\\s*loki_ingestion_rate_mb\\s*=\\s*([0-9.]+)\\s*$", local.monitoring_constants_source)[0]) ? (
+    tonumber(regex("(?m)^\\s*loki_ingestion_rate_mb\\s*=\\s*([0-9.]+)\\s*$", local.monitoring_constants_source)[0])
+  ) : 10
+  loki_ingestion_burst_size_mb_value = can(regex("(?m)^\\s*loki_ingestion_burst_size_mb\\s*=\\s*([0-9.]+)\\s*$", local.monitoring_constants_source)[0]) ? (
+    tonumber(regex("(?m)^\\s*loki_ingestion_burst_size_mb\\s*=\\s*([0-9.]+)\\s*$", local.monitoring_constants_source)[0])
+  ) : 30
   beyla_sampling_ratio_value = can(regex("(?m)^\\s*beyla_sampling_ratio\\s*=\\s*([0-9.]+)\\s*$", local.monitoring_constants_source)[0]) ? (
     tonumber(regex("(?m)^\\s*beyla_sampling_ratio\\s*=\\s*([0-9.]+)\\s*$", local.monitoring_constants_source)[0])
   ) : 0.10
@@ -660,14 +666,16 @@ locals {
   ]
   loki_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/loki.yaml", {
-      storage_class     = local.loki_storage_class
-      loki_storage_size = local.loki_storage_size_value
-      loki_retention    = local.loki_retention
-      loki_image_tag    = local.loki_image_tag
-      loki_cpu_request  = local.loki_cpu_request_value
-      loki_cpu_limit    = local.loki_cpu_limit_value
-      loki_mem_request  = local.loki_mem_request_value
-      loki_mem_limit    = local.loki_mem_limit_value
+      storage_class                = local.loki_storage_class
+      loki_storage_size            = local.loki_storage_size_value
+      loki_retention               = local.loki_retention
+      loki_image_tag               = local.loki_image_tag
+      loki_ingestion_rate_mb       = local.loki_ingestion_rate_mb_value
+      loki_ingestion_burst_size_mb = local.loki_ingestion_burst_size_mb_value
+      loki_cpu_request             = local.loki_cpu_request_value
+      loki_cpu_limit               = local.loki_cpu_limit_value
+      loki_mem_request             = local.loki_mem_request_value
+      loki_mem_limit               = local.loki_mem_limit_value
     })) :
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
@@ -876,6 +884,13 @@ check "tls_source_valid" {
   assert {
     condition     = contains(["ca_issuer", "preissued"], local.tls_source)
     error_message = format("tls_source must be \"ca_issuer\" or \"preissued\", got %q", local.tls_source)
+  }
+}
+
+check "loki_ingestion_limits_valid" {
+  assert {
+    condition     = local.loki_ingestion_rate_mb_value > 0 && local.loki_ingestion_burst_size_mb_value > 0
+    error_message = "loki_ingestion_rate_mb and loki_ingestion_burst_size_mb must both be greater than zero."
   }
 }
 

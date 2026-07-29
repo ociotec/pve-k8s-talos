@@ -44,6 +44,8 @@ data:
       delete_request_store: filesystem
 
     limits_config:
+      ingestion_rate_mb: ${loki_ingestion_rate_mb}
+      ingestion_burst_size_mb: ${loki_ingestion_burst_size_mb}
       max_query_lookback: ${loki_retention}
       retention_period: ${loki_retention}
       volume_enabled: true

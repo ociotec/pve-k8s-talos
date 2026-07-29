@@ -26,7 +26,11 @@ locals {
   # Docs: https://prometheus.io/docs/prometheus/latest/storage/#right-sizing-retention-size
   prometheus_retention_size_percent = 80
   loki_retention                    = "168h" # 7 days
-  tempo_retention                   = "336h" # 14 days
+  # Aggregate per-tenant ingestion limit and short-burst capacity. Override these
+  # only when measured log volume and Loki CPU/memory capacity justify it.
+  loki_ingestion_rate_mb       = 10
+  loki_ingestion_burst_size_mb = 30
+  tempo_retention              = "336h" # 14 days
 
   grafana_image_tag        = "13.0.2"
   prometheus_image_tag     = "v3.12.0"
