@@ -5791,7 +5791,7 @@
   "timepicker": {},
   "timezone": "browser",
   "title": "Ceph cluster",
-  "uid": "tbO9LAiZK",
+  "uid": "rook-ceph-cluster",
   "version": 1,
   "weekStart": ""
 }

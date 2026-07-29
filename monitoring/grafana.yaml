@@ -645,6 +645,10 @@ spec:
                   cat "$response"
                   exit 1
                 fi
+                if grep -q '"provisioned":true' "$response"; then
+                  echo "Keeping provisioned dashboard $legacy_uid"
+                  return 0
+                fi
                 if grep -q "\"title\":\"$legacy_title\"" "$response"; then
                   echo "Deleting legacy dashboard $legacy_uid"
                   curl_grafana -X DELETE "$api_url/api/dashboards/uid/$legacy_uid" >/dev/null
@@ -663,6 +667,7 @@ spec:
               ensure_folder "infrastructure-s3-storage" "S3 storage" "infrastructure"
 
               cleanup_legacy_dashboard "grafana" "CoreDNS internal metrics"
+              cleanup_legacy_dashboard "tbO9LAiZK" "Ceph cluster"
 
               sync_dir ${grafana_dashboard_root_mount_path} infrastructure
               sync_dir /var/lib/grafana/dashboards/infrastructure/k8s infrastructure-k8s
