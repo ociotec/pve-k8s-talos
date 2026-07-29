@@ -23,18 +23,18 @@ data:
 
     schema_config:
       configs:
-        - from: 2024-01-01
-          store: boltdb-shipper
+        - from: 2024-04-01
+          store: tsdb
           object_store: filesystem
-          schema: v12
+          schema: v13
           index:
             prefix: index_
             period: 24h
 
     storage_config:
-      boltdb_shipper:
-        active_index_directory: /data/index
-        cache_location: /data/cache
+      tsdb_shipper:
+        active_index_directory: /data/tsdb-index
+        cache_location: /data/tsdb-cache
       filesystem:
         directory: /data/chunks
 
@@ -61,6 +61,7 @@ metadata:
     app.kubernetes.io/part-of: loki
     app.kubernetes.io/managed-by: infrastructure
     pve-k8s-talos/section: monitoring
+    pve-k8s-talos/storage-format: tsdb-v13
     pve-k8s-talos/storage-role: logs
 spec:
   accessModes:

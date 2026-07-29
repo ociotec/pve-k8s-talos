@@ -1440,6 +1440,78 @@ reload_prometheus_config() {
   kubectl -n monitoring exec deploy/prometheus -- sh -ec 'kill -HUP 1' 1>/dev/null
 }
 
+reset_legacy_loki_storage() {
+  local desired_config="${cluster_monitoring_workspace}/loki.yaml"
+  local storage_format
+  local live_config
+  local legacy_pv
+  local active_pods
+  local deadline
+
+  if ! grep -Eq '^[[:space:]]*store:[[:space:]]*tsdb[[:space:]]*$' "${desired_config}" \
+    || ! grep -Eq '^[[:space:]]*schema:[[:space:]]*v13[[:space:]]*$' "${desired_config}" \
+    || ! grep -Eq '^[[:space:]]*pve-k8s-talos/storage-format:[[:space:]]*tsdb-v13[[:space:]]*$' "${desired_config}"; then
+    error "Refusing Loki storage reconciliation because the desired manifest is not explicitly TSDB v13." >&2
+    return 1
+  fi
+
+  if ! kubectl -n monitoring get pvc loki-data >/dev/null 2>&1; then
+    return 0
+  fi
+
+  storage_format="$(
+    kubectl -n monitoring get pvc loki-data \
+      -o 'go-template={{with index .metadata.labels "pve-k8s-talos/storage-format"}}{{.}}{{end}}' 2>/dev/null || true
+  )"
+  if [[ "${storage_format}" == "tsdb-v13" ]]; then
+    return 0
+  fi
+  if [[ -n "${storage_format}" ]]; then
+    error "Refusing to delete Loki PVC with unknown storage format label ${storage_format}." >&2
+    return 1
+  fi
+
+  live_config="$(
+    kubectl -n monitoring get configmap loki-config \
+      -o jsonpath='{.data.loki\.yaml}' 2>/dev/null || true
+  )"
+  if ! grep -Eq '^[[:space:]]*store:[[:space:]]*boltdb-shipper[[:space:]]*$' <<<"${live_config}" \
+    || ! grep -Eq '^[[:space:]]*schema:[[:space:]]*v12[[:space:]]*$' <<<"${live_config}"; then
+    error "Loki PVC has no storage format label and the live configuration is not BoltDB Shipper v12; refusing destructive reconciliation." >&2
+    return 1
+  fi
+
+  legacy_pv="$(
+    kubectl -n monitoring get pvc loki-data \
+      -o jsonpath='{.spec.volumeName}'
+  )"
+  message "Legacy Loki BoltDB Shipper v12 storage detected; recreating monitoring/loki-data as TSDB v13."
+
+  if kubectl -n monitoring get deployment loki >/dev/null 2>&1; then
+    kubectl -n monitoring scale deployment/loki --replicas=0 >/dev/null
+    deadline=$((SECONDS + 300))
+    while true; do
+      active_pods="$(
+        kubectl -n monitoring get pods -l app=loki -o json 2>/dev/null \
+          | jq -r '[.items[] | select(.status.phase != "Succeeded" and .status.phase != "Failed")] | length'
+      )"
+      if [[ "${active_pods}" == "0" ]]; then
+        break
+      fi
+      if (( SECONDS >= deadline )); then
+        error "Timed out waiting for Loki pods to release monitoring/loki-data." >&2
+        return 1
+      fi
+      sleep 5
+    done
+  fi
+
+  kubectl -n monitoring delete pvc loki-data --wait=true --timeout=300s >/dev/null
+  if [[ -n "${legacy_pv}" ]] && kubectl get "persistentvolume/${legacy_pv}" >/dev/null 2>&1; then
+    kubectl wait --for=delete "persistentvolume/${legacy_pv}" --timeout=300s >/dev/null
+  fi
+}
+
 prepare_k8s_net_workspace() {
   local workspace="${cluster_k8s_net_workspace}"
 
@@ -3092,6 +3164,8 @@ else
   prepare_monitoring_workspace
   message "Deploying monitoring stack..."
   run_tofu_init "${cluster_monitoring_workspace}"
+  run tofu -chdir="${cluster_monitoring_workspace}" validate
+  reset_legacy_loki_storage
   monitoring_prometheus_config_hash_before=""
   monitoring_tempo_config_rv_before=""
   monitoring_grafana_datasources_rv_before=""

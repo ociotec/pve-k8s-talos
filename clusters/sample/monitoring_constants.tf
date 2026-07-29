@@ -30,7 +30,7 @@ locals {
 
   grafana_image_tag        = "13.0.2"
   prometheus_image_tag     = "v3.12.0"
-  loki_image_tag           = "3.7.2"
+  loki_image_tag           = "3.7.3"
   tempo_image_tag          = "2.10.5"
   otel_collector_image_tag = "0.155.0"
   # Disabled by default because this opens an Internet-facing trace-ingest endpoint.

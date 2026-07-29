@@ -961,7 +961,7 @@
       "fieldConfig": {
         "defaults": {
           "min": 0,
-          "unit": "s"
+          "unit": "ops"
         },
         "overrides": []
       },
@@ -983,24 +983,25 @@
           "showLegend": true
         },
         "tooltip": {
-          "mode": "multi"
+          "mode": "multi",
+          "sort": "desc"
         }
       },
       "targets": [
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.99, sum by (le, operation, status_code) (rate(loki_boltdb_shipper_request_duration_seconds_bucket{namespace=~\"$namespace\",pod=~\"$pod\"}[$__rate_interval])))",
-          "legendFormat": "p99 {{operation}} {{status_code}}",
+          "expr": "sum by (status, source) (rate(loki_tsdb_build_index_attempts_total{namespace=~\"$namespace\",pod=~\"$pod\"}[$__rate_interval]))",
+          "legendFormat": "index build {{source}} {{status}}",
           "refId": "A"
         },
         {
           "editorMode": "code",
-          "expr": "histogram_quantile(0.50, sum by (le, operation, status_code) (rate(loki_boltdb_shipper_request_duration_seconds_bucket{namespace=~\"$namespace\",pod=~\"$pod\"}[$__rate_interval])))",
-          "legendFormat": "p50 {{operation}} {{status_code}}",
+          "expr": "sum by (status) (rate(loki_tsdb_head_rotation_attempts_total{namespace=~\"$namespace\",pod=~\"$pod\"}[$__rate_interval]))",
+          "legendFormat": "head rotation {{status}}",
           "refId": "B"
         }
       ],
-      "title": "BoltDB shipper latency",
+      "title": "TSDB index activity",
       "type": "timeseries"
     },
     {
