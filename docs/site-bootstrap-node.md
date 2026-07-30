@@ -19,7 +19,7 @@ DEVELOPMENT AND MANAGEMENT CLUSTER
             ONLINE SITE                              OFFLINE SITE
 ┌─────────────────────────────────┐       ┌─────────────────────────────────┐
 │ BOOTSTRAP NODE                  │       │ BOOTSTRAP NODE                  │
-│ Discovery │ Bootstrap tools     │       │ Discovery │ OCI │ Git │ Tools   │
+│ Discovery │ Bootstrap tools     │       │ Discovery │ Gitea │ Tools       │
 └────────────────┬────────────────┘       └────────────────┬────────────────┘
                  │ bootstrap                               │ bootstrap + artifacts
                  ▼                                         ▼
@@ -73,8 +73,8 @@ environment.
 | Bootstrap node | VM, static networking, extra disks, trusted CA | Available |
 | Bootstrap node | Docker runtime | Available |
 | Bootstrap node | Talos Discovery Service with TLS | Available |
-| Bootstrap node | Local OCI registry | Pending |
-| Bootstrap node | Local Git upstreams | Pending |
+| Bootstrap node | Docker Compose service stack | Pending |
+| Bootstrap node | Gitea with PostgreSQL for Git, images, and charts | Pending |
 | Bootstrap node | OpenTofu provider mirror and deployment tools | Pending |
 | Bootstrap node | Signed bundle import, verification, and backup | Pending |
 | Target cluster | Networking, ingress, certificates, and load balancing | Available |
@@ -91,35 +91,132 @@ Actual platform-service enablement remains environment-specific.
 | Development cluster | Bootstrap node | Target cluster |
 | --- | --- | --- |
 | Build and test software | Make the site self-sufficient | Run applications |
-| Publish approved artifacts | Store local copies | Pull local artifacts |
+| Publish approved artifacts | Store local copies in Gitea | Pull local artifacts |
 | Manage connected clusters | Bootstrap and recover Kubernetes | Reconcile locally when offline |
 
 Do not run Jenkins or build application images at every target site. Build
 once, verify once, and promote the same immutable artifacts.
 
-## Helm and the OCI registry
+## Helm, OCI, and Gitea
 
 Helm 3 only needs a client and access to the Kubernetes API. There is no
 required Helm server inside the cluster.
 
-One OCI registry can store both kinds of artifact:
+Harbor remains the authoritative registry in the development environment. It
+stores approved images and charts before they are added to a release bundle.
+
+At an offline site, Gitea is the recommended local service for three purposes:
 
 ```text
-OCI registry
-├── container images
-└── Helm charts
+Gitea
+├── Git repositories
+└── OCI registry
+    ├── container images
+    └── OCI Helm charts
 ```
 
-Therefore, Harbor can be the central source for both images and charts. A
-separate ChartMuseum service is unnecessary.
+This keeps the bootstrap VM small and simple:
 
-Recommended model:
+- Gitea is open source and designed for resource-constrained servers;
+- one application and certificate replaces separate Git, image-registry, and
+  chart-registry services;
+- its OCI registry supports both container images and Helm charts;
+- shared blobs are deduplicated and cleanup rules can limit retained versions;
+- the UI, API, users, organizations, tokens, and SSH/HTTPS access remain
+  available when operators need them.
 
-| Location | Recommendation |
+Gitea supports PostgreSQL and recommends selecting the final database type
+from the first installation because later database conversion is not a
+well-tested path. PostgreSQL is preferred over SQLite here for stronger
+operational consistency and future growth.
+
+```text
+Docker Compose
+├── Gitea
+└── PostgreSQL
+```
+
+The PostgreSQL major version must be supported, pinned, and included in the
+offline release bundle. Minor upgrades and major migrations must be deliberate
+rather than following a floating `latest` tag.
+
+Gitea documents 2 CPU and 1 GB of memory as sufficient for a small workload.
+A practical bootstrap VM baseline with PostgreSQL, Discovery Service, and
+deployment tools is:
+
+| Resource | Initial sizing |
+| --- | ---: |
+| CPU | 4 vCPU |
+| Memory | 8 GB |
+| OS disk | 40 GB |
+| Expandable data disk | 128–250 GB |
+
+Artifact volume, especially retained container images, determines disk usage.
+Git repositories and Helm charts are normally much smaller.
+
+### Container runtime model
+
+Long-running application services on the bootstrap VM should run as
+containers. Host-level responsibilities remain outside containers:
+
+```text
+Debian host
+├── Docker Engine
+│   ├── Docker Compose
+│   └── containers
+│       ├── Talos Discovery Service
+│       ├── Gitea
+│       └── PostgreSQL
+├── TLS reverse proxy and host trust
+├── disks, mounts, backups, and restore
+└── deployment CLI tools and provider mirror
+```
+
+The current VM implementation already installs Docker and runs Talos Discovery
+Service as a container managed by systemd. The planned implementation should
+add Docker Compose v2 and define Gitea and PostgreSQL as one declarative stack.
+
+Docker Compose is preferred to individual `docker run` commands once services
+have dependencies. It provides one versioned definition for networks, volumes,
+health checks, restart policies, and startup order.
+
+Docker Swarm is not recommended for a single bootstrap VM:
+
+- a one-node swarm still fails when that VM fails;
+- it adds manager state, overlay networking, and another recovery procedure;
+- moving a container does not move or recover PostgreSQL and OCI data;
+- real Swarm high availability requires multiple hosts, manager quorum, and
+  replicated storage.
+
+VM backup or a passive replacement is simpler and provides the relevant
+recovery model. Swarm should only be reconsidered if a site later provides at
+least three independent infra hosts and a separate design for PostgreSQL and
+artifact-storage high availability.
+
+Gitea data and PostgreSQL data must use separate persistent paths on the
+dedicated data disk. PostgreSQL must expose no host port, accept connections
+only from the private Compose network, use a health check, and store its
+password outside the versioned Compose file. Backups must capture both the
+Gitea data directory and a consistent PostgreSQL backup.
+
+Recommended identities:
+
+| Identity | Access |
 | --- | --- |
-| Development cluster | Harbor as the authoritative registry |
-| Small offline site | Lightweight OCI registry on the bootstrap node |
-| Larger offline site | Harbor when its UI, RBAC, retention, or scanning justify the extra resources |
+| Bundle importer | Write Git and OCI |
+| Argo CD | Read Git and Helm artifacts |
+| Talos and Kubernetes | Read container images |
+| Deployment workflow | Write only repositories that synchronize runtime state |
+
+The central environment remains responsible for building, scanning, signing,
+and approving artifacts. The offline Gitea instance distributes those
+immutable artifacts locally; it does not need to repeat Harbor's scanning or
+replication functions.
+
+A suitable cleanup policy keeps at least the three most recently published
+versions of every image or chart, all versions newer than a safety period, and
+explicit `stable` or `rollback` versions. Deployments should use versions or
+digests rather than `latest`.
 
 A proxy cache is insufficient for a fully offline site. Every required
 artifact must be imported before it is needed.
@@ -155,24 +252,87 @@ Jenkins + Harbor + Git
  Signed release bundle
           │
           ▼
- Bootstrap node imports
- ├── images and Helm charts
- ├── Git revisions
+ Bootstrap node verifies and imports
+ ├── Git revisions ────────────────► Gitea Git
+ ├── images and Helm charts ───────► Gitea OCI
  ├── OpenTofu providers
- ├── Talos assets
+ ├── Talos assets and images
  └── deployment tools
           │
           ▼
- Local Argo CD ──► local applications
+ Create Talos and Kubernetes
+          │
+          ▼
+ Install local Argo CD
+          │
+          ▼
+ Argo CD reads Gitea ──► applications
 ```
 
 A central Argo CD instance cannot continuously manage a disconnected cluster.
 Run Argo CD in each offline target cluster and point it only at site-local Git
-and OCI endpoints.
+and OCI endpoints. Argo CD Core is suitable when no local UI, OIDC, or Argo CD
+API is required; the full installation remains an option for sites that need
+those interfaces.
 
-For a small first deployment, an operator may run Helm from the bootstrap node.
-This works, but does not continuously correct configuration drift as Argo CD
-does.
+### Offline installation boundary
+
+Argo CD cannot install itself into a cluster that does not yet exist. The
+initial deployment has a small, explicit bootstrap boundary:
+
+```text
+Bootstrap node                         Target cluster
+──────────────                         ──────────────
+1. Start Gitea + PostgreSQL with Compose
+2. Verify release bundle
+3. Import Git and OCI into Gitea
+4. Create Talos and Kubernetes ──────► cluster becomes available
+5. Install Argo CD from local assets ─► Argo CD becomes available
+6. Seed the root Application ─────────► Argo CD takes control
+```
+
+Step 4 uses the existing OpenTofu platform deployment path. Steps 5–6 are
+planned additions and must also use only bundled manifests, charts, tools, and
+images. After the root `Application` is created:
+
+```text
+Gitea Git ───────► Argo CD ───────► Application desired state
+Gitea Helm OCI ──► Argo CD
+Gitea images ─────────────────────► Talos and Kubernetes runtimes
+```
+
+Argo CD then continuously corrects drift and deploys later releases from the
+local Gitea instance. The platform itself remains managed by the existing
+OpenTofu deployment path for now. A release update repeats bundle verification
+and import, then advances the approved application Git revision. It does not
+rebuild artifacts at the site.
+
+### Why Argo Rollouts is not part of the baseline
+
+Argo Rollouts is useful when old and new versions can run at the same time
+during Blue/Green or Canary delivery. That is not true for singleton services
+whose processing is stateful and ordered, such as an event processor where
+the next Kafka event depends on previous events.
+
+```text
+Unsupported baseline                 Required replacement
+────────────────────                 ────────────────────
+old version ─┐                       stop old version
+             ├── overlap                     │
+new version ─┘                               ▼
+                                        start new version
+```
+
+These services should normally use one replica with a Kubernetes Deployment
+`Recreate` strategy. The application must stop consuming, finish or abort the
+current unit of work safely, persist state and offsets, and exit before the new
+version starts. Kafka can retain incoming events during the controlled
+interruption.
+
+Argo CD still controls the desired version and performs rollback through a Git
+revision change. Argo Rollouts may be added later for stateless or replicated
+services that explicitly support concurrent versions, but installing it is
+not required for the baseline architecture.
 
 ## Local Git requirement
 
@@ -181,12 +341,13 @@ repositories before and after deployment:
 
 ```text
 Platform repository ──┐
-                      ├── local Git upstream on bootstrap node
+                      ├── Gitea on the bootstrap node
 Environment repository┘
 ```
 
-An offline site therefore needs local Git upstreams. These can be a small Git
-service or bare repositories served over SSH. Copying only working directories
+An offline site therefore needs Gitea to act as the local upstream. The
+deployment identity requires limited write access because the deployment
+workflow records allowlisted runtime state. Copying only working directories
 is not an equivalent replacement.
 
 ## Release bundle
@@ -222,7 +383,7 @@ application secrets.
 ```text
 Recover bootstrap VM
         │
-Restore registry and Git
+Restore Gitea and PostgreSQL data
         │
 Create Talos/Kubernetes cluster
         │
@@ -239,8 +400,8 @@ Minimum safeguards:
 - HTTPS and trusted certificates;
 - separate import and read-only pull identities;
 - immutable digests and signed release bundles;
-- dedicated artifact storage;
-- backups of registry, Git, certificates, and configuration;
+- dedicated Gitea and PostgreSQL data storage;
+- consistent backups of Gitea, PostgreSQL, certificates, and configuration;
 - a second copy of the latest approved release;
 - a tested restore procedure.
 
@@ -255,10 +416,10 @@ passive replacement.
    Jenkins + Harbor + central Argo CD
                  │
 2. Site artifacts
-   Local OCI registry + Talos images
+   Compose + Gitea + PostgreSQL
                  │
 3. Complete offline bootstrap
-   Git + providers + tools + signed bundles
+   Git + OCI + Talos images + providers + signed bundles
                  │
 4. Local GitOps
    Argo CD in each offline cluster
@@ -276,7 +437,27 @@ passive replacement.
   <https://helm.sh/docs/topics/registries/>
 - Harbor OCI Helm charts:
   <https://goharbor.io/docs/main/working-with-projects/working-with-oci/working-with-helm-oci-charts/>
+- Gitea overview and resource requirements:
+  <https://docs.gitea.com/>
+- Gitea OCI container and Helm chart registry:
+  <https://docs.gitea.com/usage/packages/container/>
+- Gitea package deduplication and cleanup:
+  <https://docs.gitea.com/usage/packages/storage/>
+- Gitea installation with Docker and PostgreSQL:
+  <https://docs.gitea.com/installation/install-with-docker/>
+- Gitea database preparation:
+  <https://docs.gitea.com/installation/database-prep/>
+- Docker Compose on a single production server:
+  <https://docs.docker.com/compose/how-tos/production/>
+- Docker Swarm mode:
+  <https://docs.docker.com/engine/swarm/>
 - Argo CD Helm integration:
   <https://argo-cd.readthedocs.io/en/stable/user-guide/helm/>
+- Argo CD Core:
+  <https://argo-cd.readthedocs.io/en/stable/operator-manual/core/>
+- Argo Rollouts:
+  <https://argoproj.github.io/argo-rollouts/>
+- Kubernetes Deployment strategies:
+  <https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy>
 - OpenTofu provider mirrors:
   <https://opentofu.org/docs/cli/commands/providers/mirror/>
