@@ -76,6 +76,14 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
     - Optional `k8s_labels` map per resource type (middle precedence).
     - Disks in GB with optional Talos mount points (first disk is used as root).
     - Mount points must live under `/var` (for example `/var/mnt/kafka` or `/var/lib/kafka`).
+    - A non-root disk can set `user_volume` to render a Talos
+      `UserVolumeConfig`. Talos provisions it as XFS under
+      `/var/mnt/<user_volume>`; the generator bind-mounts it into the kubelet at
+      the configured `mount` destination.
+    - Set `project_quota_support = true` on a `user_volume` disk when Kubernetes
+      local-volume provisioners need XFS project quotas. User-volume names must
+      be unique per resource profile and contain only 1-34 alphanumeric or
+      hyphen characters.
 - `secrets/credentials.json`
   - Persistent cleartext cluster credentials consumed by service modules.
   - `scripts/deploy.sh` runs `scripts/ensure-credentials.sh` before deploying, migrates missing values from existing local `out/*/terraform.tfstate` when possible, creates any remaining missing values, and keeps this file outside `out/` so deleting generated workspaces does not rotate service passwords or OIDC client secrets.

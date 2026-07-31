@@ -22,3 +22,4 @@ cluster:
         disabled: false
       service:
 ${talos_discovery_service_section}
+${user_volume_configs_section}

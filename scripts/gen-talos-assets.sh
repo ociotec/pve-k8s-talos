@@ -772,8 +772,8 @@ fi
 template="$(cat "${template_path}")"
 
 # Basic template sanity check.
-if [[ "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${kubelet_extra_args_section}'* || "${template}" != *'${machine_registries_section}'* || "${template}" != *'${k8s_node_labels_section}'* || "${template}" != *'${proxy_env_section}'* || "${template}" != *'${cert_files_section}'* || "${template}" != *'${grub_use_uki_cmdline_section}'* || "${template}" != *'${talos_discovery_service_section}'* || "${template}" != *'${extra_host_entries_section}'* ]]; then
-  echo "Error: template is missing required placeholders (\${machine_disks_section}, \${kubelet_extra_mounts_section}, \${kubelet_extra_args_section}, \${machine_registries_section}, \${k8s_node_labels_section}, \${proxy_env_section}, \${cert_files_section}, \${grub_use_uki_cmdline_section}, \${talos_discovery_service_section}, \${extra_host_entries_section})." >&2
+if [[ "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${kubelet_extra_args_section}'* || "${template}" != *'${machine_registries_section}'* || "${template}" != *'${k8s_node_labels_section}'* || "${template}" != *'${proxy_env_section}'* || "${template}" != *'${cert_files_section}'* || "${template}" != *'${grub_use_uki_cmdline_section}'* || "${template}" != *'${talos_discovery_service_section}'* || "${template}" != *'${extra_host_entries_section}'* || "${template}" != *'${user_volume_configs_section}'* ]]; then
+  echo "Error: template is missing required placeholders (\${machine_disks_section}, \${kubelet_extra_mounts_section}, \${kubelet_extra_args_section}, \${machine_registries_section}, \${k8s_node_labels_section}, \${proxy_env_section}, \${cert_files_section}, \${grub_use_uki_cmdline_section}, \${talos_discovery_service_section}, \${extra_host_entries_section}, \${user_volume_configs_section})." >&2
   echo "Fix: restore patches/machine.template.yaml or add the missing placeholders." >&2
   exit 1
 fi
@@ -1480,15 +1480,56 @@ for name in "${!vm_ips[@]}"; do
 done
 
 declare -A disk_mounts
+declare -A disk_user_volumes
+declare -A disk_project_quota_support
 declare -A disk_counts
-while IFS='|' read -r vm_type size mount; do
+while IFS='|' read -r vm_type size mount user_volume project_quota_support; do
   count="${disk_counts[${vm_type}]:-0}"
   if [[ -n "${mount}" ]]; then
     disk_mounts["${vm_type}|${count}"]="${mount}"
   fi
+  if [[ -n "${user_volume}" ]]; then
+    disk_user_volumes["${vm_type}|${count}"]="${user_volume}"
+  fi
+  disk_project_quota_support["${vm_type}|${count}"]="${project_quota_support:-false}"
   disk_counts["${vm_type}"]=$((count + 1))
 done < <(
   awk '
+    function emit_disk(line, parts, n, i, part, size, mount, user_volume, project_quota_support) {
+      gsub(/[{}]/, "", line)
+      size = ""
+      mount = ""
+      user_volume = ""
+      project_quota_support = "false"
+      n = split(line, parts, ",")
+      for (i = 1; i <= n; i++) {
+        part = parts[i]
+        gsub(/^[[:space:]]+/, "", part)
+        gsub(/[[:space:]]+$/, "", part)
+        if (part ~ /^size[[:space:]]*=/) {
+          sub(/^size[[:space:]]*=/, "", part)
+          gsub(/[[:space:]]*/, "", part)
+          size = part
+        } else if (part ~ /^mount[[:space:]]*=/) {
+          sub(/^mount[[:space:]]*=/, "", part)
+          gsub(/^[[:space:]]*"/, "", part)
+          gsub(/"[[:space:]]*$/, "", part)
+          mount = part
+        } else if (part ~ /^user_volume[[:space:]]*=/) {
+          sub(/^user_volume[[:space:]]*=/, "", part)
+          gsub(/^[[:space:]]*"/, "", part)
+          gsub(/"[[:space:]]*$/, "", part)
+          user_volume = part
+        } else if (part ~ /^project_quota_support[[:space:]]*=/) {
+          sub(/^project_quota_support[[:space:]]*=/, "", part)
+          gsub(/[[:space:]]*/, "", part)
+          project_quota_support = part
+        }
+      }
+      if (size != "") {
+        print current "|" size "|" mount "|" user_volume "|" project_quota_support
+      }
+    }
     /^[[:space:]]*#/ { next }
     match($0, /"[^"]+"[[:space:]]*=[[:space:]]*{/) {
       current = $0
@@ -1504,36 +1545,27 @@ done < <(
       opened = gsub(/{/, "{", raw)
       closed = gsub(/}/, "}", raw)
     }
-    in_block && match($0, /disks[[:space:]]*=/) { in_disks = 1 }
+    in_block && match($0, /disks[[:space:]]*=/) { in_disks = 1; next }
     in_block && in_disks {
       line = $0
       gsub(/#.*/, "", line)
-      if (line ~ /]/) { in_disks = 0 }
-      if (line ~ /size[[:space:]]*=/) {
-        gsub(/[{}]/, "", line)
-        size = ""
-        mount = ""
-        n = split(line, parts, ",")
-        for (i = 1; i <= n; i++) {
-          part = parts[i]
-          gsub(/^[[:space:]]+/, "", part)
-          gsub(/[[:space:]]+$/, "", part)
-          if (part ~ /^size[[:space:]]*=/) {
-            sub(/^size[[:space:]]*=/, "", part)
-            gsub(/[[:space:]]*/, "", part)
-            size = part
-          }
-          if (part ~ /^mount[[:space:]]*=/) {
-            sub(/^mount[[:space:]]*=/, "", part)
-            gsub(/^[[:space:]]*"/, "", part)
-            gsub(/"[[:space:]]*$/, "", part)
-            mount = part
-          }
-        }
-        if (size != "") {
-          print current "|" size "|" mount
+      if (!in_disk && line ~ /{/) {
+        in_disk = 1
+        disk_depth = 0
+        disk = ""
+      }
+      if (in_disk) {
+        disk = disk "," line
+        disk_line = line
+        disk_depth += gsub(/{/, "{", disk_line)
+        disk_depth -= gsub(/}/, "}", disk_line)
+        if (disk_depth == 0) {
+          emit_disk(disk)
+          in_disk = 0
+          disk = ""
         }
       }
+      if (!in_disk && line ~ /]/) { in_disks = 0 }
     }
     in_block {
       block_depth += opened - closed
@@ -1553,7 +1585,9 @@ for name in "${!vm_ips[@]}"; do
   resource_type="${vm_resource_types[${name}]}"
   disks_block=""
   kubelet_mounts_block=""
+  user_volume_configs_block=""
   k8s_node_labels_block=""
+  declare -A seen_user_volumes=()
   declare -A merged_labels=()
   for key in "${!global_k8s_labels[@]}"; do
     merged_labels["${key}"]="${global_k8s_labels[${key}]}"
@@ -1561,6 +1595,44 @@ for name in "${!vm_ips[@]}"; do
   disk_total="${disk_counts[${resource_type}]:-0}"
   for ((idx=0; idx<disk_total; idx++)); do
     mount_path="${disk_mounts[${resource_type}|${idx}]:-}"
+    user_volume="${disk_user_volumes[${resource_type}|${idx}]:-}"
+    project_quota_support="${disk_project_quota_support[${resource_type}|${idx}]:-false}"
+    if [[ "${project_quota_support}" != "true" && "${project_quota_support}" != "false" ]]; then
+      echo "Error: project_quota_support must be true or false for ${resource_type} disk index ${idx}." >&2
+      exit 1
+    fi
+    if [[ -n "${user_volume}" ]]; then
+      if ((idx == 0)); then
+        echo "Error: the root disk cannot define user_volume for ${resource_type}." >&2
+        exit 1
+      fi
+      if [[ ! "${user_volume}" =~ ^[A-Za-z0-9-]{1,34}$ ]]; then
+        echo "Error: invalid user_volume name for ${resource_type} disk index ${idx}: ${user_volume}." >&2
+        echo "Fix: use 1-34 ASCII letters, digits, or hyphens." >&2
+        exit 1
+      fi
+      if [[ -n "${seen_user_volumes[${user_volume}]:-}" ]]; then
+        echo "Error: duplicate user_volume ${user_volume} in resource profile ${resource_type}." >&2
+        exit 1
+      fi
+      seen_user_volumes["${user_volume}"]=1
+      if [[ -z "${mount_path}" || "${mount_path}" != /var/* ]]; then
+        echo "Error: user_volume ${user_volume} must define a mount destination under /var (got ${mount_path:-<empty>})." >&2
+        exit 1
+      fi
+      device="/dev/disk/by-id/${disk_by_id_prefix}${idx}"
+      printf -v user_volume_config_doc '\n---\napiVersion: v1alpha1\nkind: UserVolumeConfig\nname: %s\nvolumeType: partition\nprovisioning:\n  diskSelector:\n    match: "%s in disk.symlinks"\n  maxSize: 100%%\nfilesystem:\n  type: xfs\n  projectQuotaSupport: %s' \
+        "${user_volume}" "'${device}'" "${project_quota_support}"
+      user_volume_configs_block+="${user_volume_config_doc}"
+      printf -v kubelet_mount_doc '\n      - destination: %s\n        type: bind\n        source: /var/mnt/%s\n        options:\n          - bind\n          - rshared\n          - rw' \
+        "${mount_path}" "${user_volume}"
+      kubelet_mounts_block+="${kubelet_mount_doc}"
+      continue
+    fi
+    if [[ "${project_quota_support}" == "true" ]]; then
+      echo "Error: project_quota_support requires user_volume for ${resource_type} disk index ${idx}." >&2
+      exit 1
+    fi
     if [[ -z "${mount_path}" ]]; then
       continue
     fi
@@ -1583,6 +1655,7 @@ for name in "${!vm_ips[@]}"; do
   else
     kubelet_extra_mounts_section=" []"
   fi
+  user_volume_configs_section="${user_volume_configs_block}"
   if [[ -n "${talos_max_pods}" ]]; then
     kubelet_extra_args_section=$'\n'
     kubelet_extra_args_section+=$'    extraArgs:\n'
@@ -1639,6 +1712,7 @@ for name in "${!vm_ips[@]}"; do
   rendered="${rendered//'${proxy_env_section}'/${proxy_env_section}}"
   rendered="${rendered//'${cert_files_section}'/${cert_files_section}}"
   rendered="${rendered//'${talos_discovery_service_section}'/${talos_discovery_service_section}}"
+  rendered="${rendered//'${user_volume_configs_section}'/${user_volume_configs_section}}"
   out_path="${patch_dir}/machine-${name}.yaml"
   printf "%s\n" "${rendered}" > "${out_path}"
   echo "wrote ${out_path}"

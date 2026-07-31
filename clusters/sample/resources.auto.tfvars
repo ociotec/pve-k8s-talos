@@ -16,7 +16,12 @@ resources = {
     k8s_labels = {}
     disks = [
       { size = 32 }, # First disk is used as the root disk
-      { size = 128 },
+      {
+        size                  = 128
+        mount                 = "/var/lib/workloads"
+        user_volume           = "workloads"
+        project_quota_support = true
+      },
     ]
   }
   "worker-kafka" = {
