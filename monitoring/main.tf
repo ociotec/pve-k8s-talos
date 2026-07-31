@@ -686,6 +686,7 @@ locals {
       tempo_storage_size              = local.tempo_storage_size_value
       tempo_retention                 = local.tempo_retention
       tempo_image_tag                 = local.tempo_image_tag
+      tempo_v3_enabled                = try(tonumber(split(".", trimprefix(local.tempo_image_tag, "v"))[0]), 0) >= 3
       tempo_cpu_request               = local.tempo_cpu_request_value
       tempo_cpu_limit                 = local.tempo_cpu_limit_value
       tempo_mem_request               = local.tempo_mem_request_value

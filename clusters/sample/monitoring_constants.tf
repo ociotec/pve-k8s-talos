@@ -32,10 +32,10 @@ locals {
   loki_ingestion_burst_size_mb = 30
   tempo_retention              = "336h" # 14 days
 
-  grafana_image_tag        = "13.0.2"
-  prometheus_image_tag     = "v3.12.0"
-  loki_image_tag           = "3.7.3"
-  tempo_image_tag          = "2.10.5"
+  grafana_image_tag        = "13.1.1"
+  prometheus_image_tag     = "v3.13.2"
+  loki_image_tag           = "3.7.4"
+  tempo_image_tag          = "3.0.2"
   otel_collector_image_tag = "0.155.0"
   # Disabled by default because this opens an Internet-facing trace-ingest endpoint.
   # Frontends deployed under the cluster domain are accepted without creating
@@ -58,8 +58,8 @@ locals {
   beyla_mem_limit              = "256Mi"
   beyla_sampling_ratio         = 0.10
   promtail_image_tag           = "3.6.10"
-  kube_state_metrics_image_tag = "v2.18.0"
-  node_exporter_image_tag      = "v1.11.1"
+  kube_state_metrics_image_tag = "v2.19.1"
+  node_exporter_image_tag      = "v1.12.1"
 
   grafana_admin_user                    = "admin"
   grafana_admin_password_length         = 24

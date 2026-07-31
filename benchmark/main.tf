@@ -18,15 +18,15 @@ provider "kubernetes" {
 }
 
 locals {
-  benchmark_namespace_value    = try(local.benchmark_namespace, "benchmark")
-  benchmark_stress_image_value = try(local.benchmark_stress_image, "ghcr.io/colinianking/stress-ng:9df1b93b7f236617210bbad950bdd01998f381b4")
-  benchmark_fio_image_value    = try(local.benchmark_fio_image, "ghcr.io/kvaps/fio:3.38")
+  benchmark_namespace_value     = try(local.benchmark_namespace, "benchmark")
+  benchmark_stress_image_value  = try(local.benchmark_stress_image, "ghcr.io/colinianking/stress-ng:f882a7540accdaa38f15474594b7f0339d5f7472@sha256:8d663e5a331a72ae17118d27647b8bd2e0f4970bcbc6e1b0088b29f2e4e8cfa8")
+  benchmark_fio_image_value     = try(local.benchmark_fio_image, "openeuler/fio:3.42-oe2403sp3@sha256:5aa41b711c36d226852d4ce1e4a0d5d31e5e15d641f4526febf58c28def9caea")
   benchmark_kafka_enabled_value = try(local.benchmark_kafka_enabled, false)
   # Benchmark Kafka uses the same Redpanda image and broker bootstrap pattern as
   # the Kafka section, but this module cannot read locals from another module.
-  benchmark_kafka_image_value = "docker.redpanda.com/redpandadata/redpanda:v26.1.6"
+  benchmark_kafka_image_value     = "docker.redpanda.com/redpandadata/redpanda:v26.1.6"
   benchmark_kafka_bootstrap_value = "redpanda-0.redpanda.kafka.svc.cluster.local:9092,redpanda-1.redpanda.kafka.svc.cluster.local:9092,redpanda-2.redpanda.kafka.svc.cluster.local:9092"
-  benchmark_priority_class_name = "benchmark-low"
+  benchmark_priority_class_name   = "benchmark-low"
 
   benchmark_cpu_vcpus_value    = try(local.benchmark_cpu_vcpus, 2)
   benchmark_cpu_memory_value   = try(local.benchmark_cpu_memory, "256Mi")

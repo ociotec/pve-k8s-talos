@@ -121,23 +121,23 @@
       "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}}
     },
     {
-      "id": 9, "title": "Ingester pressure", "type": "timeseries", "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "id": 9, "title": "Active trace pressure", "type": "timeseries", "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "targets": [
-        {"editorMode": "code", "expr": "sum(tempo_ingester_live_traces{namespace=~\"$namespace\",pod=~\"$pod\"})", "legendFormat": "live traces", "refId": "A"},
-        {"editorMode": "code", "expr": "sum(tempo_ingester_live_trace_bytes{namespace=~\"$namespace\",pod=~\"$pod\"})", "legendFormat": "live trace bytes", "refId": "B"},
-        {"editorMode": "code", "expr": "sum(tempo_ingester_flush_queue_length{namespace=~\"$namespace\",pod=~\"$pod\"})", "legendFormat": "flush queue", "refId": "C"}
+        {"editorMode": "code", "expr": "sum(tempo_live_store_live_traces{namespace=~\"$namespace\",pod=~\"$pod\"}) or sum(tempo_ingester_live_traces{namespace=~\"$namespace\",pod=~\"$pod\"})", "legendFormat": "live traces", "refId": "A"},
+        {"editorMode": "code", "expr": "sum(tempo_live_store_complete_queue_length{namespace=~\"$namespace\",pod=~\"$pod\"}) or sum(tempo_ingester_flush_queue_length{namespace=~\"$namespace\",pod=~\"$pod\"})", "legendFormat": "completion queue", "refId": "B"},
+        {"editorMode": "code", "expr": "sum(rate(tempo_live_store_blocks_completed_total{namespace=~\"$namespace\",pod=~\"$pod\"}[$__rate_interval])) or sum(rate(tempo_ingester_blocks_flushed_total{namespace=~\"$namespace\",pod=~\"$pod\"}[$__rate_interval]))", "legendFormat": "blocks completed/s", "refId": "C"}
       ],
       "fieldConfig": {"defaults": {"min": 0, "unit": "short"}, "overrides": []},
       "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}}
     },
     {
-      "id": 10, "title": "Ingester flushes", "type": "timeseries", "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+      "id": 10, "title": "Backend processing", "type": "timeseries", "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "targets": [
-        {"editorMode": "code", "expr": "sum(rate(tempo_ingester_blocks_flushed_total{namespace=~\"$namespace\",pod=~\"$pod\"}[$__rate_interval]))", "legendFormat": "blocks flushed/s", "refId": "A"},
-        {"editorMode": "code", "expr": "sum(rate(tempo_ingester_failed_flushes_total{namespace=~\"$namespace\",pod=~\"$pod\"}[$__rate_interval]))", "legendFormat": "failed flushes/s", "refId": "B"},
-        {"editorMode": "code", "expr": "sum(rate(tempo_ingester_flush_retries_total{namespace=~\"$namespace\",pod=~\"$pod\"}[$__rate_interval]))", "legendFormat": "retries/s", "refId": "C"}
+        {"editorMode": "code", "expr": "sum(tempo_backend_scheduler_jobs_active{namespace=~\"$namespace\"})", "legendFormat": "active jobs", "refId": "A"},
+        {"editorMode": "code", "expr": "sum(rate(tempo_backend_scheduler_jobs_completed_total{namespace=~\"$namespace\"}[$__rate_interval])) or sum(rate(tempo_ingester_blocks_flushed_total{namespace=~\"$namespace\",pod=~\"$pod\"}[$__rate_interval]))", "legendFormat": "completed/s", "refId": "B"},
+        {"editorMode": "code", "expr": "sum(rate(tempo_backend_scheduler_jobs_failed_total{namespace=~\"$namespace\"}[$__rate_interval])) or sum(rate(tempo_ingester_failed_flushes_total{namespace=~\"$namespace\",pod=~\"$pod\"}[$__rate_interval]))", "legendFormat": "failed/s", "refId": "C"}
       ],
       "fieldConfig": {"defaults": {"min": 0, "unit": "ops"}, "overrides": []},
       "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}}
@@ -147,8 +147,8 @@
       "datasource": {"type": "prometheus", "uid": "${datasource}"},
       "targets": [
         {"editorMode": "code", "expr": "sum(rate(tempo_metrics_generator_spans_received_total{namespace=~\"$namespace\",pod=~\"$pod\"}[$__rate_interval]))", "legendFormat": "received spans/s", "refId": "A"},
-        {"editorMode": "code", "expr": "sum(tempo_metrics_generator_processor_local_blocks_live_traces{namespace=~\"$namespace\",pod=~\"$pod\"})", "legendFormat": "local-block live traces", "refId": "B"},
-        {"editorMode": "code", "expr": "sum(tempo_metrics_generator_processor_local_blocks_flush_queue_size{namespace=~\"$namespace\",pod=~\"$pod\"})", "legendFormat": "local-block flush queue", "refId": "C"}
+        {"editorMode": "code", "expr": "sum by (reason) (rate(tempo_metrics_generator_spans_discarded_total{namespace=~\"$namespace\",pod=~\"$pod\"}[$__rate_interval]))", "legendFormat": "discarded {{reason}}", "refId": "B"},
+        {"editorMode": "code", "expr": "sum(tempo_metrics_generator_registry_active_series{namespace=~\"$namespace\",pod=~\"$pod\"})", "legendFormat": "active series", "refId": "C"}
       ],
       "fieldConfig": {"defaults": {"min": 0, "unit": "ops"}, "overrides": []},
       "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}}

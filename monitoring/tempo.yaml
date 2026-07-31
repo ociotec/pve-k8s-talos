@@ -26,12 +26,14 @@ data:
             http:
               endpoint: 0.0.0.0:4318
 
+%{ if !tempo_v3_enabled }
     ingester:
       max_block_duration: 5m
 
     compactor:
       compaction:
         block_retention: ${tempo_retention}
+%{ endif }
 
     metrics_generator:
       registry:
@@ -42,12 +44,14 @@ data:
         remote_write:
           - url: http://prometheus.monitoring.svc.cluster.local:9090/api/v1/write
             send_exemplars: true
+%{ if !tempo_v3_enabled }
       traces_storage:
         path: /var/tempo/generator/traces
       processor:
         local_blocks:
           filter_server_spans: false
           flush_to_storage: true
+%{ endif }
 
     storage:
       trace:
@@ -59,11 +63,17 @@ data:
 
     overrides:
       defaults:
+%{ if tempo_v3_enabled }
+        compaction:
+          block_retention: ${tempo_retention}
+%{ endif }
         metrics_generator:
           processors:
             - service-graphs
             - span-metrics
+%{ if !tempo_v3_enabled }
             - local-blocks
+%{ endif }
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

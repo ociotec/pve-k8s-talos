@@ -71,7 +71,7 @@ locals {
   garage_node_label_value                  = try(local.garage_node_k8s_label, "s3")
   garage_data_host_path_value              = try(local.garage_data_host_path, "/var/lib/s3")
   garage_storage_class_value               = try(local.garage_storage_class_name, "s3-local")
-  garage_image_value                       = try(local.garage_image, "dxflrs/garage:v2.2.0")
+  garage_image_value                       = try(local.garage_image, "dxflrs/garage:v2.3.0")
   garage_console_image_value               = try(local.garage_console_image, "khairul169/garage-webui:1.1.0")
 
   garage_s3_hostname_value                 = try(local.garage_s3_hostname, "s3.${local.domain}")

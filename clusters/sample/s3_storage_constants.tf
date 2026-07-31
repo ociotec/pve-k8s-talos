@@ -9,7 +9,7 @@ locals {
   garage_console_hostname            = "s3-console.${local.domain}"
   garage_s3_tls_secret_name          = "s3-api-tls"
   garage_console_tls_secret_name     = "s3-console-tls"
-  garage_image                       = "dxflrs/garage:v2.2.0"
+  garage_image                       = "dxflrs/garage:v2.3.0"
   garage_console_image               = "khairul169/garage-webui:1.1.0"
   garage_replication_factor          = 3
   garage_console_auth_keycloak_realm = "company"
