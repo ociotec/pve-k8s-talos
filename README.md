@@ -74,6 +74,9 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
     - RAM memory in MB.
     - `k8s_node` role: `controlplane` or `worker`.
     - Optional `k8s_labels` map per resource type (middle precedence).
+    - Optional `machine_sysctls` string map applied only to Talos machines that
+      use the resource profile. Omit it unless a workload requires a node-level
+      kernel setting.
     - Disks in GB with optional Talos mount points (first disk is used as root).
     - Mount points must live under `/var` (for example `/var/mnt/kafka` or `/var/lib/kafka`).
     - A non-root disk can set `user_volume` to render a Talos

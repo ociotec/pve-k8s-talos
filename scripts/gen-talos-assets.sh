@@ -772,8 +772,8 @@ fi
 template="$(cat "${template_path}")"
 
 # Basic template sanity check.
-if [[ "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${kubelet_extra_args_section}'* || "${template}" != *'${machine_registries_section}'* || "${template}" != *'${k8s_node_labels_section}'* || "${template}" != *'${proxy_env_section}'* || "${template}" != *'${cert_files_section}'* || "${template}" != *'${grub_use_uki_cmdline_section}'* || "${template}" != *'${talos_discovery_service_section}'* || "${template}" != *'${extra_host_entries_section}'* || "${template}" != *'${user_volume_configs_section}'* ]]; then
-  echo "Error: template is missing required placeholders (\${machine_disks_section}, \${kubelet_extra_mounts_section}, \${kubelet_extra_args_section}, \${machine_registries_section}, \${k8s_node_labels_section}, \${proxy_env_section}, \${cert_files_section}, \${grub_use_uki_cmdline_section}, \${talos_discovery_service_section}, \${extra_host_entries_section}, \${user_volume_configs_section})." >&2
+if [[ "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${kubelet_extra_args_section}'* || "${template}" != *'${machine_registries_section}'* || "${template}" != *'${k8s_node_labels_section}'* || "${template}" != *'${machine_sysctls_section}'* || "${template}" != *'${proxy_env_section}'* || "${template}" != *'${cert_files_section}'* || "${template}" != *'${grub_use_uki_cmdline_section}'* || "${template}" != *'${talos_discovery_service_section}'* || "${template}" != *'${extra_host_entries_section}'* || "${template}" != *'${user_volume_configs_section}'* ]]; then
+  echo "Error: template is missing required placeholders (\${machine_disks_section}, \${kubelet_extra_mounts_section}, \${kubelet_extra_args_section}, \${machine_registries_section}, \${k8s_node_labels_section}, \${machine_sysctls_section}, \${proxy_env_section}, \${cert_files_section}, \${grub_use_uki_cmdline_section}, \${talos_discovery_service_section}, \${extra_host_entries_section}, \${user_volume_configs_section})." >&2
   echo "Fix: restore patches/machine.template.yaml or add the missing placeholders." >&2
   exit 1
 fi
@@ -1312,6 +1312,73 @@ done < <(
   ' "${resources_path}"
 )
 
+declare -A resource_machine_sysctls
+if ! resource_machine_sysctls_raw="$(
+  awk '
+    function brace_delta(line,   raw, opens, closes) {
+      raw = line
+      gsub(/#.*/, "", raw)
+      opens = gsub(/{/, "{", raw)
+      closes = gsub(/}/, "}", raw)
+      return opens - closes
+    }
+    function emit_pairs(obj_name, raw_line,   line, pair, key, val) {
+      line = raw_line
+      while (match(line, /"[^"]+"[[:space:]]*=[[:space:]]*"[^"]*"/)) {
+        pair = substr(line, RSTART, RLENGTH)
+        key = pair
+        sub(/^[[:space:]]*"/, "", key)
+        sub(/".*/, "", key)
+        sub(/^[^=]*=[[:space:]]*"/, "", pair)
+        val = pair
+        sub(/".*/, "", val)
+        print obj_name "|" key "|" val
+        line = substr(line, RSTART + RLENGTH)
+      }
+    }
+    /^[[:space:]]*#/ { next }
+    match($0, /"[^"]+"[[:space:]]*=[[:space:]]*{/) {
+      name = $0
+      sub(/^[^"]*"/, "", name)
+      sub(/".*/, "", name)
+      in_block = 1
+      block_depth = brace_delta($0)
+      in_sysctls = 0
+      next
+    }
+    in_block && match($0, /machine_sysctls[[:space:]]*=[[:space:]]*{/) {
+      in_sysctls = 1
+      sysctls_depth = brace_delta($0)
+      emit_pairs(name, $0)
+    }
+    in_block && in_sysctls {
+      if ($0 !~ /machine_sysctls[[:space:]]*=/) {
+        emit_pairs(name, $0)
+        sysctls_depth += brace_delta($0)
+      }
+      if (sysctls_depth <= 0) {
+        in_sysctls = 0
+      }
+    }
+    in_block {
+      block_depth += brace_delta($0)
+      if (block_depth <= 0) {
+        in_block = 0
+        in_sysctls = 0
+      }
+    }
+  ' "${resources_path}"
+)"; then
+  echo "Error: failed to parse machine_sysctls from ${resources_path}." >&2
+  exit 1
+fi
+while IFS='|' read -r resource_type sysctl_key sysctl_value; do
+  if [[ -z "${resource_type}" || -z "${sysctl_key}" ]]; then
+    continue
+  fi
+  resource_machine_sysctls["${resource_type}|${sysctl_key}"]="${sysctl_value}"
+done <<< "${resource_machine_sysctls_raw}"
+
 declare -A vm_labels
 while IFS='|' read -r vm_name label_key label_value; do
   if [[ -z "${vm_name}" || -z "${label_key}" ]]; then
@@ -1587,6 +1654,8 @@ for name in "${!vm_ips[@]}"; do
   kubelet_mounts_block=""
   user_volume_configs_block=""
   k8s_node_labels_block=""
+  machine_sysctls_block=""
+  resource_sysctl_keys=()
   declare -A seen_user_volumes=()
   declare -A merged_labels=()
   for key in "${!global_k8s_labels[@]}"; do
@@ -1684,6 +1753,20 @@ for name in "${!vm_ips[@]}"; do
   else
     k8s_node_labels_section=" {}"
   fi
+  for key in "${!resource_machine_sysctls[@]}"; do
+    if [[ "${key}" == "${resource_type}|"* ]]; then
+      resource_sysctl_keys+=("${key#${resource_type}|}")
+    fi
+  done
+  if [[ ${#resource_sysctl_keys[@]} -gt 0 ]]; then
+    while IFS= read -r sysctl_key; do
+      sysctl_value="${resource_machine_sysctls[${resource_type}|${sysctl_key}]}"
+      machine_sysctls_block+=$'\n    "'"$(yaml_escape "${sysctl_key}")"$'": "'"$(yaml_escape "${sysctl_value}")"$'"'
+    done < <(printf "%s\n" "${resource_sysctl_keys[@]}" | sort)
+    machine_sysctls_section="${machine_sysctls_block}"
+  else
+    machine_sysctls_section=" {}"
+  fi
 
   node_kernel_args=("${kernel_args[@]}")
   if [[ ${#node_kernel_args[@]} -gt 0 ]]; then
@@ -1709,6 +1792,7 @@ for name in "${!vm_ips[@]}"; do
   rendered="${rendered//'${kubelet_extra_args_section}'/${kubelet_extra_args_section}}"
   rendered="${rendered//'${machine_registries_section}'/${machine_registries_section}}"
   rendered="${rendered//'${k8s_node_labels_section}'/${k8s_node_labels_section}}"
+  rendered="${rendered//'${machine_sysctls_section}'/${machine_sysctls_section}}"
   rendered="${rendered//'${proxy_env_section}'/${proxy_env_section}}"
   rendered="${rendered//'${cert_files_section}'/${cert_files_section}}"
   rendered="${rendered//'${talos_discovery_service_section}'/${talos_discovery_service_section}}"

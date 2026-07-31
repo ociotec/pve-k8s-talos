@@ -1,6 +1,7 @@
 machine:
   disks: ${machine_disks_section}
   nodeLabels: ${k8s_node_labels_section}
+  sysctls: ${machine_sysctls_section}
   env: ${proxy_env_section}
   files: ${cert_files_section}
   install:

@@ -4,10 +4,11 @@ variable "constants" {
 
 variable "resources" {
   type = map(object({
-    vcpus      = number
-    memory     = number
-    k8s_node   = string
-    k8s_labels = optional(map(string), {})
+    vcpus           = number
+    memory          = number
+    k8s_node        = string
+    k8s_labels      = optional(map(string), {})
+    machine_sysctls = optional(map(string), {})
     disks = list(object({
       size                  = number
       mount                 = optional(string)
@@ -21,6 +22,15 @@ variable "resources" {
       contains(["controlplane", "worker"], resource.k8s_node)
     ])
     error_message = "Each resources entry must set k8s_node to \"controlplane\" or \"worker\"."
+  }
+  validation {
+    condition = alltrue(flatten([
+      for _, resource in var.resources : [
+        for key, value in resource.machine_sysctls :
+        trimspace(key) != "" && trimspace(value) != ""
+      ]
+    ]))
+    error_message = "machine_sysctls keys and values must be non-empty strings."
   }
   validation {
     condition = alltrue(flatten([
