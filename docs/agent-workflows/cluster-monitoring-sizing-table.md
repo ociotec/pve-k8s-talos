@@ -76,8 +76,16 @@ Use the currently agreed monitoring sizing assumptions:
 
 - Grafana auto-scales CPU and memory.
 - Loki auto-scales memory and PVC, with softened growth for larger clusters.
+- Loki treats its softened storage formula as required retained data and divides
+  it by `loki_storage_target_utilization` to obtain provisioned PVC capacity.
+- `loki_storage_target_utilization` and `loki_wal_disk_full_threshold` default
+  to platform policy values. A real cluster may override them only when measured
+  storage behavior justifies it.
+- `loki_storage_target_utilization` must remain lower than
+  `loki_wal_disk_full_threshold`, where Loki starts rejecting writes.
 - Prometheus auto-scales CPU, memory, and PVC.
 - Existing cluster PVCs must never shrink.
+- Loki PVC: `ceil(loki_storage_base_gib / loki_storage_target_utilization)`.
 
 Required rules:
 

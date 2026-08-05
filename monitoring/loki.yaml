@@ -18,6 +18,7 @@ data:
           replication_factor: 1
       wal:
         dir: /data/wal
+        disk_full_threshold: ${loki_wal_disk_full_threshold}
       chunk_idle_period: 5m
       chunk_retain_period: 30s
 

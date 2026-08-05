@@ -17,8 +17,14 @@ locals {
 
   grafana_storage_size    = "5Gi"
   prometheus_storage_size = "100Gi"
-  loki_storage_size       = "80Gi"
   tempo_storage_size      = "40Gi"
+
+  # Optional Loki storage policy overrides. The platform defaults target 75%
+  # normal utilization and block WAL writes at 90%. Override these only for an
+  # exceptional cluster backed by measured storage behavior, and always keep
+  # 0 < loki_storage_target_utilization < loki_wal_disk_full_threshold < 1.
+  # loki_storage_target_utilization = 0.75
+  # loki_wal_disk_full_threshold    = 0.90
 
   prometheus_retention = "15d"
   # Prometheus starts deleting old TSDB blocks when it reaches 80% of the PVC size,

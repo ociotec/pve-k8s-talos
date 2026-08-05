@@ -108,6 +108,16 @@ locals {
   loki_ingestion_burst_size_mb_value = can(regex("(?m)^\\s*loki_ingestion_burst_size_mb\\s*=\\s*([0-9.]+)\\s*$", local.monitoring_constants_source)[0]) ? (
     tonumber(regex("(?m)^\\s*loki_ingestion_burst_size_mb\\s*=\\s*([0-9.]+)\\s*$", local.monitoring_constants_source)[0])
   ) : 30
+  loki_storage_size_configured_value = can(regex("(?m)^\\s*loki_storage_size\\s*=\\s*\"([0-9]+(?:Gi|Mi))\"\\s*$", local.monitoring_constants_source)[0]) ? (
+    regex("(?m)^\\s*loki_storage_size\\s*=\\s*\"([0-9]+(?:Gi|Mi))\"\\s*$", local.monitoring_constants_source)[0]
+  ) : ""
+  # Platform defaults may be overridden for exceptional cluster-specific storage behavior.
+  loki_storage_target_utilization_value = can(regex("(?m)^\\s*loki_storage_target_utilization\\s*=\\s*([0-9.]+)\\s*$", local.monitoring_constants_source)[0]) ? (
+    tonumber(regex("(?m)^\\s*loki_storage_target_utilization\\s*=\\s*([0-9.]+)\\s*$", local.monitoring_constants_source)[0])
+  ) : 0.75
+  loki_wal_disk_full_threshold_value = can(regex("(?m)^\\s*loki_wal_disk_full_threshold\\s*=\\s*([0-9.]+)\\s*$", local.monitoring_constants_source)[0]) ? (
+    tonumber(regex("(?m)^\\s*loki_wal_disk_full_threshold\\s*=\\s*([0-9.]+)\\s*$", local.monitoring_constants_source)[0])
+  ) : 0.90
   beyla_sampling_ratio_value = can(regex("(?m)^\\s*beyla_sampling_ratio\\s*=\\s*([0-9.]+)\\s*$", local.monitoring_constants_source)[0]) ? (
     tonumber(regex("(?m)^\\s*beyla_sampling_ratio\\s*=\\s*([0-9.]+)\\s*$", local.monitoring_constants_source)[0])
   ) : 0.10
@@ -268,10 +278,10 @@ locals {
     ) : (
     can(regex("^[0-9]+Mi$", try(local.prometheus_storage_size, ""))) ? tonumber(trimsuffix(local.prometheus_storage_size, "Mi")) : 0
   )
-  loki_storage_current_mib = can(regex("^[0-9]+Gi$", try(local.loki_storage_size, ""))) ? (
-    tonumber(trimsuffix(local.loki_storage_size, "Gi")) * 1024
+  loki_storage_current_mib = can(regex("^[0-9]+Gi$", local.loki_storage_size_configured_value)) ? (
+    tonumber(trimsuffix(local.loki_storage_size_configured_value, "Gi")) * 1024
     ) : (
-    can(regex("^[0-9]+Mi$", try(local.loki_storage_size, ""))) ? tonumber(trimsuffix(local.loki_storage_size, "Mi")) : 0
+    can(regex("^[0-9]+Mi$", local.loki_storage_size_configured_value)) ? tonumber(trimsuffix(local.loki_storage_size_configured_value, "Mi")) : 0
   )
   tempo_storage_current_mib = can(regex("^[0-9]+Gi$", try(local.tempo_storage_size, ""))) ? (
     tonumber(trimsuffix(local.tempo_storage_size, "Gi")) * 1024
@@ -281,7 +291,9 @@ locals {
 
   prometheus_storage_formula_gib = ceil(60 * local.prometheus_sizing_factor)
   # Loki storage grows more softly than Prometheus so larger worker counts do not over-allocate log retention volume.
-  loki_storage_formula_gib = ceil(40 * (1 + (0.75 * (local.loki_sizing_factor - 1))))
+  loki_storage_base_gib = ceil(40 * (1 + (0.75 * (local.loki_sizing_factor - 1))))
+  # Provision above the retained-data estimate so normal operation remains safely below WAL write throttling.
+  loki_storage_formula_gib = ceil(local.loki_storage_base_gib / max(local.loki_storage_target_utilization_value, 0.01))
   # Trace volume depends primarily on application traffic and sampling, so this is a conservative floor, not a capacity forecast.
   tempo_storage_formula_gib = ceil(30 * (1 + (0.75 * (local.tempo_sizing_factor - 1))))
 
@@ -672,6 +684,7 @@ locals {
       loki_image_tag               = local.loki_image_tag
       loki_ingestion_rate_mb       = local.loki_ingestion_rate_mb_value
       loki_ingestion_burst_size_mb = local.loki_ingestion_burst_size_mb_value
+      loki_wal_disk_full_threshold = tostring(local.loki_wal_disk_full_threshold_value)
       loki_cpu_request             = local.loki_cpu_request_value
       loki_cpu_limit               = local.loki_cpu_limit_value
       loki_mem_request             = local.loki_mem_request_value
@@ -892,6 +905,17 @@ check "loki_ingestion_limits_valid" {
   assert {
     condition     = local.loki_ingestion_rate_mb_value > 0 && local.loki_ingestion_burst_size_mb_value > 0
     error_message = "loki_ingestion_rate_mb and loki_ingestion_burst_size_mb must both be greater than zero."
+  }
+}
+
+check "loki_storage_utilization_valid" {
+  assert {
+    condition = (
+      local.loki_storage_target_utilization_value > 0 &&
+      local.loki_storage_target_utilization_value < local.loki_wal_disk_full_threshold_value &&
+      local.loki_wal_disk_full_threshold_value < 1
+    )
+    error_message = "loki_storage_target_utilization must be greater than zero and lower than loki_wal_disk_full_threshold, which must be lower than one."
   }
 }
 
