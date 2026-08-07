@@ -56,7 +56,8 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
   - Optional `network.cert_files` for extra PEM certificates appended to Talos trust roots, for example proxy interception CAs.
   - Optional `network.extra_host_entries` for temporary Talos `/etc/hosts` entries, formatted as comma-separated `IP hostname [alias...]` entries.
   - Talos version and factory image ID (used to render `patches/qemu.yaml`).
-  - Optional `talos.max_pods` (kubelet `maxPods`) to override per-node pod density. Leave empty to keep Kubernetes default (`110`).
+  - Optional `talos.node_cidr_mask_size` to set the IPv4 PodCIDR prefix allocated to each node. Leave empty for the Kubernetes default (`/24`).
+  - Optional `talos.max_pods` (kubelet `maxPods`) to override per-node pod density. Leave empty to keep Kubernetes default (`110`). Generation fails when this exceeds the usable Flannel IPs in the node PodCIDR.
   - Optional `talos.discovery_service_disabled` toggle (`"true"` by default) to disable Talos public discovery service.
   - Optional `talos.discovery_service_bootstrap_only` override. When omitted, private endpoints are bootstrap-only and the public service registry is not.
   - Optional global `constants["k8s"]["labels"]` map applied to all k8s nodes (lowest precedence).

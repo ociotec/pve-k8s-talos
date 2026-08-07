@@ -255,6 +255,7 @@ talos_discovery_service_disabled="$(awk -F'"' '/"discovery_service_disabled"/ { 
 talos_discovery_service_bootstrap_only="$(awk -F'"' '/"discovery_service_bootstrap_only"/ { print $4; exit }' "${constants_path}")"
 talos_discovery_service_endpoint="$(awk -F'"' '/"discovery_service_endpoint"/ { print $4; exit }' "${constants_path}")"
 talos_max_pods="$(awk -F'"' '/"max_pods"/ { print $4; exit }' "${constants_path}")"
+talos_node_cidr_mask_size="$(read_constant_map_value "talos" "node_cidr_mask_size")"
 controlplane_vip="$(awk -F'"' '/"controlplane_vip"/ { print $4; exit }' "${constants_path}")"
 disk_by_id_prefix="$(awk -F'"' '/"disk_by_id_prefix"/ { print $4; exit }' "${constants_path}")"
 proxy_url="$(awk -F'"' '/"proxy_url"/ { print $4; exit }' "${constants_path}")"
@@ -525,6 +526,7 @@ if [[ -z "${talos_discovery_service_bootstrap_only}" ]]; then
   fi
 fi
 talos_max_pods="$(trim "${talos_max_pods}")"
+talos_node_cidr_mask_size="$(trim "${talos_node_cidr_mask_size}")"
 network2_net_size="$(trim "${network2_net_size}")"
 network2_bridge_device="$(trim "${network2_bridge_device}")"
 network2_vlan_tag="$(trim "${network2_vlan_tag}")"
@@ -589,6 +591,22 @@ if [[ -n "${talos_discovery_service_endpoint}" ]]; then
   fi
 fi
 
+if [[ -z "${talos_node_cidr_mask_size}" ]]; then
+  # Kubernetes defaults IPv4 node PodCIDRs to /24 when no mask is configured.
+  effective_node_cidr_mask_size=24
+  controller_manager_extra_args_section=""
+else
+  if [[ ! "${talos_node_cidr_mask_size}" =~ ^[0-9]+$ ]] || (( talos_node_cidr_mask_size < 16 || talos_node_cidr_mask_size > 30 )); then
+    echo "Error: talos.node_cidr_mask_size must be an IPv4 prefix length from 16 to 30 (got ${talos_node_cidr_mask_size})." >&2
+    echo "Fix: set node_cidr_mask_size under constants[\"talos\"] to a value such as 24 or 22." >&2
+    exit 1
+  fi
+  effective_node_cidr_mask_size="${talos_node_cidr_mask_size}"
+  controller_manager_extra_args_section=$'  controllerManager:\n'
+  controller_manager_extra_args_section+=$'    extraArgs:\n'
+  controller_manager_extra_args_section+=$'      node-cidr-mask-size: "'"${talos_node_cidr_mask_size}"$'"'
+fi
+
 if [[ -n "${talos_max_pods}" ]]; then
   if [[ ! "${talos_max_pods}" =~ ^[0-9]+$ ]]; then
     echo "Error: talos.max_pods must be a positive integer (got ${talos_max_pods})." >&2
@@ -603,6 +621,16 @@ if [[ -n "${talos_max_pods}" ]]; then
   if (( talos_max_pods < 110 )); then
     echo "warning: talos.max_pods=${talos_max_pods} is lower than Kubernetes default (110)." >&2
   fi
+fi
+
+# Flannel's IPv4 host-local allocation excludes the network and broadcast
+# addresses, and the node bridge consumes one additional address.
+pod_ips_per_node=$(( (1 << (32 - effective_node_cidr_mask_size)) - 3 ))
+effective_max_pods="${talos_max_pods:-110}"
+if (( effective_max_pods > pod_ips_per_node )); then
+  echo "Error: talos.max_pods=${effective_max_pods} exceeds the ${pod_ips_per_node} pod IPs available in an IPv4 /${effective_node_cidr_mask_size} node PodCIDR." >&2
+  echo "Fix: lower talos.max_pods or configure a larger per-node PodCIDR with talos.node_cidr_mask_size." >&2
+  exit 1
 fi
 
 if [[ -z "${cert_files_raw}" && -n "${legacy_proxy_ca_path}" ]]; then
@@ -772,8 +800,8 @@ fi
 template="$(cat "${template_path}")"
 
 # Basic template sanity check.
-if [[ "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${kubelet_extra_args_section}'* || "${template}" != *'${machine_registries_section}'* || "${template}" != *'${k8s_node_labels_section}'* || "${template}" != *'${machine_sysctls_section}'* || "${template}" != *'${proxy_env_section}'* || "${template}" != *'${cert_files_section}'* || "${template}" != *'${grub_use_uki_cmdline_section}'* || "${template}" != *'${talos_discovery_service_section}'* || "${template}" != *'${extra_host_entries_section}'* || "${template}" != *'${user_volume_configs_section}'* ]]; then
-  echo "Error: template is missing required placeholders (\${machine_disks_section}, \${kubelet_extra_mounts_section}, \${kubelet_extra_args_section}, \${machine_registries_section}, \${k8s_node_labels_section}, \${machine_sysctls_section}, \${proxy_env_section}, \${cert_files_section}, \${grub_use_uki_cmdline_section}, \${talos_discovery_service_section}, \${extra_host_entries_section}, \${user_volume_configs_section})." >&2
+if [[ "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${kubelet_extra_args_section}'* || "${template}" != *'${machine_registries_section}'* || "${template}" != *'${k8s_node_labels_section}'* || "${template}" != *'${machine_sysctls_section}'* || "${template}" != *'${proxy_env_section}'* || "${template}" != *'${cert_files_section}'* || "${template}" != *'${grub_use_uki_cmdline_section}'* || "${template}" != *'${talos_discovery_service_section}'* || "${template}" != *'${controller_manager_extra_args_section}'* || "${template}" != *'${extra_host_entries_section}'* || "${template}" != *'${user_volume_configs_section}'* ]]; then
+  echo "Error: template is missing required placeholders (\${machine_disks_section}, \${kubelet_extra_mounts_section}, \${kubelet_extra_args_section}, \${machine_registries_section}, \${k8s_node_labels_section}, \${machine_sysctls_section}, \${proxy_env_section}, \${cert_files_section}, \${grub_use_uki_cmdline_section}, \${talos_discovery_service_section}, \${controller_manager_extra_args_section}, \${extra_host_entries_section}, \${user_volume_configs_section})." >&2
   echo "Fix: restore patches/machine.template.yaml or add the missing placeholders." >&2
   exit 1
 fi
@@ -1796,6 +1824,7 @@ for name in "${!vm_ips[@]}"; do
   rendered="${rendered//'${proxy_env_section}'/${proxy_env_section}}"
   rendered="${rendered//'${cert_files_section}'/${cert_files_section}}"
   rendered="${rendered//'${talos_discovery_service_section}'/${talos_discovery_service_section}}"
+  rendered="${rendered//'${controller_manager_extra_args_section}'/${controller_manager_extra_args_section}}"
   rendered="${rendered//'${user_volume_configs_section}'/${user_volume_configs_section}}"
   out_path="${patch_dir}/machine-${name}.yaml"
   printf "%s\n" "${rendered}" > "${out_path}"

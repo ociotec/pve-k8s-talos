@@ -57,7 +57,10 @@ constants = {
     # Shared Talos control-plane VIP for the Kubernetes API endpoint.
     # Keep it on the same L2/subnet as the control planes and outside the MetalLB pool.
     "controlplane_vip" = "192.168.1.50"
-    # Optional kubelet max pods per node. Leave empty to keep Kubernetes default (110).
+    # Optional IPv4 PodCIDR prefix allocated to each node. Leave empty for Kubernetes default (/24).
+    "node_cidr_mask_size" = ""
+    # Optional kubelet max pods per node. It cannot exceed the usable IPs in the node PodCIDR.
+    # Leave empty to keep Kubernetes default (110).
     "max_pods" = ""
     # Optional Talos registry mirror settings. The generator renders these under
     # machine.registries using the global defaults below for every mirror.
