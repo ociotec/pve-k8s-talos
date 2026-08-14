@@ -187,7 +187,7 @@ locals {
   grafana_auth_edit_groups_value                                   = distinct(compact(try(local.grafana_auth_edit_groups, [])))
   grafana_auth_name_value                                          = trimspace(try(local.grafana_auth_name, "Keycloak"))
   grafana_auth_scopes_value                                        = trimspace(try(local.grafana_auth_scopes, "openid profile email"))
-  grafana_auth_auto_login_value                                    = try(local.grafana_auth_auto_login, false)
+  grafana_auth_auto_login_value                                    = try(local.grafana_auth_auto_login, true)
   grafana_auth_allow_sign_up_value                                 = try(local.grafana_auth_allow_sign_up, true)
   grafana_auth_ca_secret_name_value                                = try(local.grafana_auth_ca_secret_name, "grafana-oauth-ca")
   grafana_oauth_secret_name_value                                  = "grafana-oauth"

@@ -88,7 +88,7 @@ locals {
   grafana_auth_edit_groups              = ["monitoring-edit"]
   grafana_auth_name                     = "Keycloak"
   grafana_auth_scopes                   = "openid profile email"
-  grafana_auth_auto_login               = false
+  grafana_auth_auto_login               = true
   grafana_auth_allow_sign_up            = true
   grafana_auth_ca_secret_name           = "grafana-oauth-ca"
 

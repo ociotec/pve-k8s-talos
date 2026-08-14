@@ -401,6 +401,7 @@ print_grafana() {
 
   print_service "Grafana"
   print_url_bullet "URL" "${grafana_url}"
+  print_url_bullet "Local admin login URL" "${grafana_url}/login?disableAutoLogin=true"
   grafana_user="$(output_raw "${cluster_monitoring_workspace}" grafana_admin_user)"
   grafana_password="$(output_raw "${cluster_monitoring_workspace}" grafana_admin_password)"
   print_data_bullet "Admin user" "${grafana_user}"
