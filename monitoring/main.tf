@@ -541,7 +541,7 @@ locals {
   prometheus_wal_recovery_mem_request_value = "128Mi"
   prometheus_wal_recovery_mem_limit_value   = "128Mi"
   # registry.k8s.io/kubectl and rancher/kubectl are distroless and cannot run the mounted shell scripts.
-  prometheus_wal_recovery_kubectl_image = "dtzar/helm-kubectl:3.19.0"
+  prometheus_wal_recovery_kubectl_image_value = try(local.prometheus_wal_recovery_kubectl_image, "dtzar/helm-kubectl:3.19.0")
   prometheus_wal_check_and_recovery_scripts = {
     "prometheus-wal-check-and-recovery.sh" = file("${path.module}/scripts/prometheus-wal-check-and-recovery.sh")
     "prometheus-wal-cleanup.sh"            = file("${path.module}/scripts/prometheus-wal-cleanup.sh")
@@ -569,7 +569,7 @@ locals {
       prometheus_wal_recovery_cpu_limit          = local.prometheus_wal_recovery_cpu_limit_value
       prometheus_wal_recovery_mem_request        = local.prometheus_wal_recovery_mem_request_value
       prometheus_wal_recovery_mem_limit          = local.prometheus_wal_recovery_mem_limit_value
-      prometheus_wal_recovery_kubectl_image      = local.prometheus_wal_recovery_kubectl_image
+      prometheus_wal_recovery_kubectl_image      = local.prometheus_wal_recovery_kubectl_image_value
       prometheus_wal_check_and_recovery_scripts  = local.prometheus_wal_check_and_recovery_scripts
       prometheus_tls_secret_name                 = local.prometheus_tls_secret_name
       prometheus_auth_enabled                    = local.prometheus_auth_enabled

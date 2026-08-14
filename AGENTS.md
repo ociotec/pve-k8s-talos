@@ -197,6 +197,12 @@ For any non-trivial change:
   user explicitly authorizes secret display for that deployment.
 - In deployment scripts, format user-facing URLs consistently with the existing URL style variables instead of printing raw URLs.
 
+## Commit Messages
+
+- When proposing or creating commit messages, use a direct descriptive subject without Conventional Commits prefixes such as `feat:`, `fix:`, or `chore:`.
+- Start the subject with an uppercase letter, as with any normal sentence.
+- After making a change in a repository, propose a commit message that summarizes all pending changes in that repository. Proposing a message does not authorize creating the commit.
+
 ## Repo-Specific Agent Workflows
 
 - When the user asks to audit or update pinned versions across the repository, follow `docs/agent-workflows/update-versions.md`.
