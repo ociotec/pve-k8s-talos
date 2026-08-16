@@ -204,6 +204,11 @@ data:
           - action: keep
             source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
             regex: "true"
+          # Pod discovery creates a target for init containers too. They have
+          # already terminated and must never be scraped through pod annotations.
+          - action: drop
+            source_labels: [__meta_kubernetes_pod_container_init]
+            regex: "true"
           - action: drop
             source_labels: [__meta_kubernetes_namespace]
             regex: cert-manager
@@ -216,9 +221,9 @@ data:
             target_label: __scheme__
             regex: (https?)
           - action: replace
-            source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            source_labels: [__meta_kubernetes_pod_ip, __meta_kubernetes_pod_annotation_prometheus_io_port]
             target_label: __address__
-            regex: (.+):\d+;(\d+)
+            regex: (.+);(\d+)
             replacement: $1:$2
           - action: replace
             source_labels: [__meta_kubernetes_namespace]
