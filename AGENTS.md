@@ -206,6 +206,7 @@ For any non-trivial change:
 ## Repo-Specific Agent Workflows
 
 - When the user asks to audit or update pinned versions across the repository, follow `docs/agent-workflows/update-versions.md`.
+- When the user asks to migrate, upgrade, or deploy updated monitoring components in a real cluster, follow `docs/agent-workflows/monitoring-version-migration.md` in addition to the version-update workflow. Apply its preflight and post-deployment checks whenever the change includes Tempo, OpenTelemetry Collector, Prometheus, Loki, Grafana, PostgreSQL, exporters, or their monitoring configuration.
 - When the user asks to update a real cluster directory to match current repository changes or newly required constants, follow `docs/agent-workflows/update-cluster-from-repo.md`.
   As part of that analysis, explicitly report whether deployment sections or
   generated workspaces have appeared or disappeared compared with the target
