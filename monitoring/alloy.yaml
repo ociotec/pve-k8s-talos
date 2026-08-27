@@ -116,6 +116,11 @@ data:
       targets       = discovery.relabel.pod_logs.output
       tail_from_end = true
       forward_to    = [loki.process.pod_logs.receiver]
+
+      file_match {
+        enabled     = true
+        sync_period = "10s"
+      }
     }
 
     loki.process "pod_logs" {
