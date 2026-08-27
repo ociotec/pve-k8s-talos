@@ -1,0 +1,207 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alloy-events
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/instance: alloy-events
+    app.kubernetes.io/component: event-collector
+    app.kubernetes.io/part-of: loki
+    app.kubernetes.io/managed-by: infrastructure
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: alloy-events
+  labels:
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/instance: alloy-events
+    app.kubernetes.io/component: event-collector
+    app.kubernetes.io/part-of: loki
+    app.kubernetes.io/managed-by: infrastructure
+rules:
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: alloy-events
+  labels:
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/instance: alloy-events
+    app.kubernetes.io/component: event-collector
+    app.kubernetes.io/part-of: loki
+    app.kubernetes.io/managed-by: infrastructure
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: alloy-events
+subjects:
+  - kind: ServiceAccount
+    name: alloy-events
+    namespace: monitoring
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-events-config
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/instance: alloy-events
+    app.kubernetes.io/component: event-collector
+    app.kubernetes.io/part-of: loki
+    app.kubernetes.io/managed-by: infrastructure
+data:
+  config.alloy: |
+    logging {
+      level  = "info"
+      format = "logfmt"
+    }
+
+    loki.source.kubernetes_events "events" {
+      job_name   = "kubernetes-events"
+      log_format = "json"
+      forward_to = [loki.write.local.receiver]
+    }
+
+    loki.write "local" {
+      endpoint {
+        url = "http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push"
+      }
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: alloy-events-data
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/instance: alloy-events
+    app.kubernetes.io/component: event-collector
+    app.kubernetes.io/part-of: loki
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+    pve-k8s-talos/storage-role: app-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: ${alloy_events_storage_class}
+  resources:
+    requests:
+      storage: ${alloy_events_storage_size}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alloy-events
+  namespace: monitoring
+  labels:
+    app: alloy-events
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/instance: alloy-events
+    app.kubernetes.io/component: event-collector
+    app.kubernetes.io/part-of: loki
+    app.kubernetes.io/managed-by: infrastructure
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: alloy
+      app.kubernetes.io/instance: alloy-events
+  template:
+    metadata:
+      labels:
+        app: alloy-events
+        app.kubernetes.io/name: alloy
+        app.kubernetes.io/instance: alloy-events
+        app.kubernetes.io/component: event-collector
+        app.kubernetes.io/part-of: loki
+        app.kubernetes.io/managed-by: infrastructure
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "12345"
+        prometheus.io/path: /metrics
+        checksum/config: ${alloy_events_config_hash}
+    spec:
+      priorityClassName: infra-observability
+      serviceAccountName: alloy-events
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 473
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: alloy
+          image: grafana/alloy:${alloy_image_tag}
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/var/lib/alloy
+            - --server.http.listen-addr=0.0.0.0:12345
+            - --disable-reporting
+          ports:
+            - name: monitoring
+              containerPort: 12345
+          startupProbe:
+            httpGet:
+              path: /-/ready
+              port: monitoring
+              scheme: HTTP
+            periodSeconds: 5
+            timeoutSeconds: 2
+            successThreshold: 1
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: monitoring
+              scheme: HTTP
+            periodSeconds: 10
+            timeoutSeconds: 2
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: monitoring
+              scheme: HTTP
+            periodSeconds: 30
+            timeoutSeconds: 2
+            successThreshold: 1
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: ${alloy_events_cpu_request}
+              memory: ${alloy_events_mem_request}
+            limits:
+              cpu: ${alloy_events_cpu_limit}
+              memory: ${alloy_events_mem_limit}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 473
+            runAsGroup: 473
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/alloy
+      volumes:
+        - name: config
+          configMap:
+            name: alloy-events-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: alloy-events-data

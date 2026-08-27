@@ -655,6 +655,18 @@ spec:
                 fi
               }
 
+              delete_managed_dashboard() {
+                uid="$1"
+                code="$(curl --connect-timeout 5 --max-time 30 -sS -u "$GRAFANA_ADMIN_USER:$GRAFANA_ADMIN_PASSWORD" \
+                  -o /tmp/dashboard-delete-response.json \
+                  -w '%%{http_code}' \
+                  -X DELETE "$api_url/api/dashboards/uid/$uid")"
+                if [ "$code" != "200" ] && [ "$code" != "404" ]; then
+                  cat /tmp/dashboard-delete-response.json
+                  exit 1
+                fi
+              }
+
               ensure_folder "infrastructure" "Infrastructure"
               ensure_folder "infrastructure-k8s" "K8s" "infrastructure"
               ensure_folder "infrastructure-k8s-net" "K8s net" "infrastructure"
@@ -679,6 +691,15 @@ spec:
               sync_dir /var/lib/grafana/dashboards/infrastructure/platform infrastructure-platform
               sync_dir /var/lib/grafana/dashboards/infrastructure/rook-ceph infrastructure-rook-ceph
               sync_dir /var/lib/grafana/dashboards/infrastructure/s3-storage infrastructure-s3-storage
+
+%{ if kubernetes_log_collector == "promtail" ~}
+              delete_managed_dashboard "alloy-internal-metrics"
+%{ else ~}
+              delete_managed_dashboard "promtail-internal-metrics"
+%{ endif ~}
+%{ if !kubernetes_events_enabled ~}
+              delete_managed_dashboard "kubernetes-events"
+%{ endif ~}
           env:
             - name: GRAFANA_ADMIN_USER
               valueFrom:

@@ -1,0 +1,250 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alloy-logs
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/instance: alloy-logs
+    app.kubernetes.io/component: log-collector
+    app.kubernetes.io/part-of: loki
+    app.kubernetes.io/managed-by: infrastructure
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: alloy-logs
+  labels:
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/instance: alloy-logs
+    app.kubernetes.io/component: log-collector
+    app.kubernetes.io/part-of: loki
+    app.kubernetes.io/managed-by: infrastructure
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: alloy-logs
+  labels:
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/instance: alloy-logs
+    app.kubernetes.io/component: log-collector
+    app.kubernetes.io/part-of: loki
+    app.kubernetes.io/managed-by: infrastructure
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: alloy-logs
+subjects:
+  - kind: ServiceAccount
+    name: alloy-logs
+    namespace: monitoring
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-logs-config
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/instance: alloy-logs
+    app.kubernetes.io/component: log-collector
+    app.kubernetes.io/part-of: loki
+    app.kubernetes.io/managed-by: infrastructure
+data:
+  config.alloy: |
+    logging {
+      level  = "info"
+      format = "logfmt"
+    }
+
+    discovery.kubernetes "pods" {
+      role = "pod"
+
+      selectors {
+        role  = "pod"
+        field = "spec.nodeName=" + sys.env("HOSTNAME")
+      }
+    }
+
+    discovery.relabel "pod_logs" {
+      targets = discovery.kubernetes.pods.targets
+
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "namespace"
+      }
+
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+      }
+
+      rule {
+        source_labels = ["__meta_kubernetes_pod_container_name"]
+        target_label  = "container"
+      }
+
+      rule {
+        source_labels = [
+          "__meta_kubernetes_pod_label_app_kubernetes_io_name",
+          "__meta_kubernetes_pod_label_app",
+          "__meta_kubernetes_pod_name",
+        ]
+        separator    = ";"
+        regex        = "^;*([^;]+).*$"
+        target_label = "service_name"
+      }
+
+      rule {
+        source_labels = [
+          "__meta_kubernetes_pod_name",
+          "__meta_kubernetes_namespace",
+          "__meta_kubernetes_pod_container_name",
+        ]
+        separator    = "_"
+        target_label = "__path__"
+        replacement  = "/var/log/containers/$1-*.log"
+      }
+    }
+
+    loki.source.file "pod_logs" {
+      targets       = discovery.relabel.pod_logs.output
+      tail_from_end = true
+      forward_to    = [loki.process.pod_logs.receiver]
+    }
+
+    loki.process "pod_logs" {
+      stage.cri {}
+      forward_to = [loki.write.local.receiver]
+    }
+
+    loki.write "local" {
+      endpoint {
+        url = "http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push"
+      }
+    }
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: alloy-logs
+  namespace: monitoring
+  labels:
+    app: alloy-logs
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/instance: alloy-logs
+    app.kubernetes.io/component: log-collector
+    app.kubernetes.io/part-of: loki
+    app.kubernetes.io/managed-by: infrastructure
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: alloy
+      app.kubernetes.io/instance: alloy-logs
+  template:
+    metadata:
+      labels:
+        app: alloy-logs
+        app.kubernetes.io/name: alloy
+        app.kubernetes.io/instance: alloy-logs
+        app.kubernetes.io/component: log-collector
+        app.kubernetes.io/part-of: loki
+        app.kubernetes.io/managed-by: infrastructure
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "12345"
+        prometheus.io/path: /metrics
+        checksum/config: ${alloy_config_hash}
+    spec:
+      priorityClassName: infra-observability
+      serviceAccountName: alloy-logs
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 473
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: alloy
+          image: grafana/alloy:${alloy_image_tag}
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/var/lib/alloy
+            - --server.http.listen-addr=0.0.0.0:12345
+            - --disable-reporting
+          ports:
+            - name: monitoring
+              containerPort: 12345
+          startupProbe:
+            httpGet:
+              path: /-/ready
+              port: monitoring
+              scheme: HTTP
+            periodSeconds: 5
+            timeoutSeconds: 2
+            successThreshold: 1
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: monitoring
+              scheme: HTTP
+            periodSeconds: 10
+            timeoutSeconds: 2
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: monitoring
+              scheme: HTTP
+            periodSeconds: 30
+            timeoutSeconds: 2
+            successThreshold: 1
+            failureThreshold: 3
+          env:
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          resources:
+            requests:
+              cpu: ${alloy_cpu_request}
+              memory: ${alloy_mem_request}
+            limits:
+              cpu: ${alloy_cpu_limit}
+              memory: ${alloy_mem_limit}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 473
+            runAsGroup: 473
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy
+              readOnly: true
+            - name: varlog
+              mountPath: /var/log
+              readOnly: true
+            - name: positions
+              mountPath: /var/lib/alloy
+      volumes:
+        - name: config
+          configMap:
+            name: alloy-logs-config
+        - name: varlog
+          hostPath:
+            path: /var/log
+            type: Directory
+        - name: positions
+          emptyDir: {}

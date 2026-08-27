@@ -72,6 +72,19 @@ locals {
   monitoring_prometheus_api_basic_auth_password = try(local.monitoring_credentials.prometheus_api_basic_auth_password, "")
   monitoring_prometheus_api_basic_auth_hash     = try(local.monitoring_credentials.prometheus_api_basic_auth_hash, "")
   monitoring_prometheus_oauth_cookie_secret     = try(local.monitoring_credentials.prometheus_oauth_cookie_secret, "")
+  kubernetes_log_collector_value                = lower(trimspace(try(local.kubernetes_log_collector, "promtail")))
+  kubernetes_events_enabled_value               = try(local.kubernetes_events_enabled, false)
+  alloy_image_tag_value                         = try(local.alloy_image_tag, "v1.18.1")
+  alloy_logs_cpu_request_value                  = try(local.alloy_logs_cpu_request, "100m")
+  alloy_logs_cpu_limit_value                    = try(local.alloy_logs_cpu_limit, "300m")
+  alloy_logs_mem_request_value                  = try(local.alloy_logs_mem_request, "256Mi")
+  alloy_logs_mem_limit_value                    = try(local.alloy_logs_mem_limit, "256Mi")
+  alloy_events_cpu_request_value                = try(local.alloy_events_cpu_request, "50m")
+  alloy_events_cpu_limit_value                  = try(local.alloy_events_cpu_limit, "200m")
+  alloy_events_mem_request_value                = try(local.alloy_events_mem_request, "128Mi")
+  alloy_events_mem_limit_value                  = try(local.alloy_events_mem_limit, "128Mi")
+  alloy_events_storage_class_value              = try(local.alloy_events_storage_class, local.prometheus_storage_class)
+  alloy_events_storage_size_value               = try(local.alloy_events_storage_size, "1Gi")
   prometheus_auth_keycloak_realm_value          = trimspace(try(local.prometheus_auth_keycloak_realm, ""))
   prometheus_auth_enabled                       = local.prometheus_auth_keycloak_realm_value != ""
   prometheus_auth_allowed_groups_value          = distinct(compact(try(local.prometheus_auth_allowed_groups, [])))
@@ -461,8 +474,20 @@ locals {
       secret_name = local.otlp_public_tls_secret_name_value
     }] : []
   )
-  monitoring_namespace    = yamldecode(file("${path.module}/namespace.yaml"))
-  grafana_dashboard_files = sort(fileset("${path.module}/grafana/dashboards", "**/*.json"))
+  monitoring_namespace = yamldecode(file("${path.module}/namespace.yaml"))
+  grafana_dashboard_files = sort([
+    for filename in fileset("${path.module}/grafana/dashboards", "**/*.json") : filename
+    if(
+      basename(filename) != "promtail_internal_metrics.json" ||
+      local.kubernetes_log_collector_value == "promtail"
+      ) && (
+      basename(filename) != "alloy_internal_metrics.json" ||
+      local.kubernetes_log_collector_value == "alloy"
+      ) && (
+      basename(filename) != "kubernetes_events.json" ||
+      local.kubernetes_events_enabled_value
+    )
+  ])
   grafana_dashboard_configmap_keys = {
     for filename in local.grafana_dashboard_files :
     filename => replace(filename, "/", "__")
@@ -664,6 +689,8 @@ locals {
       grafana_dashboard_root_mount_path         = local.grafana_dashboard_root_mount_path
       grafana_dashboard_group_sources           = local.grafana_dashboard_group_sources
       grafana_dashboard_sync_hash               = local.grafana_dashboard_sync_hash
+      kubernetes_log_collector                  = local.kubernetes_log_collector_value
+      kubernetes_events_enabled                 = local.kubernetes_events_enabled_value
       grafana_dashboard_provisioning_enabled    = local.grafana_dashboard_provisioning_enabled_value
       grafana_dashboard_provisioning_pvc_create = local.grafana_dashboard_provisioning_pvc_create_value
       grafana_dashboard_provisioning_pvc_name   = local.grafana_dashboard_provisioning_pvc_name_value
@@ -753,9 +780,39 @@ locals {
       promtail_cpu_limit   = local.promtail_cpu_limit
       promtail_mem_request = local.promtail_mem_request
       promtail_mem_limit   = local.promtail_mem_limit
+      promtail_config_hash = sha256(file("${path.module}/promtail.yaml"))
     })) :
     yamldecode(doc)
-    if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
+    if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0 && (
+      try(yamldecode(doc).kind, "") != "DaemonSet" ||
+      local.kubernetes_log_collector_value == "promtail"
+    )
+  ]
+  alloy_manifests = [
+    for doc in split("\n---\n", templatefile("${path.module}/alloy.yaml", {
+      alloy_image_tag   = local.alloy_image_tag_value
+      alloy_cpu_request = local.alloy_logs_cpu_request_value
+      alloy_cpu_limit   = local.alloy_logs_cpu_limit_value
+      alloy_mem_request = local.alloy_logs_mem_request_value
+      alloy_mem_limit   = local.alloy_logs_mem_limit_value
+      alloy_config_hash = sha256(file("${path.module}/alloy.yaml"))
+    })) :
+    yamldecode(doc)
+    if local.kubernetes_log_collector_value == "alloy" && length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
+  ]
+  alloy_events_manifests = [
+    for doc in split("\n---\n", templatefile("${path.module}/alloy-events.yaml", {
+      alloy_image_tag            = local.alloy_image_tag_value
+      alloy_events_cpu_request   = local.alloy_events_cpu_request_value
+      alloy_events_cpu_limit     = local.alloy_events_cpu_limit_value
+      alloy_events_mem_request   = local.alloy_events_mem_request_value
+      alloy_events_mem_limit     = local.alloy_events_mem_limit_value
+      alloy_events_storage_class = local.alloy_events_storage_class_value
+      alloy_events_storage_size  = local.alloy_events_storage_size_value
+      alloy_events_config_hash   = sha256(file("${path.module}/alloy-events.yaml"))
+    })) :
+    yamldecode(doc)
+    if local.kubernetes_events_enabled_value && length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
   ]
   kube_state_metrics_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/kube-state-metrics.yaml", {
@@ -810,6 +867,8 @@ locals {
     local.otlp_public_manifests,
     local.beyla_manifests,
     local.promtail_manifests,
+    local.alloy_manifests,
+    local.alloy_events_manifests,
     [
       {
         apiVersion = "v1"
@@ -905,6 +964,20 @@ check "loki_ingestion_limits_valid" {
   assert {
     condition     = local.loki_ingestion_rate_mb_value > 0 && local.loki_ingestion_burst_size_mb_value > 0
     error_message = "loki_ingestion_rate_mb and loki_ingestion_burst_size_mb must both be greater than zero."
+  }
+}
+
+check "kubernetes_log_collector_valid" {
+  assert {
+    condition     = contains(["promtail", "alloy"], local.kubernetes_log_collector_value)
+    error_message = format("kubernetes_log_collector must be \"promtail\" or \"alloy\", got %q", local.kubernetes_log_collector_value)
+  }
+}
+
+check "kubernetes_events_require_alloy" {
+  assert {
+    condition     = !local.kubernetes_events_enabled_value || local.kubernetes_log_collector_value == "alloy"
+    error_message = "kubernetes_events_enabled requires kubernetes_log_collector = \"alloy\"."
   }
 }
 
@@ -1354,6 +1427,14 @@ resource "kubernetes_manifest" "monitoring_ingress" {
 
 output "grafana_url" {
   value = "https://${local.grafana_hostname}"
+}
+
+output "kubernetes_log_collector" {
+  value = local.kubernetes_log_collector_value
+}
+
+output "kubernetes_events_enabled" {
+  value = local.kubernetes_events_enabled_value
 }
 
 output "prometheus_url" {

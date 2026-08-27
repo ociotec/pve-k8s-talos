@@ -56,13 +56,19 @@ locals {
   ]
   # Enable localhost:8080 above only in development-cluster constants.
   # Beyla auto-instruments only repository-managed oauth2-proxy containers.
-  beyla_enabled                = true
-  beyla_image_tag              = "3.15.0"
-  beyla_cpu_request            = "100m"
-  beyla_cpu_limit              = "500m"
-  beyla_mem_request            = "256Mi"
-  beyla_mem_limit              = "256Mi"
-  beyla_sampling_ratio         = 0.10
+  beyla_enabled        = true
+  beyla_image_tag      = "3.15.0"
+  beyla_cpu_request    = "100m"
+  beyla_cpu_limit      = "500m"
+  beyla_mem_request    = "256Mi"
+  beyla_mem_limit      = "256Mi"
+  beyla_sampling_ratio = 0.10
+
+  # Existing clusters without this setting remain on Promtail until they opt in.
+  kubernetes_log_collector  = "alloy"
+  kubernetes_events_enabled = true
+  alloy_image_tag           = "v1.18.1"
+
   promtail_image_tag           = "3.6.10"
   kube_state_metrics_image_tag = "v2.19.1"
   node_exporter_image_tag      = "v1.12.1"
@@ -130,6 +136,18 @@ locals {
   promtail_cpu_limit   = "300m"
   promtail_mem_request = "256Mi"
   promtail_mem_limit   = "256Mi"
+
+  alloy_logs_cpu_request = "100m"
+  alloy_logs_cpu_limit   = "300m"
+  alloy_logs_mem_request = "256Mi"
+  alloy_logs_mem_limit   = "256Mi"
+
+  alloy_events_cpu_request   = "50m"
+  alloy_events_cpu_limit     = "200m"
+  alloy_events_mem_request   = "128Mi"
+  alloy_events_mem_limit     = "128Mi"
+  alloy_events_storage_class = local.replica_storage_class
+  alloy_events_storage_size  = "1Gi"
 
   otel_collector_cpu_request             = "100m"
   otel_collector_cpu_limit               = "500m"

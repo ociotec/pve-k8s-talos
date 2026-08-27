@@ -102,6 +102,7 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "3101"
         prometheus.io/path: /metrics
+        checksum/config: ${promtail_config_hash}
     spec:
       priorityClassName: infra-observability
       serviceAccountName: promtail

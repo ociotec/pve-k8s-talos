@@ -1,0 +1,91 @@
+{
+  "annotations": {"list": []},
+  "description": "Operational health of the Alloy DaemonSet that collects Kubernetes pod logs for Loki.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "showPercentChange": false, "textMode": "auto", "wideLayout": true},
+      "targets": [{"editorMode": "code", "expr": "min(up{app=\"alloy-logs\",namespace=~\"$namespace\",pod=~\"$pod\",node=~\"$node\"})", "legendFormat": "ready", "range": true, "refId": "A"}],
+      "title": "Scrape health",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}, "overrides": []},
+      "gridPos": {"h": 5, "w": 6, "x": 6, "y": 0},
+      "id": 2,
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "showPercentChange": false, "textMode": "auto", "wideLayout": true},
+      "targets": [{"editorMode": "code", "expr": "sum(alloy_component_controller_running_components{namespace=~\"$namespace\",pod=~\"$pod\",health_type!=\"healthy\"})", "legendFormat": "unhealthy", "range": true, "refId": "A"}],
+      "title": "Unhealthy components",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}}, "overrides": []},
+      "gridPos": {"h": 5, "w": 6, "x": 12, "y": 0},
+      "id": 3,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "showPercentChange": false, "textMode": "auto", "wideLayout": true},
+      "targets": [{"editorMode": "code", "expr": "sum(loki_source_file_files_active_total{namespace=~\"$namespace\",pod=~\"$pod\"})", "legendFormat": "files", "range": true, "refId": "A"}],
+      "title": "Active log files",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}, "overrides": []},
+      "gridPos": {"h": 5, "w": 6, "x": 18, "y": 0},
+      "id": 4,
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["sum"], "fields": "", "values": false}, "showPercentChange": false, "textMode": "auto", "wideLayout": true},
+      "targets": [{"editorMode": "code", "expr": "sum(increase(loki_write_dropped_entries_total{namespace=~\"$namespace\",pod=~\"$pod\"}[$__range]))", "legendFormat": "dropped", "range": true, "refId": "A"}],
+      "title": "Dropped entries",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": {"legend": false, "tooltip": false, "viz": false}, "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "mappings": [], "unit": "lines/s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+      "id": 5,
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"hideZeros": false, "mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"editorMode": "code", "expr": "sum by (pod) (rate(loki_source_file_read_lines_total{namespace=~\"$namespace\",pod=~\"$pod\"}[$__rate_interval]))", "legendFormat": "read {{pod}}", "range": true, "refId": "A"},
+        {"editorMode": "code", "expr": "sum by (pod) (rate(loki_write_sent_entries_total{namespace=~\"$namespace\",pod=~\"$pod\"}[$__rate_interval]))", "legendFormat": "sent {{pod}}", "range": true, "refId": "B"}
+      ],
+      "title": "Read and sent entries",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": {"legend": false, "tooltip": false, "viz": false}, "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "mappings": []}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+      "id": 6,
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"hideZeros": false, "mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"editorMode": "code", "expr": "sum by (reason) (rate(loki_write_dropped_entries_total{namespace=~\"$namespace\",pod=~\"$pod\"}[$__rate_interval]))", "legendFormat": "dropped {{reason}}", "range": true, "refId": "A"},
+        {"editorMode": "code", "expr": "sum by (pod) (rate(loki_write_batch_retries_total{namespace=~\"$namespace\",pod=~\"$pod\"}[$__rate_interval]))", "legendFormat": "retries {{pod}}", "range": true, "refId": "B"}
+      ],
+      "title": "Delivery problems",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 41,
+  "tags": ["alloy", "loki", "monitoring"],
+  "templating": {"list": [
+    {"current": {"selected": false, "text": "Prometheus", "value": "Prometheus"}, "hide": 0, "includeAll": false, "label": "Datasource", "name": "datasource", "options": [], "query": "prometheus", "refresh": 1, "type": "datasource"},
+    {"allValue": ".*", "current": {"selected": false, "text": "monitoring", "value": "monitoring"}, "datasource": {"type": "prometheus", "uid": "${datasource}"}, "definition": "label_values(up{app=\"alloy-logs\"}, namespace)", "hide": 0, "includeAll": true, "label": "Namespace", "multi": true, "name": "namespace", "query": {"query": "label_values(up{app=\"alloy-logs\"}, namespace)", "refId": "A"}, "refresh": 2, "type": "query"},
+    {"allValue": ".*", "current": {"selected": false, "text": "All", "value": "$__all"}, "datasource": {"type": "prometheus", "uid": "${datasource}"}, "definition": "label_values(up{app=\"alloy-logs\",namespace=~\"$namespace\"}, node)", "hide": 0, "includeAll": true, "label": "Node", "multi": true, "name": "node", "query": {"query": "label_values(up{app=\"alloy-logs\",namespace=~\"$namespace\"}, node)", "refId": "A"}, "refresh": 2, "type": "query"},
+    {"allValue": ".*", "current": {"selected": false, "text": "All", "value": "$__all"}, "datasource": {"type": "prometheus", "uid": "${datasource}"}, "definition": "label_values(up{app=\"alloy-logs\",namespace=~\"$namespace\",node=~\"$node\"}, pod)", "hide": 0, "includeAll": true, "label": "Pod", "multi": true, "name": "pod", "query": {"query": "label_values(up{app=\"alloy-logs\",namespace=~\"$namespace\",node=~\"$node\"}, pod)", "refId": "A"}, "refresh": 2, "type": "query"}
+  ]},
+  "time": {"from": "now-6h", "to": "now"},
+  "timezone": "browser",
+  "title": "Alloy internal metrics",
+  "uid": "alloy-internal-metrics",
+  "version": 1
+}

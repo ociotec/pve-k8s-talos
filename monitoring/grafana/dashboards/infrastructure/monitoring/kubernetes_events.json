@@ -1,0 +1,56 @@
+{
+  "annotations": {"list": []},
+  "description": "Kubernetes Events retained as structured JSON logs in Loki.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {"type": "loki", "uid": "${loki_datasource}"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "mappings": [], "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}, "overrides": []},
+      "gridPos": {"h": 5, "w": 8, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["sum"], "fields": "", "values": false}, "showPercentChange": false, "textMode": "auto", "wideLayout": true},
+      "targets": [{"expr": "sum(count_over_time({job=\"kubernetes-events\",namespace=~\"$namespace\"} | json | type=\"Warning\" [$__auto]))", "legendFormat": "warnings", "queryType": "range", "refId": "A"}],
+      "title": "Warning updates",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "loki", "uid": "${loki_datasource}"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "bars", "fillOpacity": 40, "gradientMode": "none", "hideFrom": {"legend": false, "tooltip": false, "viz": false}, "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "normal"}}, "mappings": []}, "overrides": []},
+      "gridPos": {"h": 5, "w": 16, "x": 8, "y": 0},
+      "id": 2,
+      "options": {"legend": {"calcs": ["sum"], "displayMode": "table", "placement": "right", "showLegend": true}, "tooltip": {"hideZeros": false, "mode": "multi", "sort": "desc"}},
+      "targets": [{"expr": "sum by (reason) (count_over_time({job=\"kubernetes-events\",namespace=~\"$namespace\"} | json | type=~\"$type\" | reason=~\"$reason\" [$__auto]))", "legendFormat": "{{reason}}", "queryType": "range", "refId": "A"}],
+      "title": "Event updates by reason",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "loki", "uid": "${loki_datasource}"},
+      "gridPos": {"h": 15, "w": 24, "x": 0, "y": 5},
+      "id": 3,
+      "options": {"dedupStrategy": "none", "enableLogDetails": true, "prettifyLogMessage": true, "showCommonLabels": false, "showLabels": false, "showTime": true, "sortOrder": "Descending", "wrapLogMessage": true},
+      "targets": [{"expr": "{job=\"kubernetes-events\",namespace=~\"$namespace\"} | json | type=~\"$type\" | reason=~\"$reason\" | kind=~\"$kind\" | name=~\"$name\" | line_format `{{.type}} {{.reason}} {{.kind}}/{{.name}} — {{.msg}}`", "queryType": "range", "refId": "A"}],
+      "title": "Kubernetes Events",
+      "type": "logs"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 41,
+  "tags": ["kubernetes", "events", "loki"],
+  "templating": {"list": [
+    {"current": {"selected": false, "text": "Loki", "value": "Loki"}, "hide": 0, "includeAll": false, "label": "Datasource", "name": "loki_datasource", "options": [], "query": "loki", "refresh": 1, "type": "datasource"},
+    {"allValue": ".*", "current": {"selected": false, "text": "All", "value": "$__all"}, "datasource": {"type": "loki", "uid": "${loki_datasource}"}, "definition": "label_values({job=\"kubernetes-events\"}, namespace)", "hide": 0, "includeAll": true, "label": "Namespace", "multi": true, "name": "namespace", "query": "label_values({job=\"kubernetes-events\"}, namespace)", "refresh": 2, "type": "query"},
+    {"allValue": ".*", "current": {"selected": false, "text": "All", "value": "$__all"}, "datasource": {"type": "loki", "uid": "${loki_datasource}"}, "definition": "label_values({job=\"kubernetes-events\"} | json, type)", "hide": 0, "includeAll": true, "label": "Type", "multi": true, "name": "type", "query": "label_values({job=\"kubernetes-events\"} | json, type)", "refresh": 2, "type": "query"},
+    {"allValue": ".*", "current": {"selected": false, "text": "All", "value": "$__all"}, "datasource": {"type": "loki", "uid": "${loki_datasource}"}, "definition": "label_values({job=\"kubernetes-events\"} | json, reason)", "hide": 0, "includeAll": true, "label": "Reason", "multi": true, "name": "reason", "query": "label_values({job=\"kubernetes-events\"} | json, reason)", "refresh": 2, "type": "query"},
+    {"current": {"selected": true, "text": ".*", "value": ".*"}, "hide": 0, "label": "Kind regex", "name": "kind", "options": [{"selected": true, "text": ".*", "value": ".*"}], "query": ".*", "type": "textbox"},
+    {"current": {"selected": true, "text": ".*", "value": ".*"}, "hide": 0, "label": "Name regex", "name": "name", "options": [{"selected": true, "text": ".*", "value": ".*"}], "query": ".*", "type": "textbox"}
+  ]},
+  "time": {"from": "now-6h", "to": "now"},
+  "timezone": "browser",
+  "title": "Kubernetes Events",
+  "uid": "kubernetes-events",
+  "version": 1
+}

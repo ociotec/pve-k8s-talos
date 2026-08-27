@@ -1584,6 +1584,8 @@ prepare_monitoring_workspace() {
   link_into_workspace "${repo_root}/monitoring/otlp-public.yaml" "${workspace}/otlp-public.yaml"
   link_into_workspace "${repo_root}/monitoring/beyla.yaml" "${workspace}/beyla.yaml"
   link_into_workspace "${repo_root}/monitoring/promtail.yaml" "${workspace}/promtail.yaml"
+  link_into_workspace "${repo_root}/monitoring/alloy.yaml" "${workspace}/alloy.yaml"
+  link_into_workspace "${repo_root}/monitoring/alloy-events.yaml" "${workspace}/alloy-events.yaml"
   link_into_workspace "${repo_root}/monitoring/kube-state-metrics.yaml" "${workspace}/kube-state-metrics.yaml"
   link_into_workspace "${repo_root}/monitoring/node-exporter.yaml" "${workspace}/node-exporter.yaml"
   link_into_workspace "${repo_root}/monitoring/grafana" "${workspace}/grafana"
@@ -1959,6 +1961,80 @@ wait_for_daemonsets_ready() {
   for daemonset_name in "${daemonsets[@]}"; do
     wait_for_rollout_ready "${namespace}" "daemonset/${daemonset_name}" "${timeout}"
   done
+}
+
+wait_for_log_collector_delivery() {
+  local app_label="$1"
+  local port="$2"
+  local health_path="$3"
+  local sent_metric="$4"
+  local timeout_seconds="${5:-180}"
+  local start
+  local pod_names
+  local pod_name
+  local metrics
+  local sent_entries
+  local all_healthy
+
+  start="$(date +%s)"
+  while true; do
+    all_healthy=true
+    pod_names="$(kubectl -n monitoring get pods -l "app=${app_label}" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)"
+    if [[ -z "${pod_names}" ]]; then
+      all_healthy=false
+    fi
+
+    while IFS= read -r pod_name; do
+      [[ -n "${pod_name}" ]] || continue
+      if ! kubectl get --raw "/api/v1/namespaces/monitoring/pods/${pod_name}:${port}/proxy${health_path}" >/dev/null 2>&1; then
+        all_healthy=false
+        break
+      fi
+      metrics="$(kubectl get --raw "/api/v1/namespaces/monitoring/pods/${pod_name}:${port}/proxy/metrics" 2>/dev/null || true)"
+      sent_entries="$(printf '%s\n' "${metrics}" | awk -v metric="${sent_metric}" '$1 ~ ("^" metric "(\\{|$)") { total += $2 } END { print total + 0 }')"
+      if ! awk -v value="${sent_entries}" 'BEGIN { exit !(value > 0) }'; then
+        all_healthy=false
+        break
+      fi
+    done <<<"${pod_names}"
+
+    if [[ "${all_healthy}" == "true" ]]; then
+      return 0
+    fi
+    if (( $(date +%s) - start >= timeout_seconds )); then
+      error "Timed out confirming successful Loki delivery from ${app_label} on every collector pod." >&2
+      kubectl -n monitoring get pods -l "app=${app_label}" -o wide >&2 || true
+      return 1
+    fi
+    sleep 5
+  done
+}
+
+finalize_log_collector_migration() {
+  local desired_collector="$1"
+
+  case "${desired_collector}" in
+    promtail)
+      message "Confirming Promtail health and successful Loki delivery before removing any inactive Alloy collector..."
+      wait_for_log_collector_delivery "promtail" "3101" "/ready" "promtail_sent_entries_total" "180"
+      if kubectl -n monitoring get daemonset/alloy-logs >/dev/null 2>&1; then
+        message "Promtail is confirmed; removing the inactive Alloy log collector."
+        kubectl -n monitoring delete daemonset/alloy-logs --wait=true --timeout=300s >/dev/null
+      fi
+      ;;
+    alloy)
+      message "Confirming Alloy health and successful Loki delivery before removing Promtail..."
+      wait_for_log_collector_delivery "alloy-logs" "12345" "/-/healthy" "loki_write_sent_entries_total" "180"
+      if kubectl -n monitoring get daemonset/promtail >/dev/null 2>&1; then
+        message "Alloy is confirmed; removing the inactive Promtail log collector."
+        kubectl -n monitoring delete daemonset/promtail --wait=true --timeout=300s >/dev/null
+      fi
+      ;;
+    *)
+      error "Unsupported Kubernetes log collector: ${desired_collector}" >&2
+      return 1
+      ;;
+  esac
 }
 
 wait_for_rollout_ready() {
@@ -3211,6 +3287,10 @@ else
     )"
   fi
   run tofu -chdir="${cluster_monitoring_workspace}" apply -auto-approve
+  monitoring_log_collector="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw kubernetes_log_collector)"
+  monitoring_events_enabled="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw kubernetes_events_enabled)"
+  message "Kubernetes log collector: ${DATA_FMT_START}${monitoring_log_collector}${DATA_FMT_END}"
+  message "Kubernetes event collection: ${DATA_FMT_START}${monitoring_events_enabled}${DATA_FMT_END}"
   monitoring_prometheus_config_hash_after="$(
     kubernetes_configmap_key_sha256 "monitoring" "prometheus-config" "prometheus.yml"
   )"
@@ -3259,11 +3339,18 @@ else
   message "Waiting for monitoring PVCs, workloads, and endpoints to become ready..."
   monitoring_deployments=(grafana-postgres grafana loki tempo otel-collector prometheus kube-state-metrics)
   monitoring_daemonsets=(node-exporter promtail)
+  if [[ "${monitoring_log_collector}" == "alloy" ]]; then
+    monitoring_daemonsets=(node-exporter alloy-logs)
+  fi
   if kubectl -n monitoring get daemonset/beyla >/dev/null 2>&1; then
     monitoring_daemonsets+=(beyla)
   fi
   monitoring_services=(grafana-postgres grafana loki tempo otel-collector prometheus kube-state-metrics node-exporter)
   monitoring_pvcs=(grafana-postgres-data grafana-data loki-data tempo-data prometheus-data)
+  if [[ "${monitoring_events_enabled}" == "true" ]]; then
+    monitoring_deployments+=(alloy-events)
+    monitoring_pvcs+=(alloy-events-data)
+  fi
   if kubectl -n monitoring get deploy/prometheus-oauth2-proxy >/dev/null 2>&1; then
     monitoring_deployments+=(prometheus-oauth2-proxy)
     monitoring_services+=(prometheus-oauth2-proxy)
@@ -3275,6 +3362,7 @@ else
   wait_for_deployments_ready "monitoring" "600s" "${monitoring_deployments[@]}"
   wait_for_daemonsets_ready "monitoring" "600s" "${monitoring_daemonsets[@]}"
   wait_for_service_endpoints "monitoring" "600" "${monitoring_services[@]}"
+  finalize_log_collector_migration "${monitoring_log_collector}"
   grafana_dashboard_sync_job="$(
     kubectl -n monitoring get jobs -l app=grafana-dashboard-sync \
       -o jsonpath='{range .items[*]}{.metadata.creationTimestamp}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null \

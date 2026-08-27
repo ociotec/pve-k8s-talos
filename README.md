@@ -589,6 +589,8 @@ The stack also includes kube-state-metrics (requests/limits), kubelet cAdvisor s
 The manifests are rendered from templates using those values.
 Use the same domain as `k8s_net_constants.tf` so TLS and DNS align.
 
+Kubernetes pod-log collection is selected per cluster with `kubernetes_log_collector = "promtail"` or `"alloy"`. Clusters that omit the setting remain on Promtail for backward compatibility; new clusters should use Alloy. The deployment waits for the selected collector to become healthy and successfully send entries to Loki before removing an inactive collector DaemonSet, so Promtail remains available as a cluster-by-cluster rollback path. Grafana provisions only the internal-metrics dashboard for the selected collector. Set `kubernetes_events_enabled = true` only with Alloy to retain Kubernetes Events as structured JSON logs in Loki and provision the Kubernetes Events dashboard.
+
 When `grafana_auth_keycloak_realm` is set in `monitoring_constants.tf`, OpenTofu configures Grafana generic OAuth against the generated Keycloak `grafana` client. Use `grafana_auth_view_groups` for Grafana `Viewer` access and `grafana_auth_edit_groups` for Grafana `Editor` access. Keep the local Grafana admin credentials for server administration and break-glass recovery.
 
 When `prometheus_auth_keycloak_realm` is set in `monitoring_constants.tf`, OpenTofu deploys an `oauth2-proxy` instance for Prometheus and protects the Prometheus ingress with ingress-nginx external auth annotations. The selected Keycloak realm must expose a confidential `prometheus` OIDC client with redirect URI `https://<prometheus-host>/oauth2/callback`. Use `prometheus_auth_allowed_groups` to restrict access.
