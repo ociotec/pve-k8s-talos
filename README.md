@@ -136,6 +136,7 @@ For the Rancher/Portainer/Grafana + Keycloak authentication split of responsibil
   - `ceph_mode = "internal"` to run a full Rook-managed Ceph cluster in Kubernetes.
   - `ceph_mode = "external"` to consume a native PVE Ceph cluster from Rook after `k8s-net`.
   - Defines block and file storage profiles, storage class names, pool/filesystem naming, and all external Ceph connection/CSI credentials in a single file.
+  - See [External Ceph Storage Architecture](docs/ceph-external-storage.md) for the PVE/Rook ownership boundary and data flow.
 - `certs/`
   - Cluster-specific CA and certificate files used by `k8s_net_constants.tf`.
   - When `tls_source = "ca_issuer"` and `root_ca_crt` / `root_ca_key` are set, `scripts/ensure-credentials.sh` generates a missing internal root CA here before Talos asset generation.
