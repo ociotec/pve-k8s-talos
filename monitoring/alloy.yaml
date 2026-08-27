@@ -169,9 +169,6 @@ spec:
       priorityClassName: infra-observability
       serviceAccountName: alloy-logs
       terminationGracePeriodSeconds: 30
-      securityContext:
-        fsGroup: 473
-        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: alloy
           image: grafana/alloy:${alloy_image_tag}
@@ -229,9 +226,9 @@ spec:
             capabilities:
               drop: ["ALL"]
             readOnlyRootFilesystem: true
-            runAsNonRoot: true
-            runAsUser: 473
-            runAsGroup: 473
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
             seccompProfile:
               type: RuntimeDefault
           volumeMounts:
