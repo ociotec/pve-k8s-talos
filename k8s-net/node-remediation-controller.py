@@ -129,12 +129,7 @@ class Kubernetes:
 
     def patch_node(self, node, annotations=None, add_taints=False, remove_taints=False, remove_quarantine=False):
         metadata = node.setdefault("metadata", {})
-        current_annotations = dict(metadata.get("annotations") or {})
-        for key, value in (annotations or {}).items():
-            if value is None:
-                current_annotations.pop(key, None)
-            else:
-                current_annotations[key] = str(value)
+        annotation_patch = {key: None if value is None else str(value) for key, value in (annotations or {}).items()}
         taints = list(node.get("spec", {}).get("taints") or [])
         if remove_taints:
             taints = [taint for taint in taints if taint.get("key") != OUT_OF_SERVICE]
@@ -143,7 +138,7 @@ class Kubernetes:
         if add_taints:
             existing = {(taint.get("key"), taint.get("effect")) for taint in taints}
             taints.extend(taint for taint in TAINTS if (taint["key"], taint["effect"]) not in existing)
-        payload = {"metadata": {"annotations": current_annotations}, "spec": {"taints": taints}}
+        payload = {"metadata": {"annotations": annotation_patch}, "spec": {"taints": taints}}
         return self.request(
             f"/api/v1/nodes/{urllib.parse.quote(metadata['name'])}",
             "PATCH",

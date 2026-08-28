@@ -107,6 +107,20 @@ class ControllerTest(unittest.TestCase):
 
         self.assertEqual(remediation.timestamp(value), "2026-08-28T10:00:00.000000Z")
 
+    def test_kubernetes_patch_sends_null_for_annotations_to_remove(self):
+        kube = remediation.Kubernetes.__new__(remediation.Kubernetes)
+        kube.request = mock.Mock(return_value={})
+        worker = node("worker-1", state="recovering")
+
+        kube.patch_node(worker, annotations={remediation.STATE: None, remediation.LAST_ERROR: None})
+
+        payload = kube.request.call_args.args[2]
+        self.assertEqual(
+            payload["metadata"]["annotations"],
+            {remediation.STATE: None, remediation.LAST_ERROR: None},
+        )
+        self.assertEqual(kube.request.call_args.args[3], "application/merge-patch+json")
+
     def test_prometheus_metrics_include_leader_and_node_progress(self):
         remediation.HealthHandler.publish_controller("controller-1", True)
         remediation.HealthHandler.publish_node("worker-1", "storage-fencing", 100.0, 28.5, True)
