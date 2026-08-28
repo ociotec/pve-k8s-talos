@@ -9,7 +9,8 @@ usage() {
   cat <<'USAGE'
 Usage:
   cluster-state-sync.sh preflight \
-    --platform-dir <path> --cluster-dir <path>
+    --platform-dir <path> --cluster-dir <path> \
+    [--development|--allow-runtime-dirty]
 
   cluster-state-sync.sh persist \
     --platform-dir <path> --cluster-dir <path> \
@@ -36,6 +37,8 @@ cluster_repo_dir=""
 deployment_id=""
 outcome=""
 include_purged_credentials=false
+allow_runtime_dirty=false
+development=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -57,6 +60,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --include-purged-credentials)
       include_purged_credentials=true
+      shift
+      ;;
+    --allow-runtime-dirty)
+      allow_runtime_dirty=true
+      shift
+      ;;
+    --development)
+      development=true
       shift
       ;;
     -h|--help)
@@ -108,15 +119,82 @@ repository_dirty() {
   [[ -n "$(git -C "${path}" status --porcelain=v1 --untracked-files=normal)" ]]
 }
 
+cluster_source_status() {
+  git -C "${cluster_repo_dir}" status \
+    --porcelain=v1 \
+    --untracked-files=all \
+    -- \
+    . \
+    ":(exclude,glob)out/**/terraform.tfstate" \
+    ":(exclude)out/kubeconfig" \
+    ":(exclude)out/talosconfig" \
+    ":(exclude)out/.talos-bootstrap-complete"
+}
+
 require_repository_root "${platform_dir}" "Platform repository"
 require_repository_root "${cluster_repo_dir}" "Cluster repository"
 
+if [[ "${development}" == "true" && "${allow_runtime_dirty}" == "true" ]]; then
+  error "--development and --allow-runtime-dirty are mutually exclusive." >&2
+  exit 1
+fi
+if [[ "${command}" == "persist" \
+  && ("${development}" == "true" || "${allow_runtime_dirty}" == "true") ]]; then
+  error "Development preflight options are not valid with persist." >&2
+  exit 1
+fi
+
 if [[ "${command}" == "preflight" ]]; then
+  if [[ "${development}" == "true" ]]; then
+    for repository_spec in \
+      "${platform_dir}|Platform" \
+      "${cluster_repo_dir}|Cluster"; do
+      repository_path="${repository_spec%%|*}"
+      repository_role="${repository_spec#*|}"
+      repository_branch="$(
+        git -C "${repository_path}" symbolic-ref --quiet --short HEAD || true
+      )"
+      if [[ -z "${repository_branch}" ]]; then
+        error "${repository_role} repository must be on a named branch in development mode." >&2
+        exit 1
+      fi
+      repository_upstream="$(
+        git -C "${repository_path}" rev-parse \
+          --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true
+      )"
+      if [[ -z "${repository_upstream}" ]]; then
+        error "${repository_role} branch ${repository_branch} does not have an upstream." >&2
+        exit 1
+      fi
+      message "Checking ${repository_role,,} repository ${repository_branch} against ${repository_upstream} without synchronizing it..."
+      git -C "${repository_path}" fetch --quiet
+      repository_ahead="$(
+        git -C "${repository_path}" rev-list --count "${repository_upstream}..HEAD"
+      )"
+      repository_behind="$(
+        git -C "${repository_path}" rev-list --count "HEAD..${repository_upstream}"
+      )"
+      if [[ "${repository_ahead}" -ne 0 || "${repository_behind}" -ne 0 ]]; then
+        error "warning: ${repository_role} branch differs from its upstream (ahead=${repository_ahead}, behind=${repository_behind}); development mode will continue without pull or push." >&2
+      fi
+    done
+    exit 0
+  fi
+
   if repository_dirty "${platform_dir}"; then
     error "Platform repository is dirty; commit or discard its changes before deploying." >&2
     exit 1
   fi
-  if repository_dirty "${cluster_repo_dir}"; then
+  if [[ "${allow_runtime_dirty}" == "true" ]]; then
+    unexpected_cluster_changes="$(cluster_source_status)"
+    if [[ -n "${unexpected_cluster_changes}" ]]; then
+      error "Development consolidation requires clean cluster source files; only runtime state may be dirty:" >&2
+      while IFS= read -r changed_line; do
+        error "  ${changed_line}" >&2
+      done <<<"${unexpected_cluster_changes}"
+      exit 1
+    fi
+  elif repository_dirty "${cluster_repo_dir}"; then
     error "Cluster repository is dirty; commit or discard its changes before deploying." >&2
     exit 1
   fi
@@ -165,17 +243,32 @@ if [[ "${command}" == "preflight" ]]; then
     exit 1
   fi
 
-  message "Synchronizing cluster repository ${branch} with ${upstream}..."
-  git -C "${cluster_repo_dir}" pull --ff-only --quiet
+  if [[ "${allow_runtime_dirty}" == "true" ]]; then
+    message "Checking cluster repository ${branch} against ${upstream} for development consolidation..."
+    git -C "${cluster_repo_dir}" fetch --quiet
+    cluster_behind="$(git -C "${cluster_repo_dir}" rev-list --count "HEAD..${upstream}")"
+    if [[ "${cluster_behind}" -ne 0 ]]; then
+      error "Cluster branch ${branch} is behind ${upstream}; reconcile it before consolidating development state." >&2
+      exit 1
+    fi
+  else
+    message "Synchronizing cluster repository ${branch} with ${upstream}..."
+    git -C "${cluster_repo_dir}" pull --ff-only --quiet
 
-  if repository_dirty "${cluster_repo_dir}"; then
-    error "Cluster repository became dirty after git pull; refusing to deploy." >&2
-    exit 1
+    if repository_dirty "${cluster_repo_dir}"; then
+      error "Cluster repository became dirty after git pull; refusing to deploy." >&2
+      exit 1
+    fi
   fi
   cluster_ahead="$(git -C "${cluster_repo_dir}" rev-list --count "${upstream}..HEAD")"
   if [[ "${cluster_ahead}" -ne 0 ]]; then
-    message "Pushing ${cluster_ahead} pending cluster repository commit(s)..."
-    git -C "${cluster_repo_dir}" push --quiet
+    if [[ "${allow_runtime_dirty}" == "true" ]]; then
+      error "Cluster branch ${branch} has ${cluster_ahead} unpushed commit(s); push them before consolidating development state." >&2
+      exit 1
+    else
+      message "Pushing ${cluster_ahead} pending cluster repository commit(s)..."
+      git -C "${cluster_repo_dir}" push --quiet
+    fi
   fi
   exit 0
 fi

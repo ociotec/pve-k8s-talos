@@ -740,15 +740,16 @@ private cluster repository versions runtime state, include
 `out/.talos-bootstrap-complete`. The last file is the stable lifecycle marker
 that prevents an existing Talos cluster from being bootstrapped again.
 
-Every `scripts/deploy.sh` run requires clean platform and cluster
-repositories and requires the platform branch to match its upstream. It pulls
-the cluster branch with `--ff-only`, pushes any clean pending cluster commits,
-and commits and pushes only those runtime files after success. It also
-preserves and pushes partial runtime state after a failed deployment. Any
-changed file outside the runtime allowlist blocks the automatic commit.
-`--destroy-only` records the successful removal of runtime files, so the next
-normal deployment starts as a new cluster. This synchronization cannot be
-disabled for a `deploy.sh` run.
+Normal `scripts/deploy.sh` runs require clean platform and cluster repositories
+and synchronize the cluster repository and its allowlisted runtime state. For
+iterative work on a test cluster, `--development` permits dirty source
+worktrees and keeps all runtime state local without Git pull, commit, or push.
+It leaves persistent local and Kubernetes warnings and must be run from the
+same PC and worktree. After committing and pushing the final source changes,
+use `--consolidate-development` with the same minimum skip flags to deploy once
+from clean source, publish runtime state, and clear development mode. Full
+cluster destruction and purge flags are unavailable in local development mode;
+ordinary resource replacement and deletion during apply remain allowed.
 
 Run operations from only one PC at a time. The ConfigMap reports the source
 revisions used by the deployment and the resulting cluster runtime-state

@@ -22,6 +22,11 @@ Their canonical, credential-free origin URLs are stored once in
 `repositories.json`. Each deployment section stores the commit and dirty state
 used from both repositories.
 
+`development.json` is present while a local development deployment is active.
+It records the base commits and SHA-256 fingerprints of both worktrees, but not
+their patch content. Such a deployment is identifiable but not reproducible
+from Git alone.
+
 After a successful deployment, `runtime-state.json` stores the cluster
 repository commit containing the resulting OpenTofu state and runtime files.
 This is intentionally separate from the cluster source revision captured at
@@ -74,10 +79,11 @@ generated workspaces or tracked state files. If either source worktree is dirty
 at that point, its revision records `dirty = true`. A dirty revision identifies
 the base commit but is not exactly reproducible from another clone.
 
-Mandatory state synchronization means deployment starts only from clean
-repositories, so both dirty flags are false. The later runtime-state commit is
-a derived deployment result and does not change the source revision used by
-each section.
+Normal and consolidation deployments record clean source revisions. A section
+written in development mode records `mode = "development"`,
+`reproducible = false`, dirty flags, and worktree fingerprints. The later
+runtime-state commit in normal mode is a derived deployment result and does not
+change the source revision used by each section.
 
 An initial adoption entry has:
 
@@ -128,6 +134,47 @@ both known commits explicitly:
 Always inspect the actual section set before creating a baseline. Do not add a
 section merely because its constants file or generated workspace exists.
 
+## Local Development Deployments
+
+Use development mode only for iterative infrastructure work on a designated
+test cluster:
+
+```bash
+../../scripts/deploy.sh --development <minimum skip flags>
+```
+
+This mode permits uncommitted changes in both platform and cluster repositories
+and performs no Git pull, commit, or push. OpenTofu runtime state remains local
+to the current PC. A private pre-deployment backup is kept below the cluster
+repository's Git directory, and both the local marker and the Kubernetes
+ConfigMap identify the active development session.
+
+Normal resource replacement or deletion inside an apply remains available.
+Full cluster destruction and credential or external-storage purges are excluded
+because their terminal state would otherwise exist only on one PC.
+
+While development mode is active:
+
+- continue from the same PC, worktree, and `out/` directory;
+- do not reset, clean, pull, or discard local runtime state;
+- treat the local state as newer than the cluster repository;
+- expect every deployment command and status inspection to report that the
+  source is not reproducible.
+
+After testing, commit and push the final platform and cluster source changes,
+leaving only allowlisted runtime files dirty. Then consolidate with the same
+minimum section scope:
+
+```bash
+../../scripts/deploy.sh --consolidate-development <minimum skip flags>
+```
+
+Consolidation verifies clean, published source revisions, deploys using the
+local runtime state, commits and pushes the resulting allowlisted runtime files,
+records reproducible section revisions, and clears both development markers. A
+normal deployment is blocked while a local or cluster-side development marker
+remains.
+
 ## Failure and Availability
 
 Writing deployment status is part of successful section completion. A write
@@ -146,7 +193,7 @@ stable Talos lifecycle marker, not a deployment-revision stamp; omitting it
 causes the root workspace to treat an existing cluster as not yet bootstrapped.
 Operators must still run deployments from one PC at a time.
 
-State synchronization is a mandatory part of every `scripts/deploy.sh` run:
+State synchronization is mandatory for normal and consolidation deployments:
 
 1. Require clean platform and cluster repositories.
 2. Fetch and require the platform branch to match its upstream.
@@ -161,7 +208,8 @@ State synchronization is a mandatory part of every `scripts/deploy.sh` run:
 Unexpected source or configuration changes block the automatic commit. If the
 push fails, the local state commit is preserved and the command exits non-zero;
 do not use another PC until that commit has been pushed. This behavior cannot
-be disabled for a `deploy.sh` run.
+be disabled in normal or consolidation mode. Development mode explicitly
+replaces synchronization with local-only state and persistent warnings.
 
 A successful `--destroy-only` commits and pushes the removal of all tracked
 runtime files. Because the Kubernetes API no longer exists, no ConfigMap update

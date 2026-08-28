@@ -39,6 +39,11 @@ Options:
   -b, --skip-benchmark      Skip benchmark workloads.
       --services-only       Skip Talos VM/root apply and deploy Kubernetes services only.
                             Requires existing out/kubeconfig and out/talosconfig.
+      --development         Allow uncommitted platform and cluster source changes.
+                            Never commits, pulls, or pushes source or runtime state.
+      --consolidate-development
+                            Finalize a development session after source changes are
+                            committed and pushed; deploy and publish runtime state.
   -h, --help                Show this help message.
 
 Note:
@@ -64,6 +69,8 @@ skip_kafka=false
 skip_monitoring=false
 skip_benchmark=false
 services_only=false
+development_mode=false
+consolidate_development=false
 gen_talos_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -125,6 +132,14 @@ while [[ $# -gt 0 ]]; do
       services_only=true
       shift
       ;;
+    --development)
+      development_mode=true
+      shift
+      ;;
+    --consolidate-development)
+      consolidate_development=true
+      shift
+      ;;
     -v|--verbose)
       verbose=true
       shift
@@ -161,15 +176,99 @@ if [[ "${services_only}" == "true" && "${destroy_first}" == "true" ]]; then
   exit 1
 fi
 
+if [[ "${development_mode}" == "true" && "${consolidate_development}" == "true" ]]; then
+  error "--development and --consolidate-development are mutually exclusive." >&2
+  exit 1
+fi
+
+if [[ "${development_mode}" == "true" \
+  && ("${destroy_first}" == "true" || "${purge_external_ceph}" == "true" \
+    || "${purge_credentials}" == "true") ]]; then
+  error "Full cluster destruction and purge flags are not available in local development mode." >&2
+  error "Normal resource replacement or deletion inside an apply remains allowed." >&2
+  exit 1
+fi
+
+if [[ "${consolidate_development}" == "true" \
+  && ("${destroy_first}" == "true" || "${purge_external_ceph}" == "true" \
+    || "${purge_credentials}" == "true") ]]; then
+  error "Development consolidation cannot be combined with destruction or purge flags." >&2
+  exit 1
+fi
+
 setup_cluster_context "${script_dir}" ""
+require_cmd git
+require_cmd jq
+if [[ "${development_mode}" == "true" ]]; then
+  require_cmd sha256sum
+fi
 
 controlplane_vip="$(awk -F'"' '/"controlplane_vip"/ { print $4; exit }' "${cluster_constants_path}")"
 
+cluster_git_dir="$(git -C "${cluster_dir}" rev-parse --absolute-git-dir 2>/dev/null || true)"
+if [[ -z "${cluster_git_dir}" ]]; then
+  error "Cluster ${cluster_name} must be an independent Git repository." >&2
+  exit 1
+fi
+development_marker="${cluster_git_dir}/pve-k8s-talos-development.json"
+
+if [[ "${development_mode}" != "true" \
+  && "${consolidate_development}" != "true" \
+  && -f "${development_marker}" ]]; then
+  error "A local development deployment is active for ${cluster_name}." >&2
+  error "Commit and push the final source changes, then run with --consolidate-development." >&2
+  exit 1
+fi
+if [[ "${consolidate_development}" == "true" && ! -f "${development_marker}" ]]; then
+  error "No local development deployment marker exists for ${cluster_name}." >&2
+  exit 1
+fi
+
+if [[ -r "${cluster_kubeconfig_path}" ]]; then
+  require_cmd kubectl
+  remote_development_status=""
+  if remote_status_json="$(
+    kubectl --kubeconfig "${cluster_kubeconfig_path}" \
+      -n kube-system get configmap pve-k8s-talos-deployment-status \
+      --ignore-not-found -o json
+  )"; then
+    if [[ -n "${remote_status_json}" ]]; then
+      remote_development_status="$(
+        jq -r '
+          if (.data["development.json"] // "{}" | fromjson | .active) == true
+          then "active" else "inactive" end
+        ' <<<"${remote_status_json}"
+      )"
+    fi
+  fi
+  if [[ "${remote_development_status}" == "active" \
+    && ! -f "${development_marker}" ]]; then
+    error "Kubernetes reports an active development deployment, but this PC has no local marker." >&2
+    error "Continue from the original development PC; its local OpenTofu state is authoritative." >&2
+    exit 1
+  fi
+  if [[ "${remote_development_status}" == "active" \
+    && "${development_mode}" != "true" \
+    && "${consolidate_development}" != "true" ]]; then
+    error "Kubernetes reports an active development deployment." >&2
+    error "Use --consolidate-development from the original development PC." >&2
+    exit 1
+  fi
+fi
+
 state_sync_armed=false
 state_sync_finalized=false
-"${script_dir}/cluster-state-sync.sh" preflight \
-  --platform-dir "${repo_root}" \
+state_sync_preflight_args=(
+  preflight
+  --platform-dir "${repo_root}"
   --cluster-dir "${cluster_dir}"
+)
+if [[ "${development_mode}" == "true" ]]; then
+  state_sync_preflight_args+=(--development)
+elif [[ "${consolidate_development}" == "true" ]]; then
+  state_sync_preflight_args+=(--allow-runtime-dirty)
+fi
+"${script_dir}/cluster-state-sync.sh" "${state_sync_preflight_args[@]}"
 state_sync_armed=true
 
 deployment_status_enabled=false
@@ -178,6 +277,9 @@ deployment_platform_commit=""
 deployment_cluster_commit=""
 deployment_platform_dirty=false
 deployment_cluster_dirty=false
+deployment_platform_diff_sha256=""
+deployment_cluster_diff_sha256=""
+development_status_marked=false
 cluster_git_root="$(git -C "${cluster_dir}" rev-parse --show-toplevel 2>/dev/null || true)"
 if [[ -n "${cluster_git_root}" && "$(cd "${cluster_git_root}" && pwd -P)" == "${cluster_dir}" ]]; then
   deployment_status_enabled=true
@@ -198,19 +300,143 @@ else
   message "warning: deployment provenance will not be recorded because ${cluster_name} is not an independent Git repository."
 fi
 
+repository_diff_sha256() {
+  local repository_path="$1"
+
+  (
+    cd "${repository_path}"
+    {
+      git diff --binary --no-ext-diff HEAD --
+      while IFS= read -r -d '' untracked_path; do
+        printf 'untracked\0%s\0' "${untracked_path}"
+        git hash-object -- "${untracked_path}"
+      done < <(git ls-files --others --exclude-standard -z | sort -z)
+    } | sha256sum | awk '{print $1}'
+  )
+}
+
+write_development_marker() {
+  local marker_tmp
+  local started_at
+
+  started_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+  if [[ -f "${development_marker}" ]]; then
+    started_at="$(jq -r '.started_at // empty' "${development_marker}" 2>/dev/null || true)"
+    started_at="${started_at:-$(date -u +'%Y-%m-%dT%H:%M:%SZ')}"
+  fi
+  marker_tmp="$(mktemp "${cluster_git_dir}/pve-k8s-talos-development.XXXXXX")"
+  jq -n \
+    --arg cluster "${cluster_name}" \
+    --arg started_at "${started_at}" \
+    --arg updated_at "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+    --arg deployment_id "${deployment_id}" \
+    --arg platform_commit "${deployment_platform_commit}" \
+    --arg cluster_commit "${deployment_cluster_commit}" \
+    --arg platform_diff_sha256 "${deployment_platform_diff_sha256}" \
+    --arg cluster_diff_sha256 "${deployment_cluster_diff_sha256}" \
+    '{
+      cluster: $cluster,
+      mode: "development",
+      started_at: $started_at,
+      updated_at: $updated_at,
+      deployment_id: $deployment_id,
+      platform: {base_commit: $platform_commit, diff_sha256: $platform_diff_sha256},
+      cluster: {base_commit: $cluster_commit, diff_sha256: $cluster_diff_sha256}
+    }' >"${marker_tmp}"
+  chmod 600 "${marker_tmp}"
+  mv "${marker_tmp}" "${development_marker}"
+}
+
+backup_development_runtime_state() {
+  local backup_root="${cluster_git_dir}/pve-k8s-talos-development-state"
+  local runtime_path
+  local relative_path
+  local -a runtime_paths=()
+
+  for runtime_path in \
+    "${cluster_out_dir}/kubeconfig" \
+    "${cluster_out_dir}/talosconfig" \
+    "${cluster_out_dir}/.talos-bootstrap-complete"; do
+    if [[ -f "${runtime_path}" ]]; then
+      runtime_paths+=("${runtime_path}")
+    fi
+  done
+  if [[ -d "${cluster_out_dir}" ]]; then
+    while IFS= read -r runtime_path; do
+      runtime_paths+=("${runtime_path}")
+    done < <(find "${cluster_out_dir}" -type f -name terraform.tfstate -print | sort)
+  fi
+  if [[ "${#runtime_paths[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  mkdir -p "${backup_root}"
+  chmod 700 "${backup_root}"
+  for runtime_path in "${runtime_paths[@]}"; do
+    relative_path="${runtime_path#"${cluster_dir}/"}"
+    mkdir -p "${backup_root}/$(dirname "${relative_path}")"
+    cp -p "${runtime_path}" "${backup_root}/${relative_path}"
+    chmod 600 "${backup_root}/${relative_path}"
+  done
+  message "Saved a private local backup of the pre-deployment runtime state inside the cluster Git directory."
+}
+
+if [[ "${consolidate_development}" == "true" ]]; then
+  deployment_platform_dirty=false
+  deployment_cluster_dirty=false
+fi
+
+if [[ "${development_mode}" == "true" ]]; then
+  deployment_platform_diff_sha256="$(repository_diff_sha256 "${repo_root}")"
+  deployment_cluster_diff_sha256="$(repository_diff_sha256 "${cluster_dir}")"
+  backup_development_runtime_state
+  write_development_marker
+  error "DEVELOPMENT MODE ACTIVE: Git synchronization and runtime-state commits are disabled." >&2
+  error "Continue from this PC and working tree; finish with --consolidate-development." >&2
+fi
+
+mark_development_status() {
+  if [[ "${development_mode}" != "true" \
+    || "${deployment_status_enabled}" != "true" \
+    || "${development_status_marked}" == "true" ]]; then
+    return 0
+  fi
+  if ! "${script_dir}/deployment-status.sh" mark-development \
+    --deployment-id "${deployment_id}" \
+    --platform-commit "${deployment_platform_commit}" \
+    --cluster-commit "${deployment_cluster_commit}" \
+    --platform-diff-sha256 "${deployment_platform_diff_sha256}" \
+    --cluster-diff-sha256 "${deployment_cluster_diff_sha256}"; then
+    return 1
+  fi
+  development_status_marked=true
+}
+
 record_deployment_status() {
   local section="$1"
+  local -a status_args
 
   if [[ "${deployment_status_enabled}" != "true" ]]; then
     return 0
   fi
-  "${script_dir}/deployment-status.sh" record \
-    --section "${section}" \
-    --deployment-id "${deployment_id}" \
-    --platform-commit "${deployment_platform_commit}" \
-    --cluster-commit "${deployment_cluster_commit}" \
-    --platform-dirty "${deployment_platform_dirty}" \
+  mark_development_status
+  status_args=(
+    record
+    --section "${section}"
+    --deployment-id "${deployment_id}"
+    --platform-commit "${deployment_platform_commit}"
+    --cluster-commit "${deployment_cluster_commit}"
+    --platform-dirty "${deployment_platform_dirty}"
     --cluster-dirty "${deployment_cluster_dirty}"
+  )
+  if [[ "${development_mode}" == "true" ]]; then
+    status_args+=(
+      --mode development
+      --platform-diff-sha256 "${deployment_platform_diff_sha256}"
+      --cluster-diff-sha256 "${deployment_cluster_diff_sha256}"
+    )
+  fi
+  "${script_dir}/deployment-status.sh" "${status_args[@]}"
 }
 
 persist_cluster_runtime_state() {
@@ -223,6 +449,15 @@ persist_cluster_runtime_state() {
     --outcome "${outcome}"
   )
 
+  if [[ "${development_mode}" == "true" ]]; then
+    if ! mark_development_status; then
+      error "warning: could not persist the development marker in Kubernetes." >&2
+    fi
+    error "DEVELOPMENT MODE REMAINS ACTIVE after outcome=${outcome}." >&2
+    error "Runtime state exists only on this PC; finish with --consolidate-development." >&2
+    return 0
+  fi
+
   if [[ "${purge_credentials}" == "true" ]]; then
     sync_args+=(--include-purged-credentials)
   fi
@@ -233,6 +468,12 @@ persist_cluster_runtime_state() {
     "${script_dir}/deployment-status.sh" record-runtime-state \
       --deployment-id "${deployment_id}" \
       --cluster-commit "$(git -C "${cluster_dir}" rev-parse HEAD)"
+  fi
+
+  if [[ "${outcome}" == "success" && "${consolidate_development}" == "true" ]]; then
+    "${script_dir}/deployment-status.sh" clear-development
+    rm -f "${development_marker}"
+    message "Development deployment consolidated; normal synchronized mode is active."
   fi
 }
 

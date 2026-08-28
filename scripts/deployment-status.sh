@@ -7,7 +7,7 @@ source "${script_dir}/common.sh"
 
 status_namespace="kube-system"
 status_configmap="pve-k8s-talos-deployment-status"
-schema_version="1"
+schema_version="2"
 kubectl_bin="${DEPLOYMENT_STATUS_KUBECTL_BIN:-kubectl}"
 
 usage() {
@@ -18,7 +18,17 @@ Usage:
       [--platform-commit <commit> --cluster-commit <commit>] [--dry-run]
   deployment-status.sh record --section <section> --deployment-id <id>
       [--platform-commit <commit> --cluster-commit <commit>
-       --platform-dirty <true|false> --cluster-dirty <true|false>] [--dry-run]
+       --platform-dirty <true|false> --cluster-dirty <true|false>]
+      [--mode <normal|development>
+       --platform-diff-sha256 <sha256> --cluster-diff-sha256 <sha256>]
+      [--dry-run]
+
+  deployment-status.sh mark-development --deployment-id <id>
+      --platform-commit <commit> --cluster-commit <commit>
+      --platform-diff-sha256 <sha256> --cluster-diff-sha256 <sha256>
+      [--dry-run]
+
+  deployment-status.sh clear-development [--dry-run]
 
   deployment-status.sh record-runtime-state --deployment-id <id>
       --cluster-commit <commit> [--dry-run]
@@ -44,6 +54,12 @@ Commands:
   record-runtime-state
       Record the cluster repository commit containing the resulting runtime
       state after a successful deployment.
+
+  mark-development
+      Mark the cluster as using local, uncommitted source and runtime state.
+
+  clear-development
+      Clear the persistent development marker after successful consolidation.
 USAGE
 }
 
@@ -234,12 +250,20 @@ show_status() {
                 null
               end
             ),
+            development: (
+              if $data["development.json"] then
+                ($data["development.json"] | fromjson)
+              else
+                null
+              end
+            ),
             sections: (
               $data
               | to_entries
               | map(
                   select(.key != "repositories.json")
                   | select(.key != "runtime-state.json")
+                  | select(.key != "development.json")
                   | select(.key | endswith(".json"))
                   | {
                       key: (.key | rtrimstr(".json")),
@@ -277,6 +301,46 @@ record_runtime_state() {
   message "Updated runtime state commit for cluster ${cluster_name}."
 }
 
+record_development_marker() {
+  local development_json="$1"
+  local platform_url="$2"
+  local cluster_url="$3"
+  local manifest_path
+
+  manifest_path="$(mktemp)"
+  build_status_manifest '[]' '{}' "${platform_url}" "${cluster_url}" \
+    | jq --arg development_json "${development_json}" \
+      '.data["development.json"] = $development_json' >"${manifest_path}"
+  if [[ "${dry_run}" == "true" ]]; then
+    jq . "${manifest_path}"
+    rm -f "${manifest_path}"
+    return 0
+  fi
+  if ! apply_status_manifest "${manifest_path}"; then
+    rm -f "${manifest_path}"
+    return 1
+  fi
+  rm -f "${manifest_path}"
+}
+
+clear_development_marker() {
+  local patch_path
+
+  if [[ "${dry_run}" == "true" ]]; then
+    jq -n '{data: {"development.json": null}}'
+    return 0
+  fi
+  patch_path="$(mktemp)"
+  jq -n '{data: {"development.json": null}}' >"${patch_path}"
+  if ! "${kubectl_bin}" -n "${status_namespace}" patch configmap "${status_configmap}" \
+    --type merge --patch-file "${patch_path}" >/dev/null; then
+    rm -f "${patch_path}"
+    return 1
+  fi
+  rm -f "${patch_path}"
+  message "Cleared development deployment status for cluster ${cluster_name}."
+}
+
 command="${1:-}"
 if [[ -z "${command}" ]]; then
   usage >&2
@@ -291,6 +355,9 @@ platform_commit_override=""
 cluster_commit_override=""
 platform_dirty_override=""
 cluster_dirty_override=""
+record_mode="normal"
+platform_diff_sha256=""
+cluster_diff_sha256=""
 confirm_aligned=false
 dry_run=false
 
@@ -324,6 +391,18 @@ while [[ $# -gt 0 ]]; do
       cluster_dirty_override="${2:-}"
       shift 2
       ;;
+    --mode)
+      record_mode="${2:-}"
+      shift 2
+      ;;
+    --platform-diff-sha256)
+      platform_diff_sha256="${2:-}"
+      shift 2
+      ;;
+    --cluster-diff-sha256)
+      cluster_diff_sha256="${2:-}"
+      shift 2
+      ;;
     --confirm-aligned)
       confirm_aligned=true
       shift
@@ -345,7 +424,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "${command}" in
-  show|baseline|record|record-runtime-state)
+  show|baseline|record|record-runtime-state|mark-development|clear-development)
     ;;
   -h|--help)
     usage
@@ -374,7 +453,70 @@ cluster_url="$(repository_url "${cluster_dir}" "cluster")"
 timestamp="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 sections=()
 
-if [[ "${command}" == "record-runtime-state" ]]; then
+if [[ "${command}" == "clear-development" ]]; then
+  if [[ -n "${sections_csv}" || -n "${section}" || -n "${deployment_id}" \
+    || -n "${platform_commit_override}" || -n "${cluster_commit_override}" \
+    || -n "${platform_dirty_override}" || -n "${cluster_dirty_override}" \
+    || -n "${platform_diff_sha256}" || -n "${cluster_diff_sha256}" \
+    || "${record_mode}" != "normal" || "${confirm_aligned}" == "true" ]]; then
+    error "clear-development only accepts --dry-run." >&2
+    exit 1
+  fi
+  clear_development_marker
+  exit 0
+elif [[ "${command}" == "mark-development" ]]; then
+  if [[ -z "${deployment_id}" || ! "${deployment_id}" =~ ^[A-Za-z0-9._:-]+$ ]]; then
+    error "mark-development requires a safe --deployment-id." >&2
+    exit 1
+  fi
+  if [[ -z "${platform_commit_override}" || -z "${cluster_commit_override}" ]]; then
+    error "mark-development requires both source commits." >&2
+    exit 1
+  fi
+  if [[ ! "${platform_diff_sha256}" =~ ^[a-f0-9]{64}$ \
+    || ! "${cluster_diff_sha256}" =~ ^[a-f0-9]{64}$ ]]; then
+    error "mark-development requires both SHA-256 worktree fingerprints." >&2
+    exit 1
+  fi
+  if [[ -n "${sections_csv}" || -n "${section}" \
+    || -n "${platform_dirty_override}" || -n "${cluster_dirty_override}" \
+    || "${record_mode}" != "normal" || "${confirm_aligned}" == "true" ]]; then
+    error "mark-development received incompatible options." >&2
+    exit 1
+  fi
+  platform_commit="$(
+    resolve_explicit_commit "${repo_root}" "platform" "${platform_commit_override}"
+  )"
+  cluster_commit="$(
+    resolve_explicit_commit "${cluster_dir}" "cluster" "${cluster_commit_override}"
+  )"
+  development_json="$(
+    jq -cn \
+      --arg deployment_id "${deployment_id}" \
+      --arg recorded_at "${timestamp}" \
+      --arg platform_commit "${platform_commit}" \
+      --arg cluster_commit "${cluster_commit}" \
+      --arg platform_diff_sha256 "${platform_diff_sha256}" \
+      --arg cluster_diff_sha256 "${cluster_diff_sha256}" \
+      '{
+        active: true,
+        mode: "development",
+        reproducible: false,
+        deployment_id: $deployment_id,
+        recorded_at: $recorded_at,
+        platform: {
+          base_commit: $platform_commit,
+          diff_sha256: $platform_diff_sha256
+        },
+        cluster: {
+          base_commit: $cluster_commit,
+          diff_sha256: $cluster_diff_sha256
+        }
+      }'
+  )"
+  record_development_marker "${development_json}" "${platform_url}" "${cluster_url}"
+  exit 0
+elif [[ "${command}" == "record-runtime-state" ]]; then
   if [[ -z "${deployment_id}" || ! "${deployment_id}" =~ ^[A-Za-z0-9._:-]+$ ]]; then
     error "record-runtime-state requires a safe --deployment-id." >&2
     exit 1
@@ -385,7 +527,9 @@ if [[ "${command}" == "record-runtime-state" ]]; then
   fi
   if [[ -n "${sections_csv}" || -n "${section}" \
     || -n "${platform_commit_override}" || -n "${platform_dirty_override}" \
-    || -n "${cluster_dirty_override}" || "${confirm_aligned}" == "true" ]]; then
+    || -n "${cluster_dirty_override}" || -n "${platform_diff_sha256}" \
+    || -n "${cluster_diff_sha256}" || "${record_mode}" != "normal" \
+    || "${confirm_aligned}" == "true" ]]; then
     error "record-runtime-state only accepts deployment ID and cluster commit provenance." >&2
     exit 1
   fi
@@ -415,8 +559,10 @@ if [[ "${command}" == "record-runtime-state" ]]; then
   record_runtime_state "${runtime_state_json}"
   exit 0
 elif [[ "${command}" == "baseline" ]]; then
-  if [[ -n "${platform_dirty_override}" || -n "${cluster_dirty_override}" ]]; then
-    error "Dirty overrides are only valid with the record command." >&2
+  if [[ -n "${platform_dirty_override}" || -n "${cluster_dirty_override}" \
+    || -n "${platform_diff_sha256}" || -n "${cluster_diff_sha256}" \
+    || "${record_mode}" != "normal" ]]; then
+    error "Deployment-mode and dirty overrides are only valid with the record command." >&2
     exit 1
   fi
   if [[ "${confirm_aligned}" != "true" ]]; then
@@ -481,6 +627,21 @@ else
   fi
   sections=("${section}")
 
+  if [[ ! "${record_mode}" =~ ^(normal|development)$ ]]; then
+    error "record --mode must be normal or development." >&2
+    exit 1
+  fi
+  if [[ "${record_mode}" == "development" ]]; then
+    if [[ ! "${platform_diff_sha256}" =~ ^[a-f0-9]{64}$ \
+      || ! "${cluster_diff_sha256}" =~ ^[a-f0-9]{64}$ ]]; then
+      error "Development records require both SHA-256 worktree fingerprints." >&2
+      exit 1
+    fi
+  elif [[ -n "${platform_diff_sha256}" || -n "${cluster_diff_sha256}" ]]; then
+    error "Worktree fingerprints are only valid for development records." >&2
+    exit 1
+  fi
+
   if [[ -n "${platform_commit_override}" || -n "${cluster_commit_override}" \
     || -n "${platform_dirty_override}" || -n "${cluster_dirty_override}" ]]; then
     if [[ -z "${platform_commit_override}" || -z "${cluster_commit_override}" \
@@ -522,12 +683,23 @@ else
       --argjson cluster_dirty "${cluster_dirty}" \
       --arg deployed_at "${timestamp}" \
       --arg deployment_id "${deployment_id}" \
+      --arg mode "${record_mode}" \
+      --arg platform_diff_sha256 "${platform_diff_sha256}" \
+      --arg cluster_diff_sha256 "${cluster_diff_sha256}" \
       '{
         revisions: {
-          platform: {commit: $platform_commit, dirty: $platform_dirty},
-          cluster: {commit: $cluster_commit, dirty: $cluster_dirty}
+          platform: (
+            {commit: $platform_commit, dirty: $platform_dirty}
+            + if $mode == "development" then {diff_sha256: $platform_diff_sha256} else {} end
+          ),
+          cluster: (
+            {commit: $cluster_commit, dirty: $cluster_dirty}
+            + if $mode == "development" then {diff_sha256: $cluster_diff_sha256} else {} end
+          )
         },
         provenance: "deploy.sh",
+        mode: $mode,
+        reproducible: ($mode != "development"),
         deployed_at: $deployed_at,
         deployment_id: $deployment_id
       }'
