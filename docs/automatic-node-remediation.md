@@ -76,6 +76,67 @@ The coordinator owns the remediation workflow. Kubernetes remains responsible
 for scheduling replacement pods, while the compute and storage backends provide
 independent ways to isolate the old writer.
 
+### Implementation Status
+
+This document describes both the portable target and the initial pilot. The
+following distinction prevents planned behavior from being mistaken for an
+implemented guarantee.
+
+| Capability | Pilot | Portable target |
+| --- | --- | --- |
+| Coordinator runtime | Two leader-elected pods on control-plane nodes | May run outside the protected cluster |
+| Compute fencing | PVE VM status, stop, and start | Pluggable compute or hardware adapters |
+| Storage fencing | Ceph RBD through CSI-Addons `NetworkFence` | Per-CSI-driver adapters |
+| Safe-path fallback | Execution fencing is required before storage release | Either independently verified execution or complete storage fencing |
+| Workload health | Kubernetes reschedules pods; application readiness is not inspected by the controller | Optional workload-aware recovery gates |
+
+### Initial Controller Packaging and Access
+
+The pilot does not build a dedicated application image. It runs the
+repository-managed Python controller on `python:3.13-alpine`; OpenTofu places
+the script and non-secret node mapping in a ConfigMap and mounts them read-only
+in two leader-elected controller pods. Only the leader performs remediation.
+
+```text
+ConfigMap: controller.py + node -> PVE host/VMID/IP mapping
+                         |
+                         v
+              python:3.13-alpine pods
+                   leader + standby
+```
+
+A future production image should embed the controller, carry an explicit
+version, and be pinned by digest. This improves provenance and vulnerability
+tracking without changing the remediation protocol.
+
+PVE connection values enter through the cluster deployment environment and are
+materialized as a Kubernetes Secret. The pod receives the API endpoint, token,
+and TLS verification mode as environment variables. The token is sent to PVE
+as `PVEAPIToken` authentication over HTTPS; the deployment first verifies that
+it has the required permissions for every managed worker VM.
+
+```text
+Cluster deployment environment
+  PVE endpoint + API token + TLS mode
+                  |
+                  v
+       Kubernetes Secret in kube-system
+                  |
+                  v
+        Controller ---- HTTPS ----> PVE API
+                     status/stop/start
+```
+
+The controller does not receive the VM's bridge, VLAN, MAC, or complete PVE
+network configuration. It only needs network reachability to the PVE API and a
+mapping from each Kubernetes worker to its PVE host and VMID. Storage-fencing
+addresses are separate inputs used by the CSI adapter.
+
+The Kubernetes Secret and OpenTofu state both contain sensitive token material
+and must be protected accordingly. Prometheus has no control role: it only
+scrapes the controller's `/metrics` endpoint; decisions are based directly on
+Kubernetes node and Lease state.
+
 ## Safety Invariant
 
 An exclusive volume must not be released until isolation is positively
@@ -116,7 +177,8 @@ Mark node out-of-service
 Detach volumes and recreate pods
           |
           v
-Wait for affected services to become ready
+Kubernetes schedules replacement pods
+(application readiness is not inspected)
           |
           v
 Recover failed worker
@@ -158,6 +220,19 @@ node after a 20-second stale Lease, and waits another 5 seconds before fencing.
 | Recovery stability | 30 s | Require stable `Ready` before unfencing. |
 | Per-node cooldown | 10 min | Prevent repeated remediation loops. |
 | Concurrent remediations | 1 | Prevent mass fencing. |
+
+### Remediation Inhibitors
+
+The pilot does not begin or advance remediation when doing so would violate a
+safety gate:
+
+| Gate | Result |
+| --- | --- |
+| Insufficient healthy control-plane nodes | Do not begin or advance fencing. |
+| Maximum concurrent remediations reached | Leave additional workers pending. |
+| Worker is new, in cooldown, or explicitly disabled | Do not begin remediation. |
+| PVE cannot confirm VM shutdown | Remain in fencing, do not release storage, and retry. |
+| RBD attachment remains or `NetworkFence` is unconfirmed | Keep the VM stopped and retry. |
 
 ### Fencing
 
@@ -211,13 +286,15 @@ After fencing, the coordinator marks the node out of service. Kubernetes can
 then remove stale pods and volume attachments and recreate the workloads on
 healthy workers.
 
-Recovery completes only when the affected replacement workloads pass their
-readiness checks. A failed application recovery does not undo fencing or return
-the old node to service.
+The pilot does not discover affected applications or wait for their readiness
+probes. Its recovery gate is infrastructure-level: the stale RBD attachment is
+gone and, when required, CSI-Addons confirms storage fencing. Application
+readiness remains observable through Kubernetes and monitoring, but does not
+currently block worker recovery.
 
 ### Worker Recovery
 
-Once workloads are safe elsewhere, the coordinator recovers the worker:
+Once stale volume use is safely excluded, the coordinator recovers the worker:
 
 1. Ask the execution adapter to restart, relocate, replace, or power-cycle the
    worker as appropriate.
@@ -226,8 +303,32 @@ Once workloads are safe elsewhere, the coordinator recovers the worker:
 4. Remove the out-of-service state and wait for storage unfencing.
 5. Remove quarantine and make the node schedulable.
 
-A separate quarantine prevents workloads from reaching the node during the
-storage unfencing cooldown.
+A separate quarantine prevents workloads from reaching the node while storage
+unfencing is still in progress.
+
+### Per-node Cooldown
+
+After recovery and storage unfencing complete, the controller removes
+quarantine and starts the default 10-minute cooldown. During this state the
+worker is operational, schedulable, and equivalent to `Healthy` for workloads.
+Only a new automatic remediation of that same worker is suppressed.
+
+```text
+Reintegrated worker
+       |
+       v
+Cooldown: 10 min
+  +-- Ready and schedulable
+  +-- storage unfenced
+  `-- repeat remediation suppressed
+       |
+       v
+Healthy: repeat remediation enabled
+```
+
+Consequently, another genuine failure of the same worker during the cooldown is
+not remediated until the timer expires. Failures of other workers remain
+eligible, subject to the global concurrency circuit breaker.
 
 ## State Model
 
@@ -235,22 +336,44 @@ The workflow must be persistent and idempotent so that restarting the
 coordinator does not repeat unsafe actions.
 
 ```text
-Healthy
-  -> Suspected
-  -> Quarantined
-  -> Fencing
-  -> Fenced
-  -> Evacuating
-  -> WorkloadsRecovered
-  -> NodeRecovering
-  -> NodeStabilizing
-  -> Reintegrated
+Healthy -> Suspect -> Fencing -> Storage fencing
+                                 |
+                                 v
+              Healthy <- Cooldown <- Unfencing <- Recovering
+
+Disabled: observed but not automatically remediated
 ```
 
-Any state may enter a retrying error condition. Error handling must preserve the
-last confirmed safe state.
+`Fencing` stops and verifies the VM. `Storage fencing` applies out-of-service
+and quarantine taints and waits for volume release. `Recovering` starts the VM
+and requires stable Kubernetes `Ready`; `Unfencing` retains quarantine until
+storage access is restored. Any active state may record an error and retry
+without discarding the last confirmed safe state.
 
-## Failure Handling
+### Persistent Coordination State
+
+The controller stores workflow state and timestamps as Kubernetes Node
+annotations. Safety state also exists in Node taints and CSI-Addons
+`NetworkFence` resources; leader ownership is stored in a Kubernetes `Lease`.
+
+```text
+Controller restart or leader change
+              |
+              v
+Node annotations + taints + NetworkFence + leader Lease
+              |
+              v
+Resume the current idempotent transition
+```
+
+Controller pod replacement therefore does not intentionally restart a
+remediation from the beginning.
+
+## Target Failure Handling
+
+The following table describes the portable target. In the pilot, PVE execution
+fencing must succeed before storage is released, and application recovery is
+left to Kubernetes rather than actively retried by the controller.
 
 | Condition | Behaviour |
 | --- | --- |
@@ -273,6 +396,38 @@ The platform HA system and the remediation coordinator must not independently
 control the same machine. Their ownership and hand-off rules must be explicit.
 For the initial implementation, these rules apply to Proxmox HA and worker VMs.
 
+## Current Safety Boundaries
+
+- Only worker nodes are remediated; control-plane remediation is out of scope.
+- One remediation is active by default, limiting correlated-failure impact.
+- Loss of the Kubernetes or PVE control path can stop progress safely.
+- The initial pilot requires PVE execution fencing; portable storage-only
+  fallback remains a target capability.
+- The PVE credential needs power control over every configured worker VM. The
+  deployment credential currently propagated to the controller may have broader
+  privileges and must be treated as a privileged cluster secret.
+- A repeat failure of the same node during cooldown may wait up to 10 minutes
+  before remediation starts.
+
+## Observability
+
+Prometheus exposes the controller leader, per-worker phase, phase age, Lease
+age, and recorded-error status. Grafana summarizes these phases:
+
+| Phase | Meaning | Expected automatic action |
+| --- | --- | --- |
+| `Healthy` | Normal operation | Watch the Node Lease. |
+| `Suspect` | Node loss is being confirmed | Return healthy or begin fencing. |
+| `Fencing` | VM execution is being stopped | Confirm the VM is stopped. |
+| `Storage fencing` | Storage ownership is being released | Wait with the VM stopped. |
+| `Recovering` | VM is starting or Kubernetes health is stabilizing | Wait for stable `Ready`. |
+| `Unfencing` | Storage access is being restored | Keep the node quarantined. |
+| `Cooldown` | Node is usable but repeat remediation is suppressed | Return to `Healthy` when the timer expires. |
+| `Disabled` | Automatic remediation is disabled for this worker | Observe only. |
+
+An active phase with increasing age and an error metric indicates a retrying or
+blocked transition; logs and the Node's last-error annotation provide detail.
+
 ## Expected Service Level
 
 The initial pilot target for a single worker failure is:
@@ -282,9 +437,8 @@ The initial pilot target for a single worker failure is:
 - Workload recovery: application-dependent, typically 30-90 seconds.
 - Expected total RTO for a singleton PostgreSQL workload: approximately 1-2
   minutes, plus any extended WAL recovery.
-- The recovered worker may remain quarantined for the CSI-Addons unfencing
-  cooldown, currently about five minutes; this does not delay the replacement
-  workload on another worker.
+- After reintegration, the worker remains fully usable during its 10-minute
+  per-node remediation cooldown; only repeat remediation is delayed.
 
 These values are objectives to validate through failure testing, not guarantees.
 
