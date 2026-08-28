@@ -198,4 +198,4 @@ spec:
         - name: controller
           configMap:
             name: node-remediation-controller
-            defaultMode: 0555
+            defaultMode: 365
