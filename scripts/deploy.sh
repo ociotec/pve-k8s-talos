@@ -1081,9 +1081,9 @@ proxmox_api_base() {
 proxmox_api_request() {
   local method="$1"
   local path="$2"
+  local token="${3:-${TF_VAR_proxmox_api_token:-${PROXMOX_VE_API_TOKEN:-}}}"
   local base
   local insecure_flag="${TF_VAR_proxmox_insecure:-${PROXMOX_VE_INSECURE:-false}}"
-  local token="${TF_VAR_proxmox_api_token:-${PROXMOX_VE_API_TOKEN:-}}"
   local -a curl_args
 
   if [[ -z "${token}" ]]; then
@@ -1092,9 +1092,9 @@ proxmox_api_request() {
   fi
 
   base="$(proxmox_api_base)"
-  curl_args=(-sS -X "${method}" -H "Authorization: PVEAPIToken=${token}")
+  curl_args=(-fsS -X "${method}" -H "Authorization: PVEAPIToken=${token}")
   if [[ "${insecure_flag}" == "true" ]]; then
-    curl_args=(-sk -X "${method}" -H "Authorization: PVEAPIToken=${token}")
+    curl_args=(-fsSk -X "${method}" -H "Authorization: PVEAPIToken=${token}")
   fi
 
   curl "${curl_args[@]}" "${base}${path}"
@@ -1105,10 +1105,7 @@ validate_node_remediation_proxmox_access() {
   local worker_name
   local node_name
   local vm_id
-  local permissions_json
-  local vm_path
-  local vm_audit
-  local vm_power
+  local admin_permissions_json
   local target_count=0
 
   enabled="$(tf_bool_value "${cluster_k8s_net_constants_path}" node_remediation_enabled)"
@@ -1120,20 +1117,21 @@ validate_node_remediation_proxmox_access() {
     exit 1
   fi
 
-  message "Checking Proxmox VM audit and power-management privileges for automatic node remediation..."
+  message "Checking Proxmox privileges required to provision the dedicated remediation token..."
+  admin_permissions_json="$(proxmox_api_request GET "/access/permissions?path=/")"
+  if ! jq -e '
+    .data["/"]["Permissions.Modify"] == 1 and
+    .data["/"]["User.Modify"] == 1
+  ' <<<"${admin_permissions_json}" >/dev/null; then
+    error "The configured deployment token requires Permissions.Modify and User.Modify at / to provision automatic node remediation." >&2
+    exit 1
+  fi
+
   while IFS='|' read -r worker_name node_name vm_id; do
     [[ -n "${worker_name}" ]] || continue
     target_count=$((target_count + 1))
-    vm_path="/vms/${vm_id}"
-    permissions_json="$(proxmox_api_request GET "/access/permissions?path=${vm_path}")"
-    vm_audit="$(printf '%s' "${permissions_json}" | jq -r --arg path "${vm_path}" '.data[$path]["VM.Audit"] // 0')"
-    vm_power="$(printf '%s' "${permissions_json}" | jq -r --arg path "${vm_path}" '.data[$path]["VM.PowerMgmt"] // 0')"
-    if [[ "${vm_audit}" != "1" || "${vm_power}" != "1" ]]; then
-      error "The configured Proxmox API token lacks VM.Audit or VM.PowerMgmt for worker ${worker_name} (${vm_path})." >&2
-      exit 1
-    fi
     if ! proxmox_api_request GET "/nodes/${node_name}/qemu/${vm_id}/status/current" | jq -e '.data.status != null' >/dev/null; then
-      error "Cannot audit Proxmox worker ${worker_name} on ${node_name} (VM ${vm_id})." >&2
+      error "The configured deployment token cannot audit Proxmox worker ${worker_name} on ${node_name} (VM ${vm_id})." >&2
       exit 1
     fi
   done < <(collect_worker_vm_targets)
@@ -1142,6 +1140,97 @@ validate_node_remediation_proxmox_access() {
     error "Automatic node remediation is enabled but no worker VM targets were found." >&2
     exit 1
   fi
+}
+
+validate_node_remediation_dedicated_proxmox_access() {
+  local enabled
+  local token_id
+  local token_name
+  local role_id
+  local acl_path
+  local token_metadata_json
+  local roles_json
+  local acls_json
+  local secret_json
+  local dedicated_token
+  local scope_permissions_json
+  local worker_name
+  local node_name
+  local vm_id
+
+  enabled="$(tf_bool_value "${cluster_k8s_net_constants_path}" node_remediation_enabled)"
+  if [[ "${enabled:-false}" != "true" ]]; then
+    return 0
+  fi
+
+  token_id="$(tofu -chdir="${cluster_k8s_net_workspace}" output -raw node_remediation_proxmox_token_id)"
+  role_id="$(tofu -chdir="${cluster_k8s_net_workspace}" output -raw node_remediation_proxmox_role_id)"
+  acl_path="$(tofu -chdir="${cluster_k8s_net_workspace}" output -raw node_remediation_proxmox_acl_path)"
+  if [[ -z "${token_id}" || -z "${role_id}" || -z "${acl_path}" ]]; then
+    error "OpenTofu did not return the dedicated Proxmox remediation identity and ACL metadata." >&2
+    exit 1
+  fi
+  token_name="${token_id#*!}"
+
+  token_metadata_json="$(proxmox_api_request GET "/access/users/root@pam/token")"
+  if ! jq -e --arg token_name "${token_name}" '
+    any(.data[]; .tokenid == $token_name and ((.privsep | tonumber) == 1))
+  ' <<<"${token_metadata_json}" >/dev/null; then
+    error "Dedicated Proxmox remediation token ${token_id} is missing or privilege separation is disabled." >&2
+    exit 1
+  fi
+
+  roles_json="$(proxmox_api_request GET "/access/roles")"
+  if ! jq -e --arg role_id "${role_id}" '
+    [.data[] | select(.roleid == $role_id)] as $roles |
+    ($roles | length) == 1 and
+    ([($roles[0].privs | splits("[, ]+")) | select(length > 0)] | sort) ==
+      (["VM.Audit", "VM.PowerMgmt"] | sort)
+  ' <<<"${roles_json}" >/dev/null; then
+    error "Dedicated Proxmox remediation role ${role_id} must contain exactly VM.Audit and VM.PowerMgmt." >&2
+    exit 1
+  fi
+
+  acls_json="$(proxmox_api_request GET "/access/acl")"
+  if ! jq -e --arg token_id "${token_id}" --arg role_id "${role_id}" --arg acl_path "${acl_path}" '
+    [.data[] | select(.type == "token" and .ugid == $token_id)] as $acls |
+    ($acls | length) == 1 and
+    $acls[0].path == $acl_path and
+    $acls[0].roleid == $role_id and
+    (($acls[0].propagate | tonumber) == 1)
+  ' <<<"${acls_json}" >/dev/null; then
+    error "Dedicated Proxmox remediation token ${token_id} must have exactly one propagated ACL at ${acl_path} using ${role_id}." >&2
+    exit 1
+  fi
+
+  secret_json="$(kubectl -n kube-system get secret node-remediation-proxmox -o json)"
+  dedicated_token="$(jq -r '.data["api-token"] // empty' <<<"${secret_json}" | base64 --decode)"
+  if [[ -z "${dedicated_token}" || "${dedicated_token%%=*}" != "${token_id}" ]]; then
+    error "The node-remediation-proxmox Secret does not contain the expected dedicated Proxmox token." >&2
+    exit 1
+  fi
+
+  if ! scope_permissions_json="$(proxmox_api_request GET "/access/permissions?path=${acl_path}" "${dedicated_token}")"; then
+    error "Dedicated remediation token cannot read its effective permissions at ${acl_path}." >&2
+    exit 1
+  fi
+  if ! jq -e --arg path "${acl_path}" '
+    .data[$path]["VM.Audit"] > 0 and
+    .data[$path]["VM.PowerMgmt"] > 0 and
+    ([.data[$path] | to_entries[] | select(.value > 0 and .key != "VM.Audit" and .key != "VM.PowerMgmt")] | length) == 0
+  ' <<<"${scope_permissions_json}" >/dev/null; then
+    error "Dedicated remediation token does not have exactly VM.Audit and VM.PowerMgmt at ${acl_path}." >&2
+    exit 1
+  fi
+
+  message "Checking the dedicated remediation token against every configured worker VM..."
+  while IFS='|' read -r worker_name node_name vm_id; do
+    [[ -n "${worker_name}" ]] || continue
+    if ! proxmox_api_request GET "/nodes/${node_name}/qemu/${vm_id}/status/current" "${dedicated_token}" | jq -e '.data.status != null' >/dev/null; then
+      error "Dedicated remediation token cannot audit worker ${worker_name} on ${node_name} (VM ${vm_id})." >&2
+      exit 1
+    fi
+  done < <(collect_worker_vm_targets)
 }
 
 wait_for_proxmox_task_completion() {
@@ -3449,6 +3538,7 @@ if [[ "${skip_k8s_net}" == "true" ]]; then
   finish_deploy_section "k8s-net" "skipped"
 else
   prepare_k8s_net_workspace
+  node_remediation_pool="$(tf_map_string_value "${cluster_constants_path}" vm pool)"
   message "Deploying k8s networking and ingress (k8s-net)..."
   run_tofu_init "${cluster_k8s_net_workspace}"
   run tofu -chdir="${cluster_k8s_net_workspace}" apply -auto-approve \
@@ -3458,11 +3548,16 @@ else
     -target=kubernetes_manifest.metallb_native \
     -target=local_file.cert_manager_ca_cert \
     -target=local_file.cert_manager_ca_key \
-    -var="skip_ceph=${skip_ceph}"
+    -var="skip_ceph=${skip_ceph}" \
+    -var="cluster_name=${cluster_name}" \
+    -var="proxmox_pool=${node_remediation_pool}"
   message "Checking MetalLB controller and webhook availability..."
   wait_for_metallb_available
   tofu -chdir="${cluster_k8s_net_workspace}" apply -auto-approve \
-    -var="skip_ceph=${skip_ceph}" 1>/dev/null
+    -var="skip_ceph=${skip_ceph}" \
+    -var="cluster_name=${cluster_name}" \
+    -var="proxmox_pool=${node_remediation_pool}" 1>/dev/null
+  validate_node_remediation_dedicated_proxmox_access
   reconcile_ingress_nginx_admission_jobs
 
   record_deployment_status "k8s-net"

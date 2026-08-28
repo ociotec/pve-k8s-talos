@@ -89,7 +89,7 @@ implemented guarantee.
 | Storage fencing | Ceph RBD through CSI-Addons `NetworkFence` | Per-CSI-driver adapters |
 | Safe-path fallback | Execution fencing is required before storage release | Either independently verified execution or complete storage fencing |
 | Workload health | Kubernetes reschedules pods; application readiness is not inspected by the controller | Optional workload-aware recovery gates |
-| PVE credential | Deployment credential is currently propagated | Dedicated least-privilege token as described below |
+| PVE credential | Dedicated, privilege-separated token managed by OpenTofu | Adapter-specific least-privilege credential |
 
 ### Initial Controller Packaging and Access
 
@@ -110,21 +110,21 @@ A future production image should embed the controller, carry an explicit
 version, and be pinned by digest. This improves provenance and vulnerability
 tracking without changing the remediation protocol.
 
-The currently deployed pilot materializes the PVE credential from the cluster
-deployment environment as a Kubernetes Secret. The pod receives the API
-endpoint, token, and TLS verification mode as environment variables and sends
-the token to PVE as `PVEAPIToken` authentication over HTTPS.
+The deployment credential remains in the operator environment and configures
+the OpenTofu PVE provider. OpenTofu uses it to manage a dedicated credential,
+then places only that limited token in the Kubernetes Secret. The pod receives
+the API endpoint, dedicated token, and TLS verification mode as environment
+variables and authenticates to PVE over HTTPS.
 
 ```text
-Cluster deployment environment
-  PVE endpoint + API token + TLS mode
-                  |
-                  v
-       Kubernetes Secret in kube-system
-                  |
-                  v
-        Controller ---- HTTPS ----> PVE API
-                     status/stop/start
+Deployment credential ---> OpenTofu ---> PVE role + token + ACL
+                                  |
+                                  v
+                     Kubernetes Secret in kube-system
+                                  |
+                                  v
+                 Controller ---- HTTPS ----> PVE API
+                              status/stop/start
 ```
 
 The controller does not receive the VM's bridge, VLAN, MAC, or complete PVE
@@ -147,7 +147,7 @@ propagate only the resulting limited token to the controller.
 Deployment credential
         |
         +--> Role: VM.Audit + VM.PowerMgmt
-        +--> Token: root@pam!node-remediation-<cluster>
+        +--> Token: root@pam!node-remediation-<cluster>-<hash>
         `--> ACL: role + token + permitted path
                          |
                          v
@@ -174,7 +174,9 @@ stable cluster-specific identifiers. The token secret is returned only when
 created, so the OpenTofu state holding it must be preserved; losing that state
 requires token rotation.
 
-Before the controller is deployed, validation must confirm:
+The deployment credential must expose `Permissions.Modify` and `User.Modify`
+at `/`, and must be able to audit each configured worker. It is never written
+to Kubernetes. Before the section is declared successful, validation confirms:
 
 - privilege separation is enabled;
 - the role contains exactly `VM.Audit` and `VM.PowerMgmt`;
@@ -448,9 +450,8 @@ For the initial implementation, these rules apply to Proxmox HA and worker VMs.
 - Loss of the Kubernetes or PVE control path can stop progress safely.
 - The initial pilot requires PVE execution fencing; portable storage-only
   fallback remains a target capability.
-- Until dedicated-token provisioning is implemented, the deployment credential
-  propagated to the controller may have broader privileges. The target limits
-  the in-cluster token to VM audit and power management on the selected scope.
+- The in-cluster PVE token is limited to VM audit and power management on the
+  selected pool, or on `/vms` only when no pool is configured.
 - A repeat failure of the same node during cooldown may wait up to 10 minutes
   before remediation starts.
 

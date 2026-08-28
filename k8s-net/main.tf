@@ -1,5 +1,9 @@
 terraform {
   required_providers {
+    proxmox = {
+      source  = "bpg/proxmox"
+      version = "~> 0.104.0"
+    }
     kubernetes = {
       source  = "hashicorp/kubernetes"
       version = ">= 3.1.0"
@@ -41,13 +45,25 @@ variable "proxmox_api_token" {
   type        = string
   default     = ""
   sensitive   = true
-  description = "Proxmox API token used by automatic node remediation."
+  description = "Administrative Proxmox API token used only to provision the dedicated automatic-remediation credential."
 }
 
 variable "proxmox_insecure" {
   type        = bool
   default     = false
   description = "Disable TLS certificate verification for the Proxmox remediation API client."
+}
+
+variable "cluster_name" {
+  type        = string
+  default     = ""
+  description = "Stable cluster identifier used to derive dedicated Proxmox remediation resource names."
+}
+
+variable "proxmox_pool" {
+  type        = string
+  default     = ""
+  description = "Optional Proxmox pool that limits the dedicated remediation token; empty grants the limited role at /vms."
 }
 
 variable "vms" {
@@ -66,6 +82,12 @@ variable "vms" {
 
 provider "kubernetes" {
   config_path = abspath("${path.module}/${var.kubeconfig_path}")
+}
+
+provider "proxmox" {
+  endpoint  = var.proxmox_endpoint
+  api_token = var.proxmox_api_token
+  insecure  = var.proxmox_insecure
 }
 
 locals {
@@ -88,6 +110,19 @@ locals {
   node_remediation_enabled_value = can(regex("(?m)^\\s*node_remediation_enabled\\s*=\\s*(true|false)\\s*$", local.constants_source)[0]) ? (
     tobool(regex("(?m)^\\s*node_remediation_enabled\\s*=\\s*(true|false)\\s*$", local.constants_source)[0])
   ) : false
+  node_remediation_cluster_slug = trim(replace(lower(var.cluster_name), "/[^a-z0-9]+/", "-"), "-")
+  node_remediation_name_hash    = substr(sha256(var.cluster_name), 0, 8)
+  node_remediation_token_name = format(
+    "node-remediation-%s-%s",
+    substr(local.node_remediation_cluster_slug, 0, 14),
+    local.node_remediation_name_hash,
+  )
+  node_remediation_role_id = format(
+    "K8sNodeRemediate-%s-%s",
+    substr(local.node_remediation_cluster_slug, 0, 20),
+    local.node_remediation_name_hash,
+  )
+  node_remediation_acl_path = trimspace(var.proxmox_pool) != "" ? "/pool/${trimspace(var.proxmox_pool)}" : "/vms"
   node_remediation_image_value = can(regex("(?m)^\\s*node_remediation_image\\s*=\\s*\"([^\"]+)\"\\s*$", local.constants_source)[0]) ? (
     regex("(?m)^\\s*node_remediation_image\\s*=\\s*\"([^\"]+)\"\\s*$", local.constants_source)[0]
   ) : "python:3.13-alpine"
@@ -453,6 +488,7 @@ check "node_remediation_configuration" {
     condition = !local.node_remediation_enabled_value || (
       var.proxmox_endpoint != "" &&
       var.proxmox_api_token != "" &&
+      local.node_remediation_cluster_slug != "" &&
       length(local.node_remediation_nodes) > 0 &&
       local.node_remediation_replicas_value >= 2 &&
       local.node_remediation_evaluation_interval_seconds_value >= 2 &&
@@ -468,6 +504,46 @@ check "node_remediation_configuration" {
     )
     error_message = "Automatic node remediation requires PVE credentials, at least one worker, two controller replicas, and timing values above the safety minima."
   }
+}
+
+resource "proxmox_virtual_environment_role" "node_remediation" {
+  count = local.node_remediation_enabled_value ? 1 : 0
+
+  role_id    = local.node_remediation_role_id
+  privileges = ["VM.Audit", "VM.PowerMgmt"]
+}
+
+resource "proxmox_user_token" "node_remediation" {
+  count = local.node_remediation_enabled_value ? 1 : 0
+
+  user_id               = "root@pam"
+  token_name            = local.node_remediation_token_name
+  comment               = "Automatic worker remediation for ${var.cluster_name}; managed by pve-k8s-talos"
+  privileges_separation = true
+}
+
+resource "proxmox_acl" "node_remediation" {
+  count = local.node_remediation_enabled_value ? 1 : 0
+
+  path      = local.node_remediation_acl_path
+  token_id  = proxmox_user_token.node_remediation[0].id
+  role_id   = proxmox_virtual_environment_role.node_remediation[0].role_id
+  propagate = true
+}
+
+output "node_remediation_proxmox_token_id" {
+  value       = try(proxmox_user_token.node_remediation[0].id, "")
+  description = "Identifier of the dedicated privilege-separated Proxmox remediation token."
+}
+
+output "node_remediation_proxmox_role_id" {
+  value       = try(proxmox_virtual_environment_role.node_remediation[0].role_id, "")
+  description = "Identifier of the dedicated Proxmox remediation role."
+}
+
+output "node_remediation_proxmox_acl_path" {
+  value       = local.node_remediation_enabled_value ? local.node_remediation_acl_path : ""
+  description = "Proxmox ACL path assigned to the dedicated remediation token."
 }
 
 resource "kubernetes_manifest" "node_remediation_config" {
@@ -513,11 +589,13 @@ resource "kubernetes_secret_v1" "node_remediation_proxmox" {
 
   data = {
     endpoint    = var.proxmox_endpoint
-    "api-token" = var.proxmox_api_token
+    "api-token" = proxmox_user_token.node_remediation[0].value
     insecure    = tostring(var.proxmox_insecure)
   }
 
   type = "Opaque"
+
+  depends_on = [proxmox_acl.node_remediation]
 }
 
 resource "kubernetes_manifest" "node_remediation" {

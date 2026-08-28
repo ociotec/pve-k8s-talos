@@ -39,6 +39,7 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
 - `.envrc`
   - This is an optional file, only proceed with this file creation if you also installed previous optional step `direnv`.
   - Define all required PVE environment variables to allow OpenTofu to access your PVE nodes, it's prererred to use API token authentication as described at sample file.
+  - When automatic node remediation is enabled, the deployment credential must have `Permissions.Modify` and `User.Modify` at `/`; it provisions a dedicated privilege-separated token and is not copied into Kubernetes.
 - `constants.auto.tfvars`
   - Talos ISO path on PVE node.
   - Optional datastore ID for VM disks and cloud-init (defaults to `local-lvm`).
