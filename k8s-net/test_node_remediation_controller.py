@@ -96,6 +96,11 @@ class FakeProxmox:
 
 
 class ControllerTest(unittest.TestCase):
+    def test_timestamp_uses_kubernetes_microtime_format(self):
+        value = dt.datetime(2026, 8, 28, 10, 0, tzinfo=dt.timezone.utc)
+
+        self.assertEqual(remediation.timestamp(value), "2026-08-28T10:00:00.000000Z")
+
     def controller(self, worker, pve=None):
         controller = remediation.Controller.__new__(remediation.Controller)
         controller.config = {

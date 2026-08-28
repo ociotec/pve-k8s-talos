@@ -38,7 +38,7 @@ def utcnow():
 
 
 def timestamp(value=None):
-    return (value or utcnow()).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return (value or utcnow()).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def parse_time(value):
@@ -94,6 +94,10 @@ class Kubernetes:
                 self.request("/apis/coordination.k8s.io/v1/namespaces/kube-node-lease/leases", "POST", body)
                 return True
             except RuntimeError:
+                # A competing replica may have created the Lease after our GET.
+                # Surface every other error so readiness and logs expose it.
+                if self.get_lease(name) is None:
+                    raise
                 return False
 
         spec = lease.get("spec", {})
