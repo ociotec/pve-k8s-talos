@@ -156,7 +156,6 @@ spec:
               path: /readyz
               port: health
               scheme: HTTP
-            initialDelaySeconds: 0
             periodSeconds: 5
             timeoutSeconds: 1
             successThreshold: 1
@@ -166,7 +165,6 @@ spec:
               path: /healthz
               port: health
               scheme: HTTP
-            initialDelaySeconds: 0
             periodSeconds: 10
             timeoutSeconds: 1
             successThreshold: 1
