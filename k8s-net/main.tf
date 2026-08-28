@@ -31,6 +31,39 @@ variable "skip_ceph" {
   description = "Skip Rook Ceph dashboard deployment."
 }
 
+variable "proxmox_endpoint" {
+  type        = string
+  default     = ""
+  description = "Proxmox API endpoint used by automatic node remediation."
+}
+
+variable "proxmox_api_token" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Proxmox API token used by automatic node remediation."
+}
+
+variable "proxmox_insecure" {
+  type        = bool
+  default     = false
+  description = "Disable TLS certificate verification for the Proxmox remediation API client."
+}
+
+variable "vms" {
+  type = map(object({
+    node_name  = string
+    vm_id      = number
+    type       = string
+    ip         = string
+    ip2        = optional(string)
+    vm_tags    = optional(string)
+    k8s_labels = optional(map(string), {})
+  }))
+  default     = {}
+  description = "Cluster VM inventory used to map Kubernetes worker names to execution-fencing targets."
+}
+
 provider "kubernetes" {
   config_path = abspath("${path.module}/${var.kubeconfig_path}")
 }
@@ -52,6 +85,87 @@ locals {
   }
 
   constants_source = file("${path.module}/constants.tf")
+  node_remediation_enabled_value = can(regex("(?m)^\\s*node_remediation_enabled\\s*=\\s*(true|false)\\s*$", local.constants_source)[0]) ? (
+    tobool(regex("(?m)^\\s*node_remediation_enabled\\s*=\\s*(true|false)\\s*$", local.constants_source)[0])
+  ) : false
+  node_remediation_image_value = can(regex("(?m)^\\s*node_remediation_image\\s*=\\s*\"([^\"]+)\"\\s*$", local.constants_source)[0]) ? (
+    regex("(?m)^\\s*node_remediation_image\\s*=\\s*\"([^\"]+)\"\\s*$", local.constants_source)[0]
+  ) : "python:3.13-alpine"
+  node_remediation_replicas_value = can(regex("(?m)^\\s*node_remediation_replicas\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0]) ? (
+    tonumber(regex("(?m)^\\s*node_remediation_replicas\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0])
+  ) : 2
+  node_remediation_evaluation_interval_seconds_value = can(regex("(?m)^\\s*node_remediation_evaluation_interval_seconds\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0]) ? (
+    tonumber(regex("(?m)^\\s*node_remediation_evaluation_interval_seconds\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0])
+  ) : 5
+  node_remediation_lease_timeout_seconds_value = can(regex("(?m)^\\s*node_remediation_lease_timeout_seconds\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0]) ? (
+    tonumber(regex("(?m)^\\s*node_remediation_lease_timeout_seconds\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0])
+  ) : 20
+  node_remediation_confirmation_seconds_value = can(regex("(?m)^\\s*node_remediation_confirmation_seconds\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0]) ? (
+    tonumber(regex("(?m)^\\s*node_remediation_confirmation_seconds\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0])
+  ) : 5
+  node_remediation_execution_fence_timeout_seconds_value = can(regex("(?m)^\\s*node_remediation_execution_fence_timeout_seconds\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0]) ? (
+    tonumber(regex("(?m)^\\s*node_remediation_execution_fence_timeout_seconds\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0])
+  ) : 45
+  node_remediation_storage_fence_timeout_seconds_value = can(regex("(?m)^\\s*node_remediation_storage_fence_timeout_seconds\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0]) ? (
+    tonumber(regex("(?m)^\\s*node_remediation_storage_fence_timeout_seconds\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0])
+  ) : 60
+  node_remediation_recovery_stability_seconds_value = can(regex("(?m)^\\s*node_remediation_recovery_stability_seconds\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0]) ? (
+    tonumber(regex("(?m)^\\s*node_remediation_recovery_stability_seconds\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0])
+  ) : 30
+  node_remediation_node_cooldown_seconds_value = can(regex("(?m)^\\s*node_remediation_node_cooldown_seconds\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0]) ? (
+    tonumber(regex("(?m)^\\s*node_remediation_node_cooldown_seconds\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0])
+  ) : 600
+  node_remediation_max_concurrent_value = can(regex("(?m)^\\s*node_remediation_max_concurrent\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0]) ? (
+    tonumber(regex("(?m)^\\s*node_remediation_max_concurrent\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0])
+  ) : 1
+  node_remediation_min_ready_controlplanes_value = can(regex("(?m)^\\s*node_remediation_min_ready_controlplanes\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0]) ? (
+    tonumber(regex("(?m)^\\s*node_remediation_min_ready_controlplanes\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0])
+  ) : 2
+  node_remediation_min_node_age_seconds_value = can(regex("(?m)^\\s*node_remediation_min_node_age_seconds\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0]) ? (
+    tonumber(regex("(?m)^\\s*node_remediation_min_node_age_seconds\\s*=\\s*([0-9]+)\\s*$", local.constants_source)[0])
+  ) : 300
+  node_remediation_cpu_request_value = can(regex("(?m)^\\s*node_remediation_cpu_request\\s*=\\s*\"([^\"]+)\"\\s*$", local.constants_source)[0]) ? (
+    regex("(?m)^\\s*node_remediation_cpu_request\\s*=\\s*\"([^\"]+)\"\\s*$", local.constants_source)[0]
+  ) : "25m"
+  node_remediation_cpu_limit_value = can(regex("(?m)^\\s*node_remediation_cpu_limit\\s*=\\s*\"([^\"]+)\"\\s*$", local.constants_source)[0]) ? (
+    regex("(?m)^\\s*node_remediation_cpu_limit\\s*=\\s*\"([^\"]+)\"\\s*$", local.constants_source)[0]
+  ) : "200m"
+  node_remediation_memory_value = can(regex("(?m)^\\s*node_remediation_memory\\s*=\\s*\"([^\"]+)\"\\s*$", local.constants_source)[0]) ? (
+    regex("(?m)^\\s*node_remediation_memory\\s*=\\s*\"([^\"]+)\"\\s*$", local.constants_source)[0]
+  ) : "128Mi"
+  node_remediation_nodes = {
+    for name, vm in var.vms : name => {
+      host = vm.node_name
+      vmid = vm.vm_id
+    }
+    if startswith(vm.type, "worker")
+  }
+  node_remediation_config = {
+    evaluation_interval_seconds     = local.node_remediation_evaluation_interval_seconds_value
+    lease_timeout_seconds           = local.node_remediation_lease_timeout_seconds_value
+    confirmation_seconds            = local.node_remediation_confirmation_seconds_value
+    execution_fence_timeout_seconds = local.node_remediation_execution_fence_timeout_seconds_value
+    storage_fence_timeout_seconds   = local.node_remediation_storage_fence_timeout_seconds_value
+    recovery_stability_seconds      = local.node_remediation_recovery_stability_seconds_value
+    node_cooldown_seconds           = local.node_remediation_node_cooldown_seconds_value
+    max_concurrent_remediations     = local.node_remediation_max_concurrent_value
+    minimum_ready_controlplanes     = local.node_remediation_min_ready_controlplanes_value
+    minimum_node_age_seconds        = local.node_remediation_min_node_age_seconds_value
+    nodes                           = local.node_remediation_nodes
+  }
+  node_remediation_config_json = jsonencode(local.node_remediation_config)
+  node_remediation_script      = file("${path.module}/node-remediation-controller.py")
+  node_remediation_manifests = [
+    for doc in split("\n---\n", templatefile("${path.module}/node-remediation.yaml", {
+      replicas        = local.node_remediation_replicas_value
+      image           = local.node_remediation_image_value
+      cpu_request     = local.node_remediation_cpu_request_value
+      cpu_limit       = local.node_remediation_cpu_limit_value
+      memory          = local.node_remediation_memory_value
+      config_checksum = sha256("${local.node_remediation_config_json}:${local.node_remediation_script}")
+    })) : yamldecode(doc)
+    if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
+  ]
   ingress_nginx_tracing_enabled_value = can(regex("(?m)^\\s*ingress_nginx_tracing_enabled\\s*=\\s*(true|false)\\s*$", local.constants_source)[0]) ? (
     tobool(regex("(?m)^\\s*ingress_nginx_tracing_enabled\\s*=\\s*(true|false)\\s*$", local.constants_source)[0])
   ) : true
@@ -322,6 +436,89 @@ check "tls_source_valid" {
     condition     = contains(["ca_issuer", "preissued"], local.tls_source)
     error_message = format("tls_source must be \"ca_issuer\" or \"preissued\", got %q", local.tls_source)
   }
+}
+
+check "node_remediation_configuration" {
+  assert {
+    condition = !local.node_remediation_enabled_value || (
+      var.proxmox_endpoint != "" &&
+      var.proxmox_api_token != "" &&
+      length(local.node_remediation_nodes) > 0 &&
+      local.node_remediation_replicas_value >= 2 &&
+      local.node_remediation_evaluation_interval_seconds_value >= 2 &&
+      local.node_remediation_lease_timeout_seconds_value >= 15 &&
+      local.node_remediation_confirmation_seconds_value >= 5 &&
+      local.node_remediation_execution_fence_timeout_seconds_value >= 15 &&
+      local.node_remediation_storage_fence_timeout_seconds_value >= 30 &&
+      local.node_remediation_recovery_stability_seconds_value >= 30 &&
+      local.node_remediation_node_cooldown_seconds_value >= 300 &&
+      local.node_remediation_max_concurrent_value >= 1 &&
+      local.node_remediation_min_ready_controlplanes_value >= 1 &&
+      local.node_remediation_min_node_age_seconds_value >= 60
+    )
+    error_message = "Automatic node remediation requires PVE credentials, at least one worker, two controller replicas, and timing values above the safety minima."
+  }
+}
+
+resource "kubernetes_manifest" "node_remediation_config" {
+  count = local.node_remediation_enabled_value ? 1 : 0
+
+  manifest = {
+    apiVersion = "v1"
+    kind       = "ConfigMap"
+    metadata = {
+      name      = "node-remediation-controller"
+      namespace = "kube-system"
+      labels = {
+        "app.kubernetes.io/name"       = "node-remediation-controller"
+        "app.kubernetes.io/instance"   = "node-remediation-controller"
+        "app.kubernetes.io/component"  = "controller"
+        "app.kubernetes.io/part-of"    = "node-remediation"
+        "app.kubernetes.io/managed-by" = "infrastructure"
+        "pve-k8s-talos/section"        = "k8s-net"
+      }
+    }
+    data = {
+      "config.json"   = local.node_remediation_config_json
+      "controller.py" = local.node_remediation_script
+    }
+  }
+}
+
+resource "kubernetes_secret_v1" "node_remediation_proxmox" {
+  count = local.node_remediation_enabled_value ? 1 : 0
+
+  metadata {
+    name      = "node-remediation-proxmox"
+    namespace = "kube-system"
+    labels = {
+      "app.kubernetes.io/name"       = "node-remediation-controller"
+      "app.kubernetes.io/instance"   = "node-remediation-controller"
+      "app.kubernetes.io/component"  = "controller"
+      "app.kubernetes.io/part-of"    = "node-remediation"
+      "app.kubernetes.io/managed-by" = "infrastructure"
+      "pve-k8s-talos/section"        = "k8s-net"
+    }
+  }
+
+  data = {
+    endpoint    = var.proxmox_endpoint
+    "api-token" = var.proxmox_api_token
+    insecure    = tostring(var.proxmox_insecure)
+  }
+
+  type = "Opaque"
+}
+
+resource "kubernetes_manifest" "node_remediation" {
+  for_each = { for i, manifest in local.node_remediation_manifests : tostring(i) => manifest if local.node_remediation_enabled_value }
+  manifest = each.value
+
+  depends_on = [
+    kubernetes_manifest.infrastructure_priority_classes,
+    kubernetes_manifest.node_remediation_config,
+    kubernetes_secret_v1.node_remediation_proxmox,
+  ]
 }
 
 resource "kubernetes_manifest" "infrastructure_priority_classes" {

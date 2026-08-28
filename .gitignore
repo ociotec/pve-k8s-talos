@@ -32,6 +32,8 @@ patches/qemu.yaml
 .envrc
 .codex
 .DS_Store
+__pycache__/
+*.pyc
 kubeconfig
 talosconfig
 talos.tf

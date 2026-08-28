@@ -361,6 +361,12 @@ tf_string_value() {
   awk -v name="${name}" -F'"' '$0 ~ "^[[:space:]]*" name "[[:space:]]*=" { print $2; exit }' "${file}" 2>/dev/null || true
 }
 
+tf_bool_value() {
+  local file="$1"
+  local name="$2"
+  awk -v name="${name}" '$0 ~ "^[[:space:]]*" name "[[:space:]]*=[[:space:]]*(true|false)[[:space:]]*$" { gsub(/[[:space:]]/, "", $0); sub(/^.*=/, "", $0); print; exit }' "${file}" 2>/dev/null || true
+}
+
 tf_map_string_value() {
   local file="$1"
   local map_name="$2"
@@ -752,6 +758,67 @@ collect_workers_with_secondary_network() {
   ' "${cluster_vms_path}" | sort
 }
 
+collect_worker_vm_targets() {
+  awk '
+    function brace_delta(line,   raw, opens, closes) {
+      raw = line
+      gsub(/#.*/, "", raw)
+      opens = gsub(/{/, "{", raw)
+      closes = gsub(/}/, "}", raw)
+      return opens - closes
+    }
+
+    /^[[:space:]]*#/ { next }
+
+    match($0, /"[^"]+"[[:space:]]*=[[:space:]]*{/) {
+      name = $0
+      sub(/^[^"]*"/, "", name)
+      sub(/".*/, "", name)
+      in_block = 1
+      block_depth = brace_delta($0)
+      if (block_depth <= 0) {
+        block_depth = 1
+      }
+      node_name = ""
+      vm_id = ""
+      vm_type = ""
+      next
+    }
+
+    in_block && match($0, /node_name[[:space:]]*=[[:space:]]*"[^"]+"/) {
+      node_name = $0
+      sub(/^[^"]*"/, "", node_name)
+      sub(/".*/, "", node_name)
+      next
+    }
+
+    in_block && match($0, /vm_id[[:space:]]*=[[:space:]]*[0-9]+/) {
+      vm_id = $0
+      sub(/^[^=]*=[[:space:]]*/, "", vm_id)
+      gsub(/[[:space:]]/, "", vm_id)
+      next
+    }
+
+    in_block && match($0, /type[[:space:]]*=[[:space:]]*"[^"]+"/) {
+      vm_type = $0
+      sub(/^[^"]*"/, "", vm_type)
+      sub(/".*/, "", vm_type)
+      next
+    }
+
+    in_block {
+      block_depth += brace_delta($0)
+      if (block_depth <= 0) {
+        if (vm_type ~ /^worker/ && name != "" && node_name != "" && vm_id != "") {
+          print name "|" node_name "|" vm_id
+        }
+        in_block = 0
+        block_depth = 0
+      }
+    }
+  ' "${cluster_vms_path}" | sort
+}
+
 proxmox_api_base() {
   local base="${TF_VAR_proxmox_endpoint:-${PROXMOX_VE_ENDPOINT:-}}"
 
@@ -790,6 +857,50 @@ proxmox_api_request() {
   fi
 
   curl "${curl_args[@]}" "${base}${path}"
+}
+
+validate_node_remediation_proxmox_access() {
+  local enabled
+  local worker_name
+  local node_name
+  local vm_id
+  local permissions_json
+  local vm_path
+  local vm_audit
+  local vm_power
+  local target_count=0
+
+  enabled="$(tf_bool_value "${cluster_k8s_net_constants_path}" node_remediation_enabled)"
+  if [[ "${enabled:-false}" != "true" ]]; then
+    return 0
+  fi
+  if [[ "${skip_ceph}" == "true" ]]; then
+    error "Automatic node remediation requires the Ceph section so CSI network fencing can be reconciled." >&2
+    exit 1
+  fi
+
+  message "Checking Proxmox VM audit and power-management privileges for automatic node remediation..."
+  while IFS='|' read -r worker_name node_name vm_id; do
+    [[ -n "${worker_name}" ]] || continue
+    target_count=$((target_count + 1))
+    vm_path="/vms/${vm_id}"
+    permissions_json="$(proxmox_api_request GET "/access/permissions?path=${vm_path}")"
+    vm_audit="$(printf '%s' "${permissions_json}" | jq -r --arg path "${vm_path}" '.data[$path]["VM.Audit"] // 0')"
+    vm_power="$(printf '%s' "${permissions_json}" | jq -r --arg path "${vm_path}" '.data[$path]["VM.PowerMgmt"] // 0')"
+    if [[ "${vm_audit}" != "1" || "${vm_power}" != "1" ]]; then
+      error "The configured Proxmox API token lacks VM.Audit or VM.PowerMgmt for worker ${worker_name} (${vm_path})." >&2
+      exit 1
+    fi
+    if ! proxmox_api_request GET "/nodes/${node_name}/qemu/${vm_id}/status/current" | jq -e '.data.status != null' >/dev/null; then
+      error "Cannot audit Proxmox worker ${worker_name} on ${node_name} (VM ${vm_id})." >&2
+      exit 1
+    fi
+  done < <(collect_worker_vm_targets)
+
+  if (( target_count == 0 )); then
+    error "Automatic node remediation is enabled but no worker VM targets were found." >&2
+    exit 1
+  fi
 }
 
 wait_for_proxmox_task_completion() {
@@ -1548,7 +1659,10 @@ prepare_k8s_net_workspace() {
   link_into_workspace "${repo_root}/k8s-net/metallb-native.yaml" "${workspace}/metallb-native.yaml"
   link_into_workspace "${repo_root}/k8s-net/metallb-pool.yaml" "${workspace}/metallb-pool.yaml"
   link_into_workspace "${repo_root}/k8s-net/metrics-server.yaml" "${workspace}/metrics-server.yaml"
+  link_into_workspace "${repo_root}/k8s-net/node-remediation-controller.py" "${workspace}/node-remediation-controller.py"
+  link_into_workspace "${repo_root}/k8s-net/node-remediation.yaml" "${workspace}/node-remediation.yaml"
   link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/constants.tf"
+  link_into_workspace "${cluster_vms_path}" "${workspace}/vms.auto.tfvars"
   link_into_workspace "${cluster_certs_dir}" "${workspace}/certs"
   if [[ -r "${repo_root}/k8s-net/.terraform.lock.hcl" ]]; then
     link_into_workspace "${repo_root}/k8s-net/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
@@ -1737,6 +1851,7 @@ prepare_rook_workspaces() {
     link_into_workspace "${repo_root}/rook/04-csi/.terraform" "${cluster_rook_04_workspace}/.terraform"
   fi
   link_into_workspace "${repo_root}/rook/01-crds-common-operator/main.tf" "${cluster_rook_01_workspace}/main.tf"
+  link_into_workspace "${cluster_ceph_constants_path}" "${cluster_rook_01_workspace}/ceph_constants.tf"
   link_into_workspace "${repo_root}/rook/02-cluster/main.tf" "${cluster_rook_02_workspace}/main.tf"
   link_into_workspace "${cluster_ceph_constants_path}" "${cluster_rook_02_workspace}/ceph_constants.tf"
   link_into_workspace "${cluster_k8s_net_constants_path}" "${cluster_rook_02_workspace}/k8s_net_constants.tf"
@@ -2939,6 +3054,10 @@ if [[ "${purge_external_ceph}" == "true" ]]; then
   fi
 fi
 
+if [[ "${skip_k8s_net}" != "true" && "${destroy_only}" != "true" ]]; then
+  validate_node_remediation_proxmox_access
+fi
+
 start_deploy_section "credentials"
 run_ensure_credentials
 finish_deploy_section "credentials"
@@ -3120,6 +3239,16 @@ else
   if [[ "${ceph_mode_value}" == "external" ]]; then
     external_csi_config_hash_before="$(rook_external_csi_configuration_sha256)"
   fi
+  csi_addons_enabled="$(tf_bool_value "${cluster_ceph_constants_path}" ceph_csi_addons_enabled)"
+  if [[ "${csi_addons_enabled:-false}" == "true" ]]; then
+    message "Deploying Rook operator and CSI-Addons network-fencing components..."
+    clear_rook_operator_restart_annotation
+    run_tofu_init "${cluster_rook_01_workspace}"
+    run tofu -chdir="${cluster_rook_01_workspace}" apply -auto-approve
+    wait_for_pods_ready "rook-ceph" "rook-ceph-operator" "180s"
+    wait_for_resource_existence "csi-addons-system" "deploy/csi-addons-controller-manager" 180
+    run kubectl -n csi-addons-system rollout status deploy/csi-addons-controller-manager --timeout=180s
+  fi
   ceph_phase="$(kubectl -n rook-ceph get cephcluster rook-ceph -o jsonpath='{.status.phase}' 2>/dev/null || true)"
   if [[ "${ceph_phase}" == "Ready" || ("${ceph_mode_value}" == "external" && "${ceph_phase}" == "Connected") ]]; then
     message "Rook Ceph cluster already healthy (phase=${ceph_phase}); reconciling cluster spec without operator bootstrap..."
@@ -3128,10 +3257,12 @@ else
     wait_for_cephcluster_ready "rook-ceph" "rook-ceph" "${ceph_mode_value}" "180"
   else
     message "Deploying Rook Ceph operator..."
-    clear_rook_operator_restart_annotation
-    run_tofu_init "${cluster_rook_01_workspace}"
-    run tofu -chdir="${cluster_rook_01_workspace}" apply -auto-approve
-    wait_for_pods_ready "rook-ceph" "rook-ceph-operator" "180s"
+    if [[ "${csi_addons_enabled:-false}" != "true" ]]; then
+      clear_rook_operator_restart_annotation
+      run_tofu_init "${cluster_rook_01_workspace}"
+      run tofu -chdir="${cluster_rook_01_workspace}" apply -auto-approve
+      wait_for_pods_ready "rook-ceph" "rook-ceph-operator" "180s"
+    fi
 
     message "Deploying Rook Ceph cluster..."
     run_tofu_init "${cluster_rook_02_workspace}"

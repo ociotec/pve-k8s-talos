@@ -30,6 +30,10 @@ locals {
   ingress_nginx_admission_job_mem_request = "64Mi"
   ingress_nginx_admission_job_mem_limit   = "64Mi"
 
+  # Automatic recovery for unreachable workers. The initial adapters use the
+  # configured Proxmox VM inventory and Rook Ceph RBD network fencing.
+  node_remediation_enabled = false
+
   available_certificates = {
     wildcard_default = {
       cert_path = "./certs/wildcard.${local.domain}.fullchain.pem"

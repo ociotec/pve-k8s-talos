@@ -1,6 +1,6 @@
 # Automatic Node Remediation and Stateful Workload Recovery
 
-Status: Proposed
+Status: Initial pilot implementation
 
 ## Purpose
 
@@ -44,9 +44,10 @@ stopped writing.
 
 ## Architecture
 
-The remediation coordinator should run outside the Kubernetes cluster it
-protects. This keeps the recovery path available during partial cluster
-failures.
+The portable target is a coordinator outside the Kubernetes cluster it
+protects. The initial implementation runs two leader-elected replicas on
+control-plane nodes. This covers worker failures without introducing a new
+external runtime; the fencing interfaces remain separable from Kubernetes.
 
 ```text
                       +-----------------------+
@@ -132,8 +133,8 @@ Node returns to schedulable service
 
 ### Detection
 
-A node is a remediation candidate when it remains `Unknown` or `NotReady`
-beyond a configured threshold. Detection must include circuit breakers:
+A node is a remediation candidate when its Kubernetes Lease remains stale
+beyond a configured threshold. Detection includes these circuit breakers:
 
 - Remediate workers only.
 - Require a healthy Kubernetes control plane.
@@ -144,18 +145,32 @@ beyond a configured threshold. Detection must include circuit breakers:
 The detector should watch Kubernetes node state directly. Monitoring alerts are
 useful for visibility but should not be the control signal.
 
+The initial fast local-network profile evaluates every 5 seconds, suspects a
+node after a 20-second stale Lease, and waits another 5 seconds before fencing.
+
+| Setting | Default | Purpose |
+| --- | ---: | --- |
+| Evaluation interval | 5 s | Recheck node and remediation state. |
+| Stale Lease threshold | 20 s | Start suspecting an unreachable node. |
+| Confirmation window | 5 s | Reject a short transient before fencing. |
+| Execution-fence timeout | 45 s | Maximum wait for confirmed VM shutdown. |
+| Storage-fence timeout | 60 s | Report slow fencing; it does not delay a successful result. |
+| Recovery stability | 30 s | Require stable `Ready` before unfencing. |
+| Per-node cooldown | 10 min | Prevent repeated remediation loops. |
+| Concurrent remediations | 1 | Prevent mass fencing. |
+
 ### Fencing
 
-The coordinator attempts both mechanisms:
+The initial PVE and Ceph RBD implementation performs both mechanisms in order:
 
 1. **Execution fencing:** use the compute adapter to isolate the worker and
    verify that it can no longer execute workloads.
 2. **Storage fencing:** use the adapter for each affected CSI driver to revoke
    the worker's access to its writable volumes.
 
-Recovery may continue when execution fencing succeeds, or when storage fencing
-succeeds for every affected writable volume. Using both provides defense in
-depth and allows recovery when one control path is unavailable.
+The node is marked out of service only after PVE confirms that its VM is
+stopped. A VM with an affected RBD attachment remains stopped until the
+attachment is gone and CSI-Addons reports a successful `NetworkFence`.
 
 ### Compute Backend Portability
 
@@ -206,7 +221,7 @@ Once workloads are safe elsewhere, the coordinator recovers the worker:
 
 1. Ask the execution adapter to restart, relocate, replace, or power-cycle the
    worker as appropriate.
-2. Verify that its boot identity changed.
+2. Verify a complete stop/start power cycle through the execution adapter.
 3. Require the node to remain healthy for a stabilization period.
 4. Remove the out-of-service state and wait for storage unfencing.
 5. Remove quarantine and make the node schedulable.
@@ -260,13 +275,16 @@ For the initial implementation, these rules apply to Proxmox HA and worker VMs.
 
 ## Expected Service Level
 
-An initial target for a single worker failure is:
+The initial pilot target for a single worker failure is:
 
-- Failure detection: 2-3 minutes.
+- Failure detection and confirmation: approximately 25-30 seconds.
 - Fencing and volume release: under 1 minute after detection.
-- Workload recovery: application-dependent, typically 1-3 minutes.
-- Expected total RTO for a singleton PostgreSQL workload: approximately 3-6
-  minutes.
+- Workload recovery: application-dependent, typically 30-90 seconds.
+- Expected total RTO for a singleton PostgreSQL workload: approximately 1-2
+  minutes, plus any extended WAL recovery.
+- The recovered worker may remain quarantined for the CSI-Addons unfencing
+  cooldown, currently about five minutes; this does not delay the replacement
+  workload on another worker.
 
 These values are objectives to validate through failure testing, not guarantees.
 

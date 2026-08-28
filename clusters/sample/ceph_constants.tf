@@ -6,6 +6,9 @@ locals {
 
   ceph_name_prefix = "sample"
 
+  # Deploy CSI-Addons and enable the RBD network-fencing sidecar.
+  ceph_csi_addons_enabled = false
+
   ceph_block_replicated = {
     enabled  = true
     size     = 3
