@@ -104,7 +104,7 @@
           "fields": "",
           "values": false
         },
-        "showPercentChange": true,
+        "showPercentChange": false,
         "textMode": "value_and_name",
         "wideLayout": false
       },
@@ -197,7 +197,7 @@
           "fields": "",
           "values": false
         },
-        "showPercentChange": true,
+        "showPercentChange": false,
         "textMode": "value_and_name",
         "wideLayout": false
       },
@@ -218,60 +218,68 @@
         "type": "prometheus",
         "uid": "Prometheus"
       },
-      "description": "Control-plane pod slot usage per node, calculated as used pods / allocatable pods. Thresholds: gray = N/A when node is not ready; green < 70%; yellow >= 70% and < 90%; red >= 90%.",
+      "description": "Automatic worker remediation phase over time. Error overrides the active phase when the controller records a blocking failure.",
       "fieldConfig": {
         "defaults": {
-          "decimals": 1,
-          "max": 100,
-          "min": -1,
+          "color": {
+            "mode": "thresholds"
+          },
           "mappings": [
             {
               "options": {
-                "-1": {
-                  "text": "N/A",
-                  "color": "dark-gray"
+                "0": {
+                  "color": "green",
+                  "text": "Healthy"
+                },
+                "1": {
+                  "color": "yellow",
+                  "text": "Suspect"
+                },
+                "2": {
+                  "color": "orange",
+                  "text": "PVE fencing"
+                },
+                "3": {
+                  "color": "orange",
+                  "text": "Storage fencing"
+                },
+                "4": {
+                  "color": "blue",
+                  "text": "Recovering"
+                },
+                "5": {
+                  "color": "blue",
+                  "text": "Unfencing"
+                },
+                "6": {
+                  "color": "light-green",
+                  "text": "Cooldown"
+                },
+                "8": {
+                  "color": "dark-gray",
+                  "text": "Disabled"
+                },
+                "9": {
+                  "color": "red",
+                  "text": "Error"
                 }
               },
               "type": "value"
-            },
-            {
-              "options": {
-                "match": "null",
-                "result": {
-                  "text": "N/A",
-                  "color": "dark-gray"
-                }
-              },
-              "type": "special"
             }
           ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "dark-gray",
-                "value": -1
-              },
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "yellow",
-                "value": 70
-              },
-              {
-                "color": "red",
-                "value": 90
+                "color": "green"
               }
             ]
-          },
-          "unit": "suffix:% pods"
+          }
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 3,
+        "h": 6,
         "w": 8,
         "x": 16,
         "y": 0
@@ -279,32 +287,32 @@
       "id": 34,
       "maxDataPoints": 120,
       "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
+        "alignValue": "left",
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
         },
-        "showPercentChange": true,
-        "textMode": "value_and_name",
-        "wideLayout": false
+        "mergeValues": true,
+        "rowHeight": 0.7,
+        "showValue": "always",
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "pluginVersion": "12.4.0-20648027705",
       "targets": [
         {
           "editorMode": "code",
-          "expr": "(100 * count by(node) ((kube_pod_status_phase{phase=~\"Pending|Running\"} == 1) * on(namespace,pod) group_left(node) max by(namespace,pod,node) (kube_pod_info)) / clamp_min(sum by(node) (kube_node_status_allocatable{resource=\"pods\"}), 1) or on(node) (-1 * (max by(node) (kube_node_info) unless on(node) max by(node) (kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1)))) * on(node) group_left() kube_node_role{role=~\"control-plane|master\"}",
+          "expr": "max by(node) (\n  ((node_remediation_node_phase{phase=\"healthy\"} == 1) * 0)\n  or ((node_remediation_node_phase{phase=\"suspect\"} == 1) * 1)\n  or ((node_remediation_node_phase{phase=\"fencing\"} == 1) * 2)\n  or ((node_remediation_node_phase{phase=\"storage-fencing\"} == 1) * 3)\n  or ((node_remediation_node_phase{phase=\"recovering\"} == 1) * 4)\n  or ((node_remediation_node_phase{phase=\"unfencing\"} == 1) * 5)\n  or ((node_remediation_node_phase{phase=\"cooldown\"} == 1) * 6)\n  or ((node_remediation_node_phase{phase=\"disabled\"} == 1) * 8)\n  or ((node_remediation_node_error == 1) * 9)\n)",
           "legendFormat": "{{node}}",
+          "range": true,
           "refId": "A"
         }
       ],
-      "title": "",
-      "type": "stat"
+      "title": "Automatic node remediation",
+      "type": "state-timeline"
     },
     {
       "datasource": {
@@ -383,7 +391,7 @@
           "fields": "",
           "values": false
         },
-        "showPercentChange": true,
+        "showPercentChange": false,
         "textMode": "value_and_name",
         "wideLayout": false
       },
@@ -476,7 +484,7 @@
           "fields": "",
           "values": false
         },
-        "showPercentChange": true,
+        "showPercentChange": false,
         "textMode": "value_and_name",
         "wideLayout": false
       },
@@ -486,99 +494,6 @@
           "editorMode": "code",
           "expr": "((\n  100 * (1 - (sum by(nodename) (\n  node_memory_MemAvailable_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n) / clamp_min(sum by(nodename) (\n  node_memory_MemTotal_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n), 1)))\n)\nor on(nodename)\n(\n  -1 * (max by(nodename) (label_replace(kube_node_info, \"nodename\", \"$1\", \"node\", \"(.*)\")) unless on(nodename) (max by(nodename) (label_replace(up{job=\"node-exporter\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\")) and on(nodename) max by(nodename) (label_replace(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\"))))\n))\n  unless on(nodename) max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"}, \"nodename\", \"$1\", \"node\", \"(.*)\"))",
           "legendFormat": "{{nodename}}",
-          "refId": "A"
-        }
-      ],
-      "title": "",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "Prometheus"
-      },
-      "description": "Worker pod slot usage per node, calculated as used pods / allocatable pods. Thresholds: gray = N/A when node is not ready; green < 70%; yellow >= 70% and < 90%; red >= 90%.",
-      "fieldConfig": {
-        "defaults": {
-          "decimals": 1,
-          "max": 100,
-          "min": -1,
-          "mappings": [
-            {
-              "options": {
-                "-1": {
-                  "text": "N/A",
-                  "color": "dark-gray"
-                }
-              },
-              "type": "value"
-            },
-            {
-              "options": {
-                "match": "null",
-                "result": {
-                  "text": "N/A",
-                  "color": "dark-gray"
-                }
-              },
-              "type": "special"
-            }
-          ],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "dark-gray",
-                "value": -1
-              },
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "yellow",
-                "value": 70
-              },
-              {
-                "color": "red",
-                "value": 90
-              }
-            ]
-          },
-          "unit": "suffix:% pods"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 3,
-        "w": 8,
-        "x": 16,
-        "y": 3
-      },
-      "id": 35,
-      "maxDataPoints": 120,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": true,
-        "textMode": "value_and_name",
-        "wideLayout": false
-      },
-      "pluginVersion": "12.4.0-20648027705",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "(100 * count by(node) ((kube_pod_status_phase{phase=~\"Pending|Running\"} == 1) * on(namespace,pod) group_left(node) max by(namespace,pod,node) (kube_pod_info)) / clamp_min(sum by(node) (kube_node_status_allocatable{resource=\"pods\"}), 1) or on(node) (-1 * (max by(node) (kube_node_info) unless on(node) max by(node) (kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1)))) unless on(node) kube_node_role{role=~\"control-plane|master\"}",
-          "legendFormat": "{{node}}",
           "refId": "A"
         }
       ],

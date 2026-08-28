@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Automatically fence and recover unreachable Proxmox-backed worker nodes."""
 
+import copy
 import datetime as dt
 import http.server
 import json
@@ -30,6 +31,16 @@ TAINTS = (
     {"key": OUT_OF_SERVICE, "value": "nodeshutdown", "effect": "NoExecute"},
     {"key": OUT_OF_SERVICE, "value": "nodeshutdown", "effect": "NoSchedule"},
     {"key": QUARANTINE, "value": "storage-unfencing", "effect": "NoSchedule"},
+)
+PHASES = (
+    "healthy",
+    "suspect",
+    "fencing",
+    "storage-fencing",
+    "recovering",
+    "unfencing",
+    "cooldown",
+    "disabled",
 )
 
 
@@ -204,8 +215,97 @@ class Proxmox:
 
 class HealthHandler(http.server.BaseHTTPRequestHandler):
     ready = False
+    leader = False
+    identity = "unknown"
+    node_metrics = {}
+    metrics_lock = threading.Lock()
+
+    @classmethod
+    def publish_controller(cls, identity, leader):
+        with cls.metrics_lock:
+            cls.identity = identity
+            cls.leader = leader
+            if not leader:
+                cls.node_metrics = {}
+
+    @classmethod
+    def publish_node(cls, node_name, phase, phase_started, lease_age, error):
+        with cls.metrics_lock:
+            cls.node_metrics[node_name] = {
+                "phase": phase,
+                "phase_started": phase_started,
+                "lease_age": lease_age,
+                "error": error,
+            }
+
+    @classmethod
+    def publish_phase(cls, node_name, phase, error=False):
+        with cls.metrics_lock:
+            if node_name in cls.node_metrics:
+                cls.node_metrics[node_name].update(
+                    {"phase": phase, "phase_started": utcnow().timestamp(), "error": error}
+                )
+
+    @classmethod
+    def render_metrics(cls):
+        with cls.metrics_lock:
+            identity = cls.identity.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+            leader = cls.leader
+            nodes = copy.deepcopy(cls.node_metrics)
+        lines = [
+            "# HELP node_remediation_controller_leader Whether this controller replica currently holds the leader Lease.",
+            "# TYPE node_remediation_controller_leader gauge",
+            f'node_remediation_controller_leader{{identity="{identity}"}} {1 if leader else 0}',
+            "# HELP node_remediation_node_phase Current remediation phase as a one-hot gauge.",
+            "# TYPE node_remediation_node_phase gauge",
+        ]
+        now = utcnow().timestamp()
+        for node_name, values in sorted(nodes.items()):
+            escaped_node = node_name.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+            for phase in PHASES:
+                lines.append(
+                    f'node_remediation_node_phase{{node="{escaped_node}",phase="{phase}"}} '
+                    f'{1 if values["phase"] == phase else 0}'
+                )
+        lines.extend(
+            [
+                "# HELP node_remediation_node_phase_age_seconds Seconds spent in the current remediation phase.",
+                "# TYPE node_remediation_node_phase_age_seconds gauge",
+            ]
+        )
+        for node_name, values in sorted(nodes.items()):
+            phase_started = values["phase_started"]
+            age = max(0.0, now - phase_started) if phase_started else 0.0
+            lines.append(f'node_remediation_node_phase_age_seconds{{node="{node_name}"}} {age:.3f}')
+        lines.extend(
+            [
+                "# HELP node_remediation_node_lease_age_seconds Seconds since the Kubernetes node Lease was renewed.",
+                "# TYPE node_remediation_node_lease_age_seconds gauge",
+            ]
+        )
+        for node_name, values in sorted(nodes.items()):
+            lease_age = values["lease_age"]
+            rendered_age = "+Inf" if lease_age == float("inf") else f"{max(0.0, lease_age):.3f}"
+            lines.append(f'node_remediation_node_lease_age_seconds{{node="{node_name}"}} {rendered_age}')
+        lines.extend(
+            [
+                "# HELP node_remediation_node_error Whether the current remediation phase has a recorded error.",
+                "# TYPE node_remediation_node_error gauge",
+            ]
+        )
+        for node_name, values in sorted(nodes.items()):
+            lines.append(f'node_remediation_node_error{{node="{node_name}"}} {1 if values["error"] else 0}')
+        return "\n".join(lines) + "\n"
 
     def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler API
+        if self.path == "/metrics":
+            payload = self.render_metrics().encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
         status = 200 if self.path == "/healthz" or (self.path == "/readyz" and self.ready) else 503
         self.send_response(status)
         self.end_headers()
@@ -225,7 +325,32 @@ class Controller:
     def set_state(self, node, state, extra=None):
         annotations = {STATE: state, STATE_SINCE: timestamp(), LAST_ERROR: None}
         annotations.update(extra or {})
-        return self.kube.patch_node(node, annotations=annotations)
+        patched = self.kube.patch_node(node, annotations=annotations)
+        HealthHandler.publish_phase(node["metadata"]["name"], state)
+        return patched
+
+    def publish_node_metrics(self, node_name, node, lease_age, now):
+        metadata = node.get("metadata", {})
+        annotations = metadata.get("annotations") or {}
+        labels = metadata.get("labels") or {}
+        phase = annotations.get(STATE, "")
+        phase_started = parse_time(annotations.get(STATE_SINCE))
+        cooldown = parse_time(annotations.get(COOLDOWN_UNTIL))
+        if not phase:
+            if labels.get(DISABLED_LABEL, "false").lower() == "true":
+                phase = "disabled"
+            elif cooldown and cooldown > now:
+                phase = "cooldown"
+                phase_started = cooldown - dt.timedelta(seconds=self.config["node_cooldown_seconds"])
+            else:
+                phase = "healthy"
+        HealthHandler.publish_node(
+            node_name,
+            phase,
+            phase_started.timestamp() if phase_started else 0.0,
+            lease_age,
+            bool(annotations.get(LAST_ERROR)),
+        )
 
     def complete_recovery(self, node, node_name):
         cooldown = utcnow() + dt.timedelta(seconds=self.config["node_cooldown_seconds"])
@@ -243,6 +368,7 @@ class Controller:
             remove_taints=True,
             remove_quarantine=True,
         )
+        HealthHandler.publish_phase(node_name, "cooldown")
 
     @staticmethod
     def ready(node):
@@ -285,6 +411,8 @@ class Controller:
         labels = metadata.get("labels") or {}
         state = annotations.get(STATE, "")
         now = utcnow()
+        lease_age = self.lease_age(node_name)
+        self.publish_node_metrics(node_name, node, lease_age, now)
 
         if labels.get(DISABLED_LABEL, "false").lower() == "true" and not state:
             return
@@ -296,7 +424,7 @@ class Controller:
             cooldown = parse_time(annotations.get(COOLDOWN_UNTIL))
             if cooldown and cooldown > now:
                 return
-            if self.lease_age(node_name) < self.config["lease_timeout_seconds"]:
+            if lease_age < self.config["lease_timeout_seconds"]:
                 return
             if self.ready_control_plane_count() < self.config["minimum_ready_controlplanes"]:
                 return
@@ -308,9 +436,10 @@ class Controller:
 
         state_since = parse_time(annotations.get(STATE_SINCE)) or now
         if state == "suspect":
-            if self.lease_age(node_name) < self.config["lease_timeout_seconds"]:
+            if lease_age < self.config["lease_timeout_seconds"]:
                 logging.info("node %s recovered during confirmation window", node_name)
                 self.kube.patch_node(node, annotations={STATE: None, STATE_SINCE: None, LAST_ERROR: None})
+                HealthHandler.publish_phase(node_name, "healthy")
                 return
             if (now - state_since).total_seconds() < self.config["confirmation_seconds"]:
                 return
@@ -347,6 +476,7 @@ class Controller:
                     },
                     add_taints=True,
                 )
+                HealthHandler.publish_phase(node_name, "storage-fencing")
                 state = "storage-fencing"
                 state_since = now
                 annotations = node.get("metadata", {}).get("annotations") or {}
@@ -384,7 +514,7 @@ class Controller:
                 logging.exception("failed to verify or restart %s during recovery", node_name)
                 self.kube.patch_node(node, annotations={LAST_ERROR: str(error)[:512]})
                 return
-            if not self.ready(node) or self.lease_age(node_name) >= self.config["lease_timeout_seconds"]:
+            if not self.ready(node) or lease_age >= self.config["lease_timeout_seconds"]:
                 if annotations.get(STABLE_SINCE):
                     self.kube.patch_node(node, annotations={STABLE_SINCE: None})
                 return
@@ -401,6 +531,7 @@ class Controller:
                     annotations={STATE: "unfencing", STATE_SINCE: timestamp(), STABLE_SINCE: None},
                     remove_taints=True,
                 )
+                HealthHandler.publish_phase(node_name, "unfencing")
             else:
                 self.complete_recovery(node, node_name)
 
@@ -413,6 +544,7 @@ class Controller:
             try:
                 if self.kube.acquire_leader("pve-node-remediation", self.identity, max(15, interval * 3)):
                     HealthHandler.ready = True
+                    HealthHandler.publish_controller(self.identity, True)
                     for node_name, target in self.config["nodes"].items():
                         try:
                             self.reconcile(node_name, target)
@@ -420,8 +552,10 @@ class Controller:
                             logging.exception("reconciliation failed for %s", node_name)
                 else:
                     HealthHandler.ready = True
+                    HealthHandler.publish_controller(self.identity, False)
             except Exception:
                 HealthHandler.ready = False
+                HealthHandler.publish_controller(self.identity, False)
                 logging.exception("controller loop failed")
             time.sleep(interval)
 

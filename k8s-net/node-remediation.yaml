@@ -77,6 +77,9 @@ spec:
   template:
     metadata:
       annotations:
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8080"
+        prometheus.io/scrape: "true"
         remediation.pve-k8s-talos/config-checksum: ${config_checksum}
       labels:
         app.kubernetes.io/name: node-remediation-controller
