@@ -89,6 +89,7 @@ implemented guarantee.
 | Storage fencing | Ceph RBD through CSI-Addons `NetworkFence` | Per-CSI-driver adapters |
 | Safe-path fallback | Execution fencing is required before storage release | Either independently verified execution or complete storage fencing |
 | Workload health | Kubernetes reschedules pods; application readiness is not inspected by the controller | Optional workload-aware recovery gates |
+| PVE credential | Deployment credential is currently propagated | Dedicated least-privilege token as described below |
 
 ### Initial Controller Packaging and Access
 
@@ -109,11 +110,10 @@ A future production image should embed the controller, carry an explicit
 version, and be pinned by digest. This improves provenance and vulnerability
 tracking without changing the remediation protocol.
 
-PVE connection values enter through the cluster deployment environment and are
-materialized as a Kubernetes Secret. The pod receives the API endpoint, token,
-and TLS verification mode as environment variables. The token is sent to PVE
-as `PVEAPIToken` authentication over HTTPS; the deployment first verifies that
-it has the required permissions for every managed worker VM.
+The currently deployed pilot materializes the PVE credential from the cluster
+deployment environment as a Kubernetes Secret. The pod receives the API
+endpoint, token, and TLS verification mode as environment variables and sends
+the token to PVE as `PVEAPIToken` authentication over HTTPS.
 
 ```text
 Cluster deployment environment
@@ -136,6 +136,51 @@ The Kubernetes Secret and OpenTofu state both contain sensitive token material
 and must be protected accordingly. Prometheus has no control role: it only
 scrapes the controller's `/metrics` endpoint; decisions are based directly on
 Kubernetes node and Lease state.
+
+### Dedicated PVE Credential
+
+The deployment credential must remain outside Kubernetes. OpenTofu will use it
+only to create and reconcile a dedicated remediation role, token, and ACL, then
+propagate only the resulting limited token to the controller.
+
+```text
+Deployment credential
+        |
+        +--> Role: VM.Audit + VM.PowerMgmt
+        +--> Token: root@pam!node-remediation-<cluster>
+        `--> ACL: role + token + permitted path
+                         |
+                         v
+                Kubernetes Secret
+                         |
+                         v
+                 Remediation controller
+```
+
+The token must use PVE privilege separation. Its effective permissions are the
+intersection of the privileges of `root@pam` and the ACL assigned directly to
+the token; it must never inherit the unrestricted privileges of `root@pam`.
+
+The role and ACL scope are intentionally small:
+
+| Configuration | ACL path | Effective scope |
+| --- | --- | --- |
+| Cluster pool configured | `/pool/<pool>` | VMs belonging to that pool |
+| No cluster pool | `/vms` | All VMs, but only audit and power operations |
+
+The no-pool behavior is a deliberate simple-cluster fallback; individual VM
+ACLs are not created. The role, token, and ACL are managed idempotently with
+stable cluster-specific identifiers. The token secret is returned only when
+created, so the OpenTofu state holding it must be preserved; losing that state
+requires token rotation.
+
+Before the controller is deployed, validation must confirm:
+
+- privilege separation is enabled;
+- the role contains exactly `VM.Audit` and `VM.PowerMgmt`;
+- the token ACL uses only the selected pool path or the `/vms` fallback;
+- every worker VM has both effective privileges and its status is readable;
+- no broader or additional privilege is granted to the token.
 
 ## Safety Invariant
 
@@ -403,9 +448,9 @@ For the initial implementation, these rules apply to Proxmox HA and worker VMs.
 - Loss of the Kubernetes or PVE control path can stop progress safely.
 - The initial pilot requires PVE execution fencing; portable storage-only
   fallback remains a target capability.
-- The PVE credential needs power control over every configured worker VM. The
-  deployment credential currently propagated to the controller may have broader
-  privileges and must be treated as a privileged cluster secret.
+- Until dedicated-token provisioning is implemented, the deployment credential
+  propagated to the controller may have broader privileges. The target limits
+  the in-cluster token to VM audit and power management on the selected scope.
 - A repeat failure of the same node during cooldown may wait up to 10 minutes
   before remediation starts.
 
