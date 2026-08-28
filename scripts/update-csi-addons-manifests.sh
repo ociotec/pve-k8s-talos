@@ -26,6 +26,10 @@ db00008852c8ae08b1bd6ca1bb7ee89620fd747e68f4b5ca5a316c1f86c93020  setup-controll
 CHECKSUMS
 )
 
+# Keep the deployed source compatible with the repository's canonical
+# Kubernetes quantity policy without changing the effective resource value.
+sed -i 's/cpu: 1000m/cpu: "1"/' "${work_dir}/setup-controller.yaml"
+
 mkdir -p "${destination}"
 install -m 0644 "${work_dir}/crds.yaml" "${destination}/crds.yaml"
 install -m 0644 "${work_dir}/rbac.yaml" "${destination}/rbac.yaml"

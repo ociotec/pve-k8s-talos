@@ -1,6 +1,6 @@
 # CSI-Addons manifests
 
-These files are the unmodified Kubernetes CSI-Addons `v0.14.0` release
+These files are generated from the Kubernetes CSI-Addons `v0.14.0` release
 manifests. Refresh and verify them with:
 
 ```bash
@@ -8,4 +8,5 @@ manifests. Refresh and verify them with:
 ```
 
 Repository ownership labels, priority, replica count, probes, and resource
-requirements are applied declaratively by the Rook operator workspace.
+requirements are applied declaratively by the Rook operator workspace. The
+generator normalizes integer CPU quantities to Kubernetes canonical form.
