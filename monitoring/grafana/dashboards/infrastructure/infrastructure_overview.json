@@ -218,11 +218,12 @@
         "type": "prometheus",
         "uid": "Prometheus"
       },
-      "description": "Automatic worker remediation phase over time. Error overrides the active phase when the controller records a blocking failure.",
+      "description": "Automatic worker remediation phase over time. States: Healthy (normal operation), Suspect (confirming node loss), PVE fencing (stopping the VM), Storage fencing (releasing volumes), Recovering (waiting for the node), Unfencing (restoring storage access), Cooldown (retries suppressed temporarily), Disabled (automation disabled), Error (recovery blocked). Error overrides the active phase when the controller records a blocking failure.",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "fixedColor": "green",
+            "mode": "fixed"
           },
           "mappings": [
             {
@@ -311,7 +312,6 @@
           "refId": "A"
         }
       ],
-      "title": "Automatic node remediation",
       "type": "state-timeline"
     },
     {
@@ -1905,7 +1905,7 @@
         "type": "prometheus",
         "uid": "Prometheus"
       },
-      "description": "Workload replica status for Deployments, StatefulSets, and DaemonSets. Mappings and thresholds: 0 = ready/green when ready replicas match expected replicas; 1 = scaled to zero/gray; 2 = degraded/red when ready and expected replicas differ.",
+      "description": "Workload replica status for Deployments, StatefulSets, and DaemonSets. Green = all expected replicas ready; gray = intentionally scaled to zero; yellow = partially available; red = unavailable when replicas are expected.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1926,9 +1926,14 @@
                   "text": "scaled to zero"
                 },
                 "2": {
-                  "color": "red",
+                  "color": "yellow",
                   "index": 2,
-                  "text": "degraded"
+                  "text": "partially available"
+                },
+                "3": {
+                  "color": "red",
+                  "index": 3,
+                  "text": "unavailable"
                 }
               },
               "type": "value"
@@ -1946,8 +1951,12 @@
                 "value": 1
               },
               {
-                "color": "red",
+                "color": "yellow",
                 "value": 2
+              },
+              {
+                "color": "red",
+                "value": 3
               }
             ]
           },
@@ -1983,7 +1992,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (Workload) (label_join(label_replace(label_replace(((kube_deployment_spec_replicas{} == bool 0) * 1) + (((kube_deployment_spec_replicas{} > bool 0) * (kube_deployment_status_replicas_available{} == bool kube_deployment_spec_replicas{})) * 0) + (((kube_deployment_spec_replicas{} > bool 0) * (kube_deployment_status_replicas_available{} != bool kube_deployment_spec_replicas{})) * 2), \"workload\", \"$1\", \"deployment\", \"(.*)\"), \"kind\", \"Deployment\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(((kube_statefulset_replicas{} == bool 0) * 1) + (((kube_statefulset_replicas{} > bool 0) * (kube_statefulset_status_replicas_ready{} == bool kube_statefulset_replicas{})) * 0) + (((kube_statefulset_replicas{} > bool 0) * (kube_statefulset_status_replicas_ready{} != bool kube_statefulset_replicas{})) * 2), \"workload\", \"$1\", \"statefulset\", \"(.*)\"), \"kind\", \"StatefulSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(((kube_daemonset_status_desired_number_scheduled{} == bool 0) * 1) + (((kube_daemonset_status_desired_number_scheduled{} > bool 0) * (kube_daemonset_status_number_available{} == bool kube_daemonset_status_desired_number_scheduled{})) * 0) + (((kube_daemonset_status_desired_number_scheduled{} > bool 0) * (kube_daemonset_status_number_available{} != bool kube_daemonset_status_desired_number_scheduled{})) * 2), \"workload\", \"$1\", \"daemonset\", \"(.*)\"), \"kind\", \"DaemonSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\"))",
+          "expr": "sum by (Workload) (label_join(label_replace(label_replace(((kube_deployment_spec_replicas{} == bool 0) * 1) + (((kube_deployment_spec_replicas{} > bool 0) * (kube_deployment_status_replicas_available{} > bool 0) * (kube_deployment_status_replicas_available{} != bool kube_deployment_spec_replicas{})) * 2) + (((kube_deployment_spec_replicas{} > bool 0) * (kube_deployment_status_replicas_available{} == bool 0)) * 3), \"workload\", \"$1\", \"deployment\", \"(.*)\"), \"kind\", \"Deployment\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(((kube_statefulset_replicas{} == bool 0) * 1) + (((kube_statefulset_replicas{} > bool 0) * (kube_statefulset_status_replicas_ready{} > bool 0) * (kube_statefulset_status_replicas_ready{} != bool kube_statefulset_replicas{})) * 2) + (((kube_statefulset_replicas{} > bool 0) * (kube_statefulset_status_replicas_ready{} == bool 0)) * 3), \"workload\", \"$1\", \"statefulset\", \"(.*)\"), \"kind\", \"StatefulSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\") or label_join(label_replace(label_replace(((kube_daemonset_status_desired_number_scheduled{} == bool 0) * 1) + (((kube_daemonset_status_desired_number_scheduled{} > bool 0) * (kube_daemonset_status_number_available{} > bool 0) * (kube_daemonset_status_number_available{} != bool kube_daemonset_status_desired_number_scheduled{})) * 2) + (((kube_daemonset_status_desired_number_scheduled{} > bool 0) * (kube_daemonset_status_number_available{} == bool 0)) * 3), \"workload\", \"$1\", \"daemonset\", \"(.*)\"), \"kind\", \"DaemonSet\", \"namespace\", \".*\"), \"Workload\", \"/\", \"namespace\", \"kind\", \"workload\"))",
           "format": "table",
           "instant": true,
           "legendFormat": "{{Workload}}",
