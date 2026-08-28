@@ -160,26 +160,91 @@ class Kubernetes:
             and ".rbd.csi.ceph.com" in item.get("spec", {}).get("attacher", "")
         ]
 
-    def network_fence_succeeded(self, node_name):
-        response = self.request("/apis/csiaddons.openshift.io/v1alpha1/networkfences") or {}
-        for item in response.get("items", []):
-            metadata = item.get("metadata", {})
-            spec = item.get("spec", {})
-            status = item.get("status", {})
-            if metadata.get("name") == node_name and spec.get("fenceState", "Fenced") == "Fenced":
-                return status.get("result") == "Succeeded"
-        return False
-
-    def network_fence_released(self, node_name):
-        response = self.request("/apis/csiaddons.openshift.io/v1alpha1/networkfences") or {}
-        matching = [item for item in response.get("items", []) if item.get("metadata", {}).get("name") == node_name]
-        if not matching:
-            return True
-        return all(
-            item.get("spec", {}).get("fenceState") == "Unfenced"
-            and item.get("status", {}).get("result") == "Succeeded"
-            for item in matching
+    def get_network_fence(self, node_name):
+        return self.request(
+            f"/apis/csiaddons.openshift.io/v1alpha1/networkfences/{urllib.parse.quote(node_name)}"
         )
+
+    @staticmethod
+    def _raise_failed_fence(item):
+        status = item.get("status", {})
+        if status.get("result") == "Failed":
+            raise RuntimeError(f"CSI NetworkFence failed: {status.get('message', 'no detail')}")
+
+    def ensure_network_fenced(self, node_name, cidrs, config):
+        path = "/apis/csiaddons.openshift.io/v1alpha1/networkfences"
+        item = self.get_network_fence(node_name)
+        if item is None:
+            body = {
+                "apiVersion": "csiaddons.openshift.io/v1alpha1",
+                "kind": "NetworkFence",
+                "metadata": {
+                    "name": node_name,
+                    "labels": {
+                        "app.kubernetes.io/name": "node-remediation-controller",
+                        "app.kubernetes.io/instance": "node-remediation-controller",
+                        "app.kubernetes.io/component": "storage-fencing",
+                        "app.kubernetes.io/part-of": "node-remediation",
+                        "app.kubernetes.io/managed-by": "infrastructure",
+                        "pve-k8s-talos/section": "k8s-net",
+                    },
+                },
+                "spec": {
+                    "cidrs": cidrs,
+                    "driver": config["driver"],
+                    "fenceState": "Fenced",
+                    "parameters": config.get("parameters", {}),
+                    "secret": {
+                        "name": config["secret_name"],
+                        "namespace": config["secret_namespace"],
+                    },
+                },
+            }
+            self.request(path, "POST", body)
+            logging.warning("created CSI NetworkFence for %s and CIDRs %s", node_name, ", ".join(cidrs))
+            return False
+
+        spec = item.get("spec", {})
+        expected = {
+            "cidrs": cidrs,
+            "driver": config["driver"],
+            "parameters": config.get("parameters", {}),
+            "secret": {"name": config["secret_name"], "namespace": config["secret_namespace"]},
+        }
+        for field, value in expected.items():
+            if spec.get(field) != value:
+                raise RuntimeError(f"existing NetworkFence {node_name} has unexpected immutable field {field}")
+
+        if spec.get("fenceState", "Fenced") == "Unfenced":
+            self.request(f"{path}/{urllib.parse.quote(node_name)}", "DELETE")
+            logging.info("deleted completed CSI NetworkFence for %s before refencing", node_name)
+            return False
+
+        self._raise_failed_fence(item)
+        return item.get("status", {}).get("result") == "Succeeded"
+
+    def request_network_unfence(self, node_name):
+        item = self.get_network_fence(node_name)
+        if item is None:
+            raise RuntimeError(f"CSI NetworkFence {node_name} disappeared before unfencing")
+        if item.get("spec", {}).get("fenceState") != "Unfenced":
+            self.request(
+                f"/apis/csiaddons.openshift.io/v1alpha1/networkfences/{urllib.parse.quote(node_name)}",
+                "PATCH",
+                {"spec": {"fenceState": "Unfenced"}},
+                "application/merge-patch+json",
+            )
+            logging.warning("requested CSI network unfencing for %s", node_name)
+            return False
+        self._raise_failed_fence(item)
+        return item.get("status", {}).get("result") == "Succeeded"
+
+    def delete_network_fence(self, node_name):
+        if self.get_network_fence(node_name) is not None:
+            self.request(
+                f"/apis/csiaddons.openshift.io/v1alpha1/networkfences/{urllib.parse.quote(node_name)}",
+                "DELETE",
+            )
 
 
 class Proxmox:
@@ -488,7 +553,14 @@ class Controller:
         if state == "storage-fencing":
             attachments = self.kube.rbd_volume_attachments(node_name)
             had_attachment = annotations.get(HAD_RBD_ATTACHMENT, "false") == "true"
-            fence_ready = not had_attachment or self.kube.network_fence_succeeded(node_name)
+            try:
+                fence_ready = not had_attachment or self.kube.ensure_network_fenced(
+                    node_name, target["fence_cidrs"], self.config["network_fence"]
+                )
+            except Exception as error:
+                logging.exception("storage fencing failed for %s", node_name)
+                self.kube.patch_node(node, annotations={LAST_ERROR: str(error)[:512]})
+                return
             if attachments or not fence_ready:
                 if (now - state_since).total_seconds() >= self.config["storage_fence_timeout_seconds"]:
                     detail = "waiting for VolumeAttachment deletion or successful CSI NetworkFence"
@@ -535,8 +607,14 @@ class Controller:
             else:
                 self.complete_recovery(node, node_name)
 
-        if state == "unfencing" and self.kube.network_fence_released(node_name):
-            self.complete_recovery(node, node_name)
+        if state == "unfencing":
+            try:
+                if self.kube.request_network_unfence(node_name):
+                    self.kube.delete_network_fence(node_name)
+                    self.complete_recovery(node, node_name)
+            except Exception as error:
+                logging.exception("storage unfencing failed for %s", node_name)
+                self.kube.patch_node(node, annotations={LAST_ERROR: str(error)[:512]})
 
     def run(self):
         interval = self.config["evaluation_interval_seconds"]

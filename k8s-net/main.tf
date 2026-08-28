@@ -137,6 +137,10 @@ locals {
     for name, vm in var.vms : name => {
       host = vm.node_name
       vmid = vm.vm_id
+      fence_cidrs = distinct(concat(
+        ["${vm.ip}${strcontains(vm.ip, ":") ? "/128" : "/32"}"],
+        [for address in compact([try(vm.ip2, null)]) : "${address}${strcontains(address, ":") ? "/128" : "/32"}"]
+      ))
     }
     if startswith(vm.type, "worker")
   }
@@ -151,7 +155,13 @@ locals {
     max_concurrent_remediations     = local.node_remediation_max_concurrent_value
     minimum_ready_controlplanes     = local.node_remediation_min_ready_controlplanes_value
     minimum_node_age_seconds        = local.node_remediation_min_node_age_seconds_value
-    nodes                           = local.node_remediation_nodes
+    network_fence = {
+      driver           = "rook-ceph.rbd.csi.ceph.com"
+      secret_name      = "rook-csi-rbd-provisioner"
+      secret_namespace = "rook-ceph"
+      parameters       = { clusterID = "rook-ceph" }
+    }
+    nodes = local.node_remediation_nodes
   }
   node_remediation_config_json = jsonencode(local.node_remediation_config)
   node_remediation_script      = file("${path.module}/node-remediation-controller.py")

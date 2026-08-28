@@ -44,6 +44,7 @@ class FakeKubernetes:
         self.lease_age_seconds = 60
         self.attachments = []
         self.fence_succeeded = False
+        self.fence_requests = []
 
     def get_node(self, _name):
         return self.worker
@@ -75,11 +76,16 @@ class FakeKubernetes:
     def rbd_volume_attachments(self, _name):
         return self.attachments
 
-    def network_fence_succeeded(self, _name):
+    def ensure_network_fenced(self, name, cidrs, config):
+        self.fence_requests.append(("fence", name, cidrs, config))
         return self.fence_succeeded
 
-    def network_fence_released(self, _name):
+    def request_network_unfence(self, name):
+        self.fence_requests.append(("unfence", name))
         return self.fence_succeeded
+
+    def delete_network_fence(self, name):
+        self.fence_requests.append(("delete", name))
 
 
 class FakeProxmox:
@@ -129,6 +135,12 @@ class ControllerTest(unittest.TestCase):
             "max_concurrent_remediations": 1,
             "minimum_ready_controlplanes": 2,
             "minimum_node_age_seconds": 300,
+            "network_fence": {
+                "driver": "rook-ceph.rbd.csi.ceph.com",
+                "secret_name": "rook-csi-rbd-provisioner",
+                "secret_namespace": "rook-ceph",
+                "parameters": {"clusterID": "rook-ceph"},
+            },
         }
         controller.kube = FakeKubernetes(worker)
         controller.pve = pve or FakeProxmox()
@@ -138,7 +150,9 @@ class ControllerTest(unittest.TestCase):
         worker = node("worker-1", ready=False)
         controller = self.controller(worker)
 
-        controller.reconcile("worker-1", {"host": "pve-1", "vmid": 101})
+        controller.reconcile(
+            "worker-1", {"host": "pve-1", "vmid": 101, "fence_cidrs": ["192.0.2.10/32"]}
+        )
 
         self.assertEqual(worker["metadata"]["annotations"][remediation.STATE], "suspect")
         self.assertEqual(controller.pve.actions, [])
@@ -149,7 +163,9 @@ class ControllerTest(unittest.TestCase):
         controller = self.controller(worker)
         controller.kube.attachments = [{"metadata": {"name": "rbd"}}]
 
-        controller.reconcile("worker-1", {"host": "pve-1", "vmid": 101})
+        controller.reconcile(
+            "worker-1", {"host": "pve-1", "vmid": 101, "fence_cidrs": ["192.0.2.10/32"]}
+        )
 
         self.assertEqual(controller.pve.actions, ["stop"])
         self.assertEqual(worker["metadata"]["annotations"][remediation.STATE], "storage-fencing")
@@ -161,13 +177,34 @@ class ControllerTest(unittest.TestCase):
         pve = FakeProxmox(status="stopped")
         controller = self.controller(worker, pve)
 
-        controller.reconcile("worker-1", {"host": "pve-1", "vmid": 101})
+        target = {"host": "pve-1", "vmid": 101, "fence_cidrs": ["192.0.2.10/32"]}
+        controller.reconcile("worker-1", target)
         self.assertEqual(pve.actions, [])
+        self.assertEqual(controller.kube.fence_requests[0][:3], ("fence", "worker-1", ["192.0.2.10/32"]))
+
+        controller.kube.fence_succeeded = True
+        controller.reconcile("worker-1", target)
+        self.assertEqual(pve.actions, ["start"])
+        self.assertEqual(worker["metadata"]["annotations"][remediation.STATE], "recovering")
+
+    def test_stable_rbd_node_is_unfenced_before_quarantine_is_removed(self):
+        worker = node("worker-1", state="recovering", state_age=120, ready=True)
+        worker["metadata"]["annotations"].update(
+            {remediation.STABLE_SINCE: ago(70), remediation.HAD_RBD_ATTACHMENT: "true"}
+        )
+        worker["spec"]["taints"] = list(copy.deepcopy(remediation.TAINTS))
+        controller = self.controller(worker, FakeProxmox(status="running"))
+        controller.kube.lease_age_seconds = 1
+
+        controller.reconcile("worker-1", {"host": "pve-1", "vmid": 101})
+        self.assertEqual(worker["metadata"]["annotations"][remediation.STATE], "unfencing")
+        self.assertEqual([taint["key"] for taint in worker["spec"]["taints"]], [remediation.QUARANTINE])
 
         controller.kube.fence_succeeded = True
         controller.reconcile("worker-1", {"host": "pve-1", "vmid": 101})
-        self.assertEqual(pve.actions, ["start"])
-        self.assertEqual(worker["metadata"]["annotations"][remediation.STATE], "recovering")
+        self.assertEqual(controller.kube.fence_requests, [("unfence", "worker-1"), ("delete", "worker-1")])
+        self.assertNotIn(remediation.STATE, worker["metadata"]["annotations"])
+        self.assertEqual(worker["spec"]["taints"], [])
 
     def test_stable_recovered_node_is_reintegrated(self):
         worker = node("worker-1", state="recovering", state_age=120, ready=True)
