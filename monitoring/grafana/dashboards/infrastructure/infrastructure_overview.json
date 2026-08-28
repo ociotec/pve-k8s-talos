@@ -305,8 +305,8 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "max by(node) (\n  ((node_remediation_node_phase{phase=\"healthy\"} == 1) * 0)\n  or ((node_remediation_node_phase{phase=\"suspect\"} == 1) * 1)\n  or ((node_remediation_node_phase{phase=\"fencing\"} == 1) * 2)\n  or ((node_remediation_node_phase{phase=\"storage-fencing\"} == 1) * 3)\n  or ((node_remediation_node_phase{phase=\"recovering\"} == 1) * 4)\n  or ((node_remediation_node_phase{phase=\"unfencing\"} == 1) * 5)\n  or ((node_remediation_node_phase{phase=\"cooldown\"} == 1) * 6)\n  or ((node_remediation_node_phase{phase=\"disabled\"} == 1) * 8)\n  or ((node_remediation_node_error == 1) * 9)\n)",
-          "legendFormat": "{{node}}",
+          "expr": "max by(worker) (\n  ((node_remediation_node_phase{phase=\"healthy\"} == 1) * 0)\n  or ((node_remediation_node_phase{phase=\"suspect\"} == 1) * 1)\n  or ((node_remediation_node_phase{phase=\"fencing\"} == 1) * 2)\n  or ((node_remediation_node_phase{phase=\"storage-fencing\"} == 1) * 3)\n  or ((node_remediation_node_phase{phase=\"recovering\"} == 1) * 4)\n  or ((node_remediation_node_phase{phase=\"unfencing\"} == 1) * 5)\n  or ((node_remediation_node_phase{phase=\"cooldown\"} == 1) * 6)\n  or ((node_remediation_node_phase{phase=\"disabled\"} == 1) * 8)\n  or ((node_remediation_node_error == 1) * 9)\n)",
+          "legendFormat": "{{worker}}",
           "range": true,
           "refId": "A"
         }

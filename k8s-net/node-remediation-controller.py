@@ -261,10 +261,10 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
         ]
         now = utcnow().timestamp()
         for node_name, values in sorted(nodes.items()):
-            escaped_node = node_name.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+            escaped_worker = node_name.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
             for phase in PHASES:
                 lines.append(
-                    f'node_remediation_node_phase{{node="{escaped_node}",phase="{phase}"}} '
+                    f'node_remediation_node_phase{{worker="{escaped_worker}",phase="{phase}"}} '
                     f'{1 if values["phase"] == phase else 0}'
                 )
         lines.extend(
@@ -276,7 +276,7 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
         for node_name, values in sorted(nodes.items()):
             phase_started = values["phase_started"]
             age = max(0.0, now - phase_started) if phase_started else 0.0
-            lines.append(f'node_remediation_node_phase_age_seconds{{node="{node_name}"}} {age:.3f}')
+            lines.append(f'node_remediation_node_phase_age_seconds{{worker="{node_name}"}} {age:.3f}')
         lines.extend(
             [
                 "# HELP node_remediation_node_lease_age_seconds Seconds since the Kubernetes node Lease was renewed.",
@@ -286,7 +286,7 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
         for node_name, values in sorted(nodes.items()):
             lease_age = values["lease_age"]
             rendered_age = "+Inf" if lease_age == float("inf") else f"{max(0.0, lease_age):.3f}"
-            lines.append(f'node_remediation_node_lease_age_seconds{{node="{node_name}"}} {rendered_age}')
+            lines.append(f'node_remediation_node_lease_age_seconds{{worker="{node_name}"}} {rendered_age}')
         lines.extend(
             [
                 "# HELP node_remediation_node_error Whether the current remediation phase has a recorded error.",
@@ -294,7 +294,7 @@ class HealthHandler(http.server.BaseHTTPRequestHandler):
             ]
         )
         for node_name, values in sorted(nodes.items()):
-            lines.append(f'node_remediation_node_error{{node="{node_name}"}} {1 if values["error"] else 0}')
+            lines.append(f'node_remediation_node_error{{worker="{node_name}"}} {1 if values["error"] else 0}')
         return "\n".join(lines) + "\n"
 
     def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler API

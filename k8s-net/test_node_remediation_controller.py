@@ -108,14 +108,14 @@ class ControllerTest(unittest.TestCase):
         metrics = remediation.HealthHandler.render_metrics()
 
         self.assertIn('node_remediation_controller_leader{identity="controller-1"} 1', metrics)
-        self.assertIn('node_remediation_node_phase{node="worker-1",phase="storage-fencing"} 1', metrics)
-        self.assertIn('node_remediation_node_lease_age_seconds{node="worker-1"} 28.500', metrics)
-        self.assertIn('node_remediation_node_error{node="worker-1"} 1', metrics)
+        self.assertIn('node_remediation_node_phase{worker="worker-1",phase="storage-fencing"} 1', metrics)
+        self.assertIn('node_remediation_node_lease_age_seconds{worker="worker-1"} 28.500', metrics)
+        self.assertIn('node_remediation_node_error{worker="worker-1"} 1', metrics)
 
         remediation.HealthHandler.publish_phase("worker-1", "fencing")
         metrics = remediation.HealthHandler.render_metrics()
-        self.assertIn('node_remediation_node_phase{node="worker-1",phase="fencing"} 1', metrics)
-        self.assertIn('node_remediation_node_error{node="worker-1"} 0', metrics)
+        self.assertIn('node_remediation_node_phase{worker="worker-1",phase="fencing"} 1', metrics)
+        self.assertIn('node_remediation_node_error{worker="worker-1"} 0', metrics)
 
     def controller(self, worker, pve=None):
         controller = remediation.Controller.__new__(remediation.Controller)
