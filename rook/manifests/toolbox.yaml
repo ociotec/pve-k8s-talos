@@ -3,6 +3,11 @@ kind: Deployment
 metadata:
   name: rook-ceph-tools
   namespace: rook-ceph # namespace:cluster
+  annotations:
+    policy.pve-k8s-talos.io/allow-missing-probes: "true"
+    policy.pve-k8s-talos.io/exception-reason: >-
+      The Rook toolbox is a persistent administrative shell and does not expose
+      a Kubernetes-compatible readiness or liveness health endpoint.
   labels:
     app: rook-ceph-tools
     app.kubernetes.io/part-of: rook-ceph

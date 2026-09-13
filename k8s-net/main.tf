@@ -394,6 +394,11 @@ locals {
         spec = {
           containers = [{
             name = "kube-flannel"
+            args = [
+              "--ip-masq",
+              "--kube-subnet-mgr",
+              "--healthz-port=8285",
+            ]
             resources = {
               requests = {
                 cpu    = "100m"
@@ -403,6 +408,28 @@ locals {
                 cpu    = "200m"
                 memory = "50Mi"
               }
+            }
+            readinessProbe = {
+              exec = {
+                command = ["/bin/sh", "-ec", "test -s /run/flannel/subnet.env"]
+              }
+              initialDelaySeconds = 3
+              periodSeconds       = 10
+              timeoutSeconds      = 1
+              successThreshold    = 1
+              failureThreshold    = 3
+            }
+            livenessProbe = {
+              httpGet = {
+                path   = "/healthz"
+                port   = 8285
+                scheme = "HTTP"
+              }
+              initialDelaySeconds = 10
+              periodSeconds       = 10
+              timeoutSeconds      = 1
+              successThreshold    = 1
+              failureThreshold    = 3
             }
           }]
         }
@@ -425,6 +452,30 @@ locals {
                 cpu    = "200m"
                 memory = "64Mi"
               }
+            }
+            readinessProbe = {
+              httpGet = {
+                path   = "/healthz"
+                port   = 10256
+                scheme = "HTTP"
+              }
+              initialDelaySeconds = 3
+              periodSeconds       = 10
+              timeoutSeconds      = 1
+              successThreshold    = 1
+              failureThreshold    = 3
+            }
+            livenessProbe = {
+              httpGet = {
+                path   = "/healthz"
+                port   = 10256
+                scheme = "HTTP"
+              }
+              initialDelaySeconds = 10
+              periodSeconds       = 10
+              timeoutSeconds      = 1
+              successThreshold    = 1
+              failureThreshold    = 3
             }
           }]
         }

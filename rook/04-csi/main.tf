@@ -381,6 +381,10 @@ locals {
       labels = {
         "app.kubernetes.io/part-of" = "rook-ceph"
       }
+      annotations = {
+        "policy.pve-k8s-talos.io/allow-missing-probes" = "true"
+        "policy.pve-k8s-talos.io/exception-reason"     = "Rook-managed Ceph CSI sidecars do not expose Kubernetes-compatible readiness and liveness health endpoints."
+      }
     }
     spec = {
       template = {
