@@ -256,6 +256,12 @@ talos_discovery_service_bootstrap_only="$(awk -F'"' '/"discovery_service_bootstr
 talos_discovery_service_endpoint="$(awk -F'"' '/"discovery_service_endpoint"/ { print $4; exit }' "${constants_path}")"
 talos_max_pods="$(awk -F'"' '/"max_pods"/ { print $4; exit }' "${constants_path}")"
 talos_node_cidr_mask_size="$(read_constant_map_value "talos" "node_cidr_mask_size")"
+talos_api_server_cpu="$(read_constant_map_value "talos" "api_server_cpu")"
+talos_api_server_memory="$(read_constant_map_value "talos" "api_server_memory")"
+talos_controller_manager_cpu="$(read_constant_map_value "talos" "controller_manager_cpu")"
+talos_controller_manager_memory="$(read_constant_map_value "talos" "controller_manager_memory")"
+talos_scheduler_cpu="$(read_constant_map_value "talos" "scheduler_cpu")"
+talos_scheduler_memory="$(read_constant_map_value "talos" "scheduler_memory")"
 controlplane_vip="$(awk -F'"' '/"controlplane_vip"/ { print $4; exit }' "${constants_path}")"
 disk_by_id_prefix="$(awk -F'"' '/"disk_by_id_prefix"/ { print $4; exit }' "${constants_path}")"
 proxy_url="$(awk -F'"' '/"proxy_url"/ { print $4; exit }' "${constants_path}")"
@@ -594,7 +600,6 @@ fi
 if [[ -z "${talos_node_cidr_mask_size}" ]]; then
   # Kubernetes defaults IPv4 node PodCIDRs to /24 when no mask is configured.
   effective_node_cidr_mask_size=24
-  controller_manager_extra_args_section=""
 else
   if [[ ! "${talos_node_cidr_mask_size}" =~ ^[0-9]+$ ]] || (( talos_node_cidr_mask_size < 16 || talos_node_cidr_mask_size > 30 )); then
     echo "Error: talos.node_cidr_mask_size must be an IPv4 prefix length from 16 to 30 (got ${talos_node_cidr_mask_size})." >&2
@@ -602,9 +607,58 @@ else
     exit 1
   fi
   effective_node_cidr_mask_size="${talos_node_cidr_mask_size}"
-  controller_manager_extra_args_section=$'  controllerManager:\n'
-  controller_manager_extra_args_section+=$'    extraArgs:\n'
-  controller_manager_extra_args_section+=$'      node-cidr-mask-size: "'"${talos_node_cidr_mask_size}"$'"'
+fi
+
+validate_control_plane_resources() {
+  local component_name="$1"
+  local cpu="$2"
+  local memory="$3"
+
+  if [[ -z "${cpu}" && -z "${memory}" ]]; then
+    return
+  fi
+  if [[ -z "${cpu}" || -z "${memory}" ]]; then
+    echo "Error: talos.${component_name}_cpu and talos.${component_name}_memory must be set together." >&2
+    echo "Fix: set both resource values, or leave both empty to use Talos defaults." >&2
+    exit 1
+  fi
+  if [[ ! "${cpu}" =~ ^[1-9][0-9]*m?$ ]] || [[ ! "${memory}" =~ ^[1-9][0-9]*(Mi|Gi)$ ]]; then
+    echo "Error: invalid Talos ${component_name} resource quantity (cpu=${cpu}, memory=${memory})." >&2
+    echo "Fix: use integer CPU cores or millicores (for example 1 or 500m) and Mi/Gi memory (for example 512Mi or 2Gi)." >&2
+    exit 1
+  fi
+}
+
+validate_control_plane_resources "api_server" "${talos_api_server_cpu}" "${talos_api_server_memory}"
+validate_control_plane_resources "controller_manager" "${talos_controller_manager_cpu}" "${talos_controller_manager_memory}"
+validate_control_plane_resources "scheduler" "${talos_scheduler_cpu}" "${talos_scheduler_memory}"
+
+render_control_plane_resources() {
+  local cpu="$1"
+  local memory="$2"
+
+  if [[ -z "${cpu}" ]]; then
+    return
+  fi
+  printf '    resources:\n      requests:\n        cpu: "%s"\n        memory: "%s"\n      limits:\n        cpu: "%s"\n        memory: "%s"\n' "${cpu}" "${memory}" "${cpu}" "${memory}"
+}
+
+control_plane_components_section=""
+if [[ -n "${talos_api_server_cpu}" ]]; then
+  control_plane_components_section+=$'  apiServer:\n'
+  control_plane_components_section+="$(render_control_plane_resources "${talos_api_server_cpu}" "${talos_api_server_memory}")"$'\n'
+fi
+if [[ -n "${talos_node_cidr_mask_size}" || -n "${talos_controller_manager_cpu}" ]]; then
+  control_plane_components_section+=$'  controllerManager:\n'
+  if [[ -n "${talos_node_cidr_mask_size}" ]]; then
+    control_plane_components_section+=$'    extraArgs:\n'
+    control_plane_components_section+=$'      node-cidr-mask-size: "'"${talos_node_cidr_mask_size}"$'"\n'
+  fi
+  control_plane_components_section+="$(render_control_plane_resources "${talos_controller_manager_cpu}" "${talos_controller_manager_memory}")"$'\n'
+fi
+if [[ -n "${talos_scheduler_cpu}" ]]; then
+  control_plane_components_section+=$'  scheduler:\n'
+  control_plane_components_section+="$(render_control_plane_resources "${talos_scheduler_cpu}" "${talos_scheduler_memory}")"$'\n'
 fi
 
 if [[ -n "${talos_max_pods}" ]]; then
@@ -800,8 +854,8 @@ fi
 template="$(cat "${template_path}")"
 
 # Basic template sanity check.
-if [[ "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${kubelet_extra_args_section}'* || "${template}" != *'${machine_registries_section}'* || "${template}" != *'${k8s_node_labels_section}'* || "${template}" != *'${machine_sysctls_section}'* || "${template}" != *'${proxy_env_section}'* || "${template}" != *'${cert_files_section}'* || "${template}" != *'${grub_use_uki_cmdline_section}'* || "${template}" != *'${talos_discovery_service_section}'* || "${template}" != *'${controller_manager_extra_args_section}'* || "${template}" != *'${extra_host_entries_section}'* || "${template}" != *'${user_volume_configs_section}'* ]]; then
-  echo "Error: template is missing required placeholders (\${machine_disks_section}, \${kubelet_extra_mounts_section}, \${kubelet_extra_args_section}, \${machine_registries_section}, \${k8s_node_labels_section}, \${machine_sysctls_section}, \${proxy_env_section}, \${cert_files_section}, \${grub_use_uki_cmdline_section}, \${talos_discovery_service_section}, \${controller_manager_extra_args_section}, \${extra_host_entries_section}, \${user_volume_configs_section})." >&2
+if [[ "${template}" != *'${machine_disks_section}'* || "${template}" != *'${kubelet_extra_mounts_section}'* || "${template}" != *'${kubelet_extra_args_section}'* || "${template}" != *'${machine_registries_section}'* || "${template}" != *'${k8s_node_labels_section}'* || "${template}" != *'${machine_sysctls_section}'* || "${template}" != *'${proxy_env_section}'* || "${template}" != *'${cert_files_section}'* || "${template}" != *'${grub_use_uki_cmdline_section}'* || "${template}" != *'${talos_discovery_service_section}'* || "${template}" != *'${control_plane_components_section}'* || "${template}" != *'${extra_host_entries_section}'* || "${template}" != *'${user_volume_configs_section}'* ]]; then
+  echo "Error: template is missing required placeholders (\${machine_disks_section}, \${kubelet_extra_mounts_section}, \${kubelet_extra_args_section}, \${machine_registries_section}, \${k8s_node_labels_section}, \${machine_sysctls_section}, \${proxy_env_section}, \${cert_files_section}, \${grub_use_uki_cmdline_section}, \${talos_discovery_service_section}, \${control_plane_components_section}, \${extra_host_entries_section}, \${user_volume_configs_section})." >&2
   echo "Fix: restore patches/machine.template.yaml or add the missing placeholders." >&2
   exit 1
 fi
@@ -1824,7 +1878,7 @@ for name in "${!vm_ips[@]}"; do
   rendered="${rendered//'${proxy_env_section}'/${proxy_env_section}}"
   rendered="${rendered//'${cert_files_section}'/${cert_files_section}}"
   rendered="${rendered//'${talos_discovery_service_section}'/${talos_discovery_service_section}}"
-  rendered="${rendered//'${controller_manager_extra_args_section}'/${controller_manager_extra_args_section}}"
+  rendered="${rendered//'${control_plane_components_section}'/${control_plane_components_section}}"
   rendered="${rendered//'${user_volume_configs_section}'/${user_volume_configs_section}}"
   out_path="${patch_dir}/machine-${name}.yaml"
   printf "%s\n" "${rendered}" > "${out_path}"

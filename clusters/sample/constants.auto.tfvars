@@ -59,6 +59,14 @@ constants = {
     "controlplane_vip" = "192.168.1.50"
     # Optional IPv4 PodCIDR prefix allocated to each node. Leave empty for Kubernetes default (/24).
     "node_cidr_mask_size" = ""
+    # Optional resource profiles for Talos-managed static control-plane Pods. Set each
+    # CPU/memory pair together; generated requests and limits use the same values.
+    "api_server_cpu"                  = "1"
+    "api_server_memory"               = "3Gi"
+    "controller_manager_cpu"          = "500m"
+    "controller_manager_memory"       = "1Gi"
+    "scheduler_cpu"                   = "250m"
+    "scheduler_memory"                = "512Mi"
     # Optional kubelet max pods per node. It cannot exceed the usable IPs in the node PodCIDR.
     # Leave empty to keep Kubernetes default (110).
     "max_pods" = ""

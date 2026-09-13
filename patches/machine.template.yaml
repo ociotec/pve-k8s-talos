@@ -17,7 +17,7 @@ ${extra_host_entries_section}
 ${kubelet_extra_args_section}
 ${machine_registries_section}
 cluster:
-${controller_manager_extra_args_section}
+${control_plane_components_section}
   discovery:
     registries:
       kubernetes:
