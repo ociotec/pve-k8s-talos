@@ -205,7 +205,7 @@ legitimately slow starts, including migrations, WAL recovery, JVM startup, and
 storage recovery. Each probe endpoint must be verified against official
 component documentation or existing configuration; do not guess endpoints.
 
-## Temporary annotation-based exceptions
+## Annotation-based exceptions
 
 Two independent exceptions are allowed. They apply to controller resource
 `metadata.annotations`, never to the pod template:
@@ -216,25 +216,22 @@ metadata:
     policy.pve-k8s-talos.io/allow-missing-resources: "true"
     policy.pve-k8s-talos.io/allow-missing-probes: "true"
     policy.pve-k8s-talos.io/exception-reason: "The component has no health endpoint"
-    policy.pve-k8s-talos.io/exception-owner: "platform"
-    policy.pve-k8s-talos.io/exception-expires: "2027-03-31"
 ```
 
 - `allow-missing-resources` skips only the rule requiring all four CPU/memory
   fields. Per-field exceptions are not supported.
 - `allow-missing-probes` skips only readiness and liveness; it does not affect
   resource validation.
-- When either exception is present, `exception-reason`, `exception-owner`,
-  and `exception-expires` are mandatory.
-- The expiry date uses `YYYY-MM-DD`, must not be expired, and has a proposed
-  maximum validity of 90 days.
+- When either exception is present, `exception-reason` is mandatory and must
+  be non-empty. It records the technical justification; Kyverno validates its
+  presence and format, not the truth of its content.
 - Any value other than the literal string `"true"` is invalid.
 
 An exception must not become a self-authorization mechanism. The policy permits
 these annotations only for explicitly configured, RBAC-authorized administrative
-identities or groups. It rejects unauthorized attempts to add, modify, or renew
-an exception. Active and near-expiry exceptions must be exposed through Kyverno
-reports and monitoring metrics or alerts.
+identities or groups. It rejects unauthorized attempts to add or modify an
+exception. Active exceptions must be exposed through Kyverno reports and
+monitoring metrics or alerts.
 
 Namespace-wide exemptions must not be the normal mechanism. If a system
 exclusion is necessary to bootstrap the engine, it must be minimal and
@@ -244,8 +241,7 @@ documented.
 
 1. Enable `enable_kyverno_audit = true` in a non-critical cluster.
 2. Inventory violations with Kyverno reports and repository audit scripts.
-3. Fix manifests and create justified, owner-assigned, expiring exceptions only
-   where necessary.
+3. Fix manifests and create justified exceptions only where necessary.
 4. Verify CI/CD, Helm, and installed operators while audit remains enabled.
 5. Disable audit and enable `enable_kyverno_enforce = true` first in selected
    namespaces, then across the remaining application namespaces.
@@ -270,8 +266,8 @@ is not unexpectedly blocked by historical debt.
 - A service container missing either probe violates the rule unless it has a
   valid probe exception.
 - Jobs and CronJobs do not violate the policy for missing readiness/liveness.
-- Unauthorized, incomplete, or expired exceptions are denied in enforce mode
-  and visible in audit mode.
+- Unauthorized or incomplete exceptions are denied in enforce mode and visible
+  in audit mode.
 - Error messages identify the requirement, container, and applicable exception.
 - With Policy Reporter disabled, monitoring creates none of its resources.
 - With Policy Reporter enabled, its UI is exposed only through authenticated

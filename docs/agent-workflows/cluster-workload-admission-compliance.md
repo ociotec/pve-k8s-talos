@@ -67,15 +67,12 @@ Evaluate exception annotations on the workload controller's
 - `policy.pve-k8s-talos.io/allow-missing-resources: "true"`
 - `policy.pve-k8s-talos.io/allow-missing-probes: "true"`
 - `policy.pve-k8s-talos.io/exception-reason`
-- `policy.pve-k8s-talos.io/exception-owner`
-- `policy.pve-k8s-talos.io/exception-expires`
 
 An active exception requires either allow annotation with literal value
-`"true"`, a non-empty reason and owner, and an ISO date expiry that has not
-passed. Treat any malformed, missing, unauthorized, or expired exception as
-invalid and therefore non-compliant. Authorization can only be confirmed from
-the configured Kyverno policy and RBAC identities; when those are not available,
-render its authorization status as `not verified`, not `valid`.
+`"true"` and a non-empty reason. Treat any malformed, missing, or unauthorized
+exception as invalid and therefore non-compliant. Authorization can only be
+confirmed from the configured Kyverno policy and RBAC identities; when those are
+not available, render its authorization status as `not verified`, not `valid`.
 
 A valid resource exception affects only the resource result. A valid probe
 exception affects only the probe result. A valid exception is a distinct status,
@@ -136,9 +133,9 @@ Evaluate each applicable policy independently:
 
 - `compliant`: every applicable container has all required fields.
 - `non-compliant`: one or more applicable fields are missing.
-- `excepted`: fields are missing but a valid, unexpired exception applies.
+- `excepted`: fields are missing but a valid exception applies.
 - `invalid exception`: fields are missing and an exception is malformed,
-  expired, incomplete, or cannot be authorized.
+  incomplete, or cannot be authorized.
 - `not applicable`: probes on Jobs and CronJobs.
 - `unknown`: the API, object data, or policy authorization evidence was not
   available.
@@ -186,8 +183,8 @@ Rules:
   `missing requests.cpu, limits.memory`.
 - In the probes column, use `ready + live`, `missing readiness`,
   `missing liveness`, `missing both`, or `n/a (Job)`.
-- In the exception column, show `none`, `resources until YYYY-MM-DD`,
-  `probes until YYYY-MM-DD`, or the invalidity reason.
+- In the exception column, show `none`, `resources: <reason>`,
+  `probes: <reason>`, or the invalidity reason.
 - Sort failures first, then invalid exceptions, valid exceptions, compliant
   workloads, and probe-not-applicable workloads. Sort each group by namespace,
   kind, and name.
@@ -226,4 +223,3 @@ changes. If repository files were not changed, state that no deployment is
 needed. If a future policy implementation is changed as a result of the audit,
 provide the minimum authorized deployment command for the affected section or
 sections; do not run it.
-
