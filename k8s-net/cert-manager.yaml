@@ -12357,11 +12357,6 @@ automountServiceAccountToken: true
 metadata:
   name: cert-manager-cainjector
   namespace: cert-manager
-  annotations:
-    policy.pve-k8s-talos.io/allow-missing-probes: "true"
-    policy.pve-k8s-talos.io/exception-reason: >-
-      Upstream cert-manager cainjector does not provide a Kubernetes-compatible
-      readiness or liveness health endpoint.
   labels:
     app: cainjector
     app.kubernetes.io/name: cainjector
@@ -13241,6 +13236,11 @@ kind: Deployment
 metadata:
   name: cert-manager-cainjector
   namespace: cert-manager
+  annotations:
+    policy.pve-k8s-talos.io/allow-missing-probes: "true"
+    policy.pve-k8s-talos.io/exception-reason: >-
+      Upstream cert-manager cainjector does not provide a Kubernetes-compatible
+      readiness or liveness health endpoint.
   labels:
     app: cainjector
     app.kubernetes.io/name: cainjector
