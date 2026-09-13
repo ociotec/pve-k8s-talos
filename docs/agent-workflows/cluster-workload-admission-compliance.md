@@ -22,6 +22,7 @@ Inspect live Kubernetes resources, not only repository manifests.
 | --- | --- | --- |
 | CPU and memory resources | Deployment, StatefulSet, DaemonSet, Job, CronJob | `containers` and `initContainers` |
 | Readiness and liveness probes | Deployment, StatefulSet, DaemonSet | Regular `containers` only |
+| Startup probe observation | Deployment, StatefulSet, DaemonSet | Regular `containers` only |
 
 For CronJobs, inspect
 `.spec.jobTemplate.spec.template.spec`. For all other included resources,
@@ -37,7 +38,9 @@ resources.limits.memory
 ```
 
 A probe-compliant regular service container defines both `readinessProbe` and
-`livenessProbe`. Jobs and CronJobs are probe-not-applicable, not probe-failed.
+`livenessProbe`. `startupProbe` is recorded as an advisory observation only;
+its absence does not make a container non-compliant and does not require an
+exception. Jobs and CronJobs are probe-not-applicable, not probe-failed.
 
 The audit checks field presence and valid exception metadata. It does not assess
 whether resource quantities are appropriately sized, or whether a probe endpoint
@@ -110,7 +113,7 @@ not full compliance.
    - namespace, kind, and name;
    - each regular and init container name;
    - the four resource field-presence values;
-   - readiness and liveness field presence when applicable;
+   - readiness, liveness, and startup field presence when applicable;
    - all exception annotations and their evaluated status.
 
 6. If Kyverno is installed, collect its current reports separately:
@@ -148,6 +151,10 @@ The overall workload result is:
 3. `compliant` if all applicable policies comply.
 4. `unknown` if no more definite result is available.
 
+Startup observation is independent of this result model: render it as
+`present` or `missing (advisory)`. It does not change the result of the
+readiness/liveness policy or the overall workload result.
+
 ## Chat output
 
 Start with a concise summary:
@@ -159,6 +166,7 @@ Start with a concise summary:
 - count of invalid and valid exceptions;
 - count fully compliant with every applicable policy;
 - count of Jobs/CronJobs where probes are not applicable;
+- count of startup probes present and missing (advisory);
 - whether live Kyverno reports corroborate the findings.
 
 Then render Markdown tables in this order:
@@ -171,7 +179,7 @@ Then render Markdown tables in this order:
 
 Use this column set:
 
-| Namespace | Workload | Container(s) | Resources | Probes | Exception | Overall result | Finding |
+| Namespace | Workload | Container(s) | Resources | Probes | Startup | Exception | Overall result | Finding |
 
 Rules:
 
@@ -183,6 +191,7 @@ Rules:
   `missing requests.cpu, limits.memory`.
 - In the probes column, use `ready + live`, `missing readiness`,
   `missing liveness`, `missing both`, or `n/a (Job)`.
+- In the startup column, use `present`, `missing (advisory)`, or `n/a (Job)`.
 - In the exception column, show `none`, `resources: <reason>`,
   `probes: <reason>`, or the invalidity reason.
 - Sort failures first, then invalid exceptions, valid exceptions, compliant

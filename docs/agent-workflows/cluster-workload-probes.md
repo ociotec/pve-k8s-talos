@@ -101,8 +101,10 @@ If the result is large, show the worst 25 rows and state that the table is trunc
 5. Flag findings:
    - Missing readiness if `readinessProbe` is absent.
    - Missing liveness if `livenessProbe` is absent.
-   - Missing startup is informational unless the workload is known to start slowly.
-   - `ok` only when readiness and liveness probes exist.
+- Missing startup is advisory only. Report it separately, but do not classify
+  the workload as non-compliant and do not recommend an exception annotation.
+- `ok` only when readiness and liveness probes exist; render a missing startup
+  probe as `advisory: consider startupProbe for slow startup`.
 6. Add a short cluster summary before the table:
    - total audited containers
    - count missing readiness probes

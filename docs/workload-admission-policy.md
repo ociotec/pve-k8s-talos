@@ -5,7 +5,7 @@
 Gradually prevent user-managed workloads from being created or updated without
 explicit CPU and memory resources, or without the health probes that apply to
 long-running services. The policy is disabled by default per cluster and
-provides minimal, traceable, time-bound exceptions.
+provides minimal, traceable exceptions.
 
 This specification does not change cluster state or install a policy engine.
 
@@ -160,14 +160,16 @@ Policies run on `CREATE` and `UPDATE` for the following resources:
 | --- | --- | --- |
 | CPU and memory resources | Deployment, StatefulSet, DaemonSet, Job, CronJob | `containers` and `initContainers` |
 | `readinessProbe` and `livenessProbe` | Deployment, StatefulSet, DaemonSet | Regular `containers` only |
+| `startupProbe` observation | Deployment, StatefulSet, DaemonSet | Regular `containers` only |
 
 For a `CronJob`, resources are inspected under
 `.spec.jobTemplate.spec.template.spec`; other resources are inspected in their
 pod template. `ephemeralContainers` are excluded.
 
-Jobs and CronJobs are excluded from the probe policy: their execution is
-finite, they do not provide a stable endpoint for traffic, and Kubernetes does
-not run readiness, liveness, or startup probes for init containers.
+Jobs and CronJobs are excluded from probe rules and startup observation: their
+execution is finite, they do not provide a stable endpoint for traffic, and
+Kubernetes does not run readiness, liveness, or startup probes for init
+containers.
 
 The first version does not validate directly created `Pod` objects. Exception
 annotations live on the controller resource and are not necessarily propagated
@@ -200,10 +202,22 @@ readinessProbe: { ... }
 livenessProbe: { ... }
 ```
 
-`startupProbe` is not mandatory in the first version. It is recommended for
-legitimately slow starts, including migrations, WAL recovery, JVM startup, and
-storage recovery. Each probe endpoint must be verified against official
-component documentation or existing configuration; do not guess endpoints.
+## Startup probe observation
+
+`startupProbe` is observed but is never an admission requirement. Kyverno must
+report its absence for each applicable regular container through a separate
+policy which remains in `Audit` mode even when
+`enable_kyverno_enforce = true`. A missing startup probe must neither deny nor
+warn on an admission request, and it requires no exception annotation.
+
+The report is an operational prompt to decide whether the workload has a
+legitimately slow start, such as migrations, WAL recovery, JVM startup, cache
+warmup, or storage recovery. If so, add a startup probe with a startup budget
+appropriate to that component. Otherwise, leave it absent. Do not add a dummy
+startup probe simply to make the report disappear.
+
+When a startup probe is added, verify its endpoint against official component
+documentation or existing configuration; do not guess endpoints.
 
 ## Annotation-based exceptions
 
@@ -246,6 +260,8 @@ documented.
 5. Disable audit and enable `enable_kyverno_enforce = true` first in selected
    namespaces, then across the remaining application namespaces.
 6. Periodically review and remove exceptions as workloads are corrected.
+7. Review startup-probe observations independently and add probes only to
+   workloads with a demonstrated slow-start risk.
 
 Policy Reporter may be enabled after Kyverno audit reports are available. Its
 ingress is deployed only after the required ingress, TLS, and authentication
@@ -265,6 +281,9 @@ is not unexpectedly blocked by historical debt.
   it has a valid resource exception.
 - A service container missing either probe violates the rule unless it has a
   valid probe exception.
+- A missing startup probe produces an Audit-mode policy report but never
+  changes admission or requires an exception, including when the required
+  policies are in Enforce mode.
 - Jobs and CronJobs do not violate the policy for missing readiness/liveness.
 - Unauthorized or incomplete exceptions are denied in enforce mode and visible
   in audit mode.
