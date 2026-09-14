@@ -176,6 +176,10 @@ resource "kubernetes_manifest" "cpu_deployment" {
       labels = {
         app = local.benchmark_cpu_workload_name
       }
+      annotations = {
+        "policy.pve-k8s-talos.io/allow-missing-probes" = "true"
+        "policy.pve-k8s-talos.io/exception-reason"    = "Benchmark workload has no service traffic or meaningful health endpoint; it is controlled by benchmark orchestration."
+      }
     }
     spec = {
       replicas = local.benchmark_cpu_replicas_value
@@ -243,6 +247,10 @@ resource "kubernetes_manifest" "memory_deployment" {
       namespace = local.benchmark_namespace_value
       labels = {
         app = local.benchmark_memory_workload_name
+      }
+      annotations = {
+        "policy.pve-k8s-talos.io/allow-missing-probes" = "true"
+        "policy.pve-k8s-talos.io/exception-reason"    = "Benchmark workload has no service traffic or meaningful health endpoint; it is controlled by benchmark orchestration."
       }
     }
     spec = {
@@ -666,6 +674,10 @@ resource "kubernetes_manifest" "disk_headless_service" {
       namespace = local.benchmark_namespace_value
       labels = {
         app = format("benchmark-disk-%s-%dmbs", each.key, local.benchmark_disk_rate_mbs_value)
+      }
+      annotations = {
+        "policy.pve-k8s-talos.io/allow-missing-probes" = "true"
+        "policy.pve-k8s-talos.io/exception-reason"    = "Benchmark workload has no service traffic or meaningful health endpoint; it is controlled by benchmark orchestration."
       }
     }
     spec = {
