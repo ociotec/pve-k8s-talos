@@ -67,7 +67,7 @@ locals {
   # Deploy Policy Reporter, its Kyverno plugin, and its ingress-protected UI.
   enable_policy_reporter = false
 
-  policy_reporter_hostname        = "policy-reporter.${local.domain}"
+  policy_reporter_hostname        = "kyverno.${local.domain}"
   policy_reporter_tls_secret_name = "policy-reporter-tls"
 
   # Policy Reporter is an operational UI and must not be exposed anonymously.
