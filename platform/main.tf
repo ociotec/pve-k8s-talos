@@ -566,6 +566,10 @@ locals {
           labels = {
             "app.kubernetes.io/part-of" = "rancher"
           }
+          annotations = {
+            "policy.pve-k8s-talos.io/allow-missing-probes" = "true"
+            "policy.pve-k8s-talos.io/exception-reason"     = "Rancher-managed webhook is configured by a nested Helm release; the platform module does not own its readiness probe."
+          }
         }
         spec = {
           template = {
@@ -589,6 +593,21 @@ locals {
                 }
               }]
             }
+          }
+        }
+      })
+    }
+
+    "cattle-system/api-extension" = {
+      namespace = "cattle-system"
+      resource  = "deployment"
+      name      = "api-extension"
+      patch = jsonencode({
+        metadata = {
+          annotations = {
+            "policy.pve-k8s-talos.io/allow-missing-resources" = "true"
+            "policy.pve-k8s-talos.io/allow-missing-probes"    = "true"
+            "policy.pve-k8s-talos.io/exception-reason"        = "Rancher-managed remotedialer proxy has no supported health endpoint; resource sizing is owned by the Rancher Helm release."
           }
         }
       })
