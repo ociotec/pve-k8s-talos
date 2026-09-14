@@ -895,7 +895,7 @@
         "type": "prometheus",
         "uid": "Prometheus"
       },
-      "description": "Worker pod capacity and workload signals. Workers pods used is compared with worker allocatable pods: green < 50%, yellow >= 50% and < 80%, red >= 80%. Problem pods: green = 0, yellow > 0 and <= 10% of worker allocatable pods, red > 10%. Warning events (last 30'): green = 0, yellow > 0 and <= 10% of worker allocatable pods, red > 10%.",
+      "description": "Worker pod capacity and workload signals. Workers pods used is compared with worker allocatable pods: green < 50%, yellow >= 50% and < 80%, red >= 80%. Problem pods counts Pending, Unknown, and Failed pods, excluding pods terminated by the kubelet after normal workload replacement; green = 0, yellow > 0 and <= 10% of worker allocatable pods, red > 10%. Warning events (last 30'): green = 0, yellow > 0 and <= 10% of worker allocatable pods, red > 10%.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1013,7 +1013,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "label_replace((sum(count by(node) ((kube_pod_status_phase{phase=~\"Pending|Running\"} == 1) * on(namespace,pod) group_left(node) max by(namespace,pod,node) (kube_pod_info)) unless on(node) kube_node_role{role=~\"control-plane|master\"})), \"Type\", \"Workers pods used\", \"__name__\", \".*\") or label_replace((count(kube_pod_status_phase{namespace=~\"${infra_namespaces:raw}\",phase=~\"Failed|Unknown|Pending\"} == 1) or on() vector(0)), \"Type\", \"Problem pods\", \"__name__\", \".*\") or label_replace((sum(increase(kube_event_count{type=\"Warning\",namespace=~\"${infra_namespaces:raw}\"}[30m])) or on() vector(0)), \"Type\", \"Warning events (last 30')\", \"__name__\", \".*\")",
+          "expr": "label_replace((sum(count by(node) ((kube_pod_status_phase{phase=~\"Pending|Running\"} == 1) * on(namespace,pod) group_left(node) max by(namespace,pod,node) (kube_pod_info)) unless on(node) kube_node_role{role=~\"control-plane|master\"})), \"Type\", \"Workers pods used\", \"__name__\", \".*\") or label_replace((count((kube_pod_status_phase{namespace=~\"${infra_namespaces:raw}\",phase=~\"Failed|Unknown|Pending\"} == 1) unless on(namespace,pod,uid) (kube_pod_status_reason{reason=\"TerminationByKubelet\"} == 1)) or on() vector(0)), \"Type\", \"Problem pods\", \"__name__\", \".*\") or label_replace((sum(increase(kube_event_count{type=\"Warning\",namespace=~\"${infra_namespaces:raw}\"}[30m])) or on() vector(0)), \"Type\", \"Warning events (last 30')\", \"__name__\", \".*\")",
           "format": "table",
           "instant": true,
           "legendFormat": "",
