@@ -3550,7 +3550,7 @@ else
     -target=local_file.cert_manager_ca_cert \
     -target=local_file.cert_manager_ca_key \
     -target=helm_release.kyverno \
-    -target=kubernetes_manifest.kyverno_policies \
+    -target=null_resource.kyverno_policies \
     -var="skip_ceph=${skip_ceph}" \
     -var="cluster_name=${cluster_name}" \
     -var="proxmox_pool=${node_remediation_pool}"

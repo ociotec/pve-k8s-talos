@@ -769,17 +769,22 @@ resource "helm_release" "kyverno" {
   depends_on = [kubernetes_manifest.infrastructure_priority_classes]
 }
 
-resource "kubernetes_manifest" "kyverno_policies" {
-  count = local.kyverno_enabled_value ? length(local.kyverno_policies) : 0
+resource "local_file" "kyverno_policies" {
+  count    = local.kyverno_enabled_value ? 1 : 0
+  filename = "${path.module}/.generated-kyverno-policies.yaml"
+  content  = join("\n---\n", [for policy in local.kyverno_policies : yamlencode(policy)])
+}
 
-  manifest = local.kyverno_policies[count.index]
+resource "null_resource" "kyverno_policies" {
+  count = local.kyverno_enabled_value ? 1 : 0
 
-  field_manager {
-    name            = "opentofu"
-    force_conflicts = true
+  triggers = { manifest_sha = sha256(local_file.kyverno_policies[0].content) }
+
+  provisioner "local-exec" {
+    command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl apply -f ${local_file.kyverno_policies[0].filename}"
   }
 
-  depends_on = [helm_release.kyverno]
+  depends_on = [helm_release.kyverno, local_file.kyverno_policies]
 }
 
 resource "kubernetes_manifest" "cert_manager_crds" {
