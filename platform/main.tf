@@ -886,8 +886,10 @@ resource "kubernetes_deployment_v1" "rancher" {
       }
 
       spec {
-        priority_class_name  = local.platform_rancher_deployments[count.index].spec.template.spec.priorityClassName
-        service_account_name = local.platform_rancher_deployments[count.index].spec.template.spec.serviceAccountName
+        priority_class_name             = local.platform_rancher_deployments[count.index].spec.template.spec.priorityClassName
+        service_account_name            = local.platform_rancher_deployments[count.index].spec.template.spec.serviceAccountName
+        automount_service_account_token = local.platform_rancher_deployments[count.index].spec.template.spec.automountServiceAccountToken
+        enable_service_links            = local.platform_rancher_deployments[count.index].spec.template.spec.enableServiceLinks
 
         affinity {
           node_affinity {
@@ -1035,8 +1037,6 @@ resource "kubernetes_deployment_v1" "rancher" {
   lifecycle {
     ignore_changes = [
       metadata[0].annotations,
-      spec[0].template[0].spec[0].automount_service_account_token,
-      spec[0].template[0].spec[0].enable_service_links,
     ]
   }
 

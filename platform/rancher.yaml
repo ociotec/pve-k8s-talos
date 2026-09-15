@@ -134,6 +134,8 @@ spec:
     spec:
       priorityClassName: rancher-critical
       serviceAccountName: rancher
+      automountServiceAccountToken: true
+      enableServiceLinks: true
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
