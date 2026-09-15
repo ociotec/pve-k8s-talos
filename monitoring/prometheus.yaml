@@ -212,6 +212,16 @@ data:
           - action: drop
             source_labels: [__meta_kubernetes_namespace]
             regex: cert-manager
+          # Kubernetes pod discovery yields one target per declared container
+          # port. Keep only the target whose port is the annotated scrape port;
+          # otherwise replacing __address__ below would scrape one endpoint once
+          # for every container port in the pod.
+          - action: replace
+            source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+            target_label: __tmp_prometheus_annotation_port
+          - action: keepequal
+            source_labels: [__meta_kubernetes_pod_container_port_number]
+            target_label: __tmp_prometheus_annotation_port
           - action: replace
             source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
             target_label: __metrics_path__
