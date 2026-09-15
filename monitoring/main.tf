@@ -1469,7 +1469,7 @@ resource "helm_release" "policy_reporter" {
   namespace  = "monitoring"
   repository = "oci://ghcr.io/kyverno/charts"
   chart      = "policy-reporter"
-  version    = "3.7.4"
+  version    = "3.8.1"
   wait       = true
   timeout    = 600
   atomic     = true
