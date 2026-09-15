@@ -166,6 +166,15 @@ class Kubernetes:
         if status.get("result") == "Failed":
             raise RuntimeError(f"CSI NetworkFence failed: {status.get('message', 'no detail')}")
 
+    @staticmethod
+    def _fence_operation_succeeded(item, fence_state):
+        status = item.get("status", {})
+        operation = "fencing" if fence_state == "Fenced" else "unfencing"
+        return (
+            status.get("result") == "Succeeded"
+            and status.get("message", "").strip().lower() == f"{operation} operation successful"
+        )
+
     def ensure_network_fenced(self, node_name, cidrs, config):
         path = "/apis/csiaddons.openshift.io/v1alpha1/networkfences"
         item = self.get_network_fence(node_name)
@@ -216,7 +225,7 @@ class Kubernetes:
             return False
 
         self._raise_failed_fence(item)
-        return item.get("status", {}).get("result") == "Succeeded"
+        return self._fence_operation_succeeded(item, "Fenced")
 
     def request_network_unfence(self, node_name):
         item = self.get_network_fence(node_name)
@@ -232,7 +241,7 @@ class Kubernetes:
             logging.warning("requested CSI network unfencing for %s", node_name)
             return False
         self._raise_failed_fence(item)
-        return item.get("status", {}).get("result") == "Succeeded"
+        return self._fence_operation_succeeded(item, "Unfenced")
 
     def delete_network_fence(self, node_name):
         if self.get_network_fence(node_name) is not None:

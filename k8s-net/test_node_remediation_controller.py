@@ -121,6 +121,44 @@ class ControllerTest(unittest.TestCase):
         )
         self.assertEqual(kube.request.call_args.args[3], "application/merge-patch+json")
 
+    def test_network_fence_waits_for_current_fencing_operation(self):
+        kube = remediation.Kubernetes.__new__(remediation.Kubernetes)
+        item = {
+            "spec": {
+                "fenceState": "Fenced",
+                "cidrs": ["192.0.2.10/32"],
+                "driver": "rook-ceph.rbd.csi.ceph.com",
+                "parameters": {"clusterID": "rook-ceph"},
+                "secret": {"name": "rook-csi-rbd-provisioner", "namespace": "rook-ceph"},
+            },
+            "status": {"result": "Succeeded", "message": "unfencing operation successful"},
+        }
+        kube.get_network_fence = mock.Mock(return_value=item)
+        kube.request = mock.Mock()
+        config = {
+            "driver": "rook-ceph.rbd.csi.ceph.com",
+            "parameters": {"clusterID": "rook-ceph"},
+            "secret_name": "rook-csi-rbd-provisioner",
+            "secret_namespace": "rook-ceph",
+        }
+
+        self.assertFalse(kube.ensure_network_fenced("worker-1", ["192.0.2.10/32"], config))
+        item["status"]["message"] = "fencing operation successful"
+        self.assertTrue(kube.ensure_network_fenced("worker-1", ["192.0.2.10/32"], config))
+
+    def test_network_unfence_ignores_stale_fencing_success(self):
+        kube = remediation.Kubernetes.__new__(remediation.Kubernetes)
+        item = {
+            "spec": {"fenceState": "Unfenced"},
+            "status": {"result": "Succeeded", "message": "fencing operation successful"},
+        }
+        kube.get_network_fence = mock.Mock(return_value=item)
+        kube.request = mock.Mock()
+
+        self.assertFalse(kube.request_network_unfence("worker-1"))
+        item["status"]["message"] = "unfencing operation successful"
+        self.assertTrue(kube.request_network_unfence("worker-1"))
+
     def test_prometheus_metrics_include_leader_and_node_progress(self):
         remediation.HealthHandler.publish_controller("controller-1", True)
         remediation.HealthHandler.publish_node("worker-1", "storage-fencing", 100.0, 28.5, True)
