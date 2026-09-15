@@ -770,11 +770,9 @@ resource "helm_release" "kyverno" {
 }
 
 resource "kubernetes_manifest" "kyverno_policies" {
-  for_each = local.kyverno_enabled_value ? tomap({
-    for index, policy in local.kyverno_policies : tostring(index) => policy
-  }) : tomap({})
+  count = local.kyverno_enabled_value ? length(local.kyverno_policies) : 0
 
-  manifest = each.value
+  manifest = local.kyverno_policies[count.index]
 
   field_manager {
     name            = "opentofu"
