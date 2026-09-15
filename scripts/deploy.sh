@@ -1856,7 +1856,7 @@ wait_for_prometheus_config_hash() {
   start="$(date +%s)"
   while true; do
     pod="$(
-      kubectl -n monitoring get pods -l app=prometheus \
+      kubectl -n monitoring get pods -l app=prometheus --field-selector=status.phase=Running \
         -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true
     )"
     if [[ -n "${pod}" ]]; then
@@ -1878,7 +1878,14 @@ wait_for_prometheus_config_hash() {
 }
 
 reload_prometheus_config() {
-  kubectl -n monitoring exec deploy/prometheus -- sh -ec 'kill -HUP 1' 1>/dev/null
+  local pod
+
+  pod="$(
+    kubectl -n monitoring get pods -l app=prometheus --field-selector=status.phase=Running \
+      -o jsonpath='{.items[0].metadata.name}'
+  )"
+  [[ -n "${pod}" ]] || die "No running Prometheus pod found for configuration reload."
+  kubectl -n monitoring exec "${pod}" -- sh -ec 'kill -HUP 1' 1>/dev/null
 }
 
 reset_legacy_loki_storage() {
