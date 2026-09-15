@@ -1538,6 +1538,16 @@ resource "helm_release" "policy_reporter" {
       requests = { cpu = "100m", memory = "256Mi" }
       limits   = { cpu = "500m", memory = "256Mi" }
     }
+    podAnnotations = {
+      "prometheus.io/scrape" = "true"
+      "prometheus.io/port"   = "8080"
+      "prometheus.io/path"   = "/metrics"
+    }
+    metrics = {
+      enabled      = true
+      mode         = "custom"
+      customLabels = ["namespace", "kind", "name", "policy", "rule", "status", "source"]
+    }
     ui = {
       enabled           = true
       replicaCount      = 1
