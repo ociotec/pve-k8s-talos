@@ -735,6 +735,9 @@ resource "helm_release" "kyverno" {
   cleanup_on_fail  = true
 
   values = [yamlencode({
+    image = {
+      registry = "ghcr.io"
+    }
     admissionController = {
       replicas          = 2
       priorityClassName = "infra-high"
