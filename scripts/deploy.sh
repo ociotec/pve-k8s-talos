@@ -2023,6 +2023,7 @@ prepare_monitoring_workspace() {
   link_into_workspace "${repo_root}/monitoring/prometheus.yaml" "${workspace}/prometheus.yaml"
   link_into_workspace "${repo_root}/monitoring/prometheus-api.yaml" "${workspace}/prometheus-api.yaml"
   link_into_workspace "${repo_root}/monitoring/prometheus-oauth2-proxy.yaml" "${workspace}/prometheus-oauth2-proxy.yaml"
+  link_into_workspace "${repo_root}/monitoring/policy-reporter-oauth2-proxy.yaml" "${workspace}/policy-reporter-oauth2-proxy.yaml"
   link_into_workspace "${repo_root}/monitoring/grafana.yaml" "${workspace}/grafana.yaml"
   link_into_workspace "${repo_root}/monitoring/loki.yaml" "${workspace}/loki.yaml"
   link_into_workspace "${repo_root}/monitoring/tempo.yaml" "${workspace}/tempo.yaml"
@@ -3824,6 +3825,10 @@ else
   if kubectl -n monitoring get deploy/prometheus-oauth2-proxy >/dev/null 2>&1; then
     monitoring_deployments+=(prometheus-oauth2-proxy)
     monitoring_services+=(prometheus-oauth2-proxy)
+  fi
+  if kubectl -n monitoring get deploy/policy-reporter-oauth2-proxy >/dev/null 2>&1; then
+    monitoring_deployments+=(policy-reporter-oauth2-proxy)
+    monitoring_services+=(policy-reporter-oauth2-proxy)
   fi
   if kubectl -n monitoring get pvc dashboards-provisioning >/dev/null 2>&1; then
     monitoring_pvcs+=(dashboards-provisioning)

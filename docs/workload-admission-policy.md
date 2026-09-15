@@ -73,7 +73,6 @@ locals {
   # Policy Reporter is an operational UI and must not be exposed anonymously.
   policy_reporter_auth_keycloak_realm  = "company"
   policy_reporter_auth_allowed_groups  = ["monitoring-view", "monitoring-edit"]
-  policy_reporter_auth_ca_secret_name  = "policy-reporter-oauth-ca"
 }
 ```
 
@@ -89,6 +88,9 @@ The monitoring TLS secret catalog must contain
 `k8s_net_constants.tf`. The ingress must use the existing OAuth2 Proxy and
 Keycloak pattern, with the listed Keycloak realm and authorized groups. The
 implementation must reject an enabled public UI without TLS and authentication.
+Authentication is enforced at ingress by a dedicated OAuth2 Proxy; Policy
+Reporter native OIDC is intentionally disabled so UI rendering does not depend
+on the application's local filesystem session store.
 
 ## Component ownership and dependency order
 

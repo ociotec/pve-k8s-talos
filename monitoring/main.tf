@@ -79,41 +79,50 @@ locals {
   enable_policy_reporter_value = can(regex("(?m)^\\s*enable_policy_reporter\\s*=\\s*(true|false)\\s*$", local.monitoring_constants_source)[0]) ? (
     tobool(regex("(?m)^\\s*enable_policy_reporter\\s*=\\s*(true|false)\\s*$", local.monitoring_constants_source)[0])
   ) : false
-  policy_reporter_hostname_value                = try(local.policy_reporter_hostname, "")
-  policy_reporter_tls_secret_name_value         = try(local.policy_reporter_tls_secret_name, "")
-  policy_reporter_auth_keycloak_realm_value     = trimspace(try(local.policy_reporter_auth_keycloak_realm, ""))
-  policy_reporter_auth_allowed_groups_value     = distinct(compact(try(local.policy_reporter_auth_allowed_groups, [])))
-  monitoring_credentials                        = try(local.cluster_credentials.monitoring, {})
-  monitoring_grafana_admin_password             = try(local.monitoring_credentials.grafana_admin_password, "")
-  monitoring_grafana_postgres_password          = try(local.monitoring_credentials.grafana_postgres_password, "")
-  monitoring_prometheus_api_basic_auth_password = try(local.monitoring_credentials.prometheus_api_basic_auth_password, "")
-  monitoring_prometheus_api_basic_auth_hash     = try(local.monitoring_credentials.prometheus_api_basic_auth_hash, "")
-  monitoring_prometheus_oauth_cookie_secret     = try(local.monitoring_credentials.prometheus_oauth_cookie_secret, "")
-  kubernetes_log_collector_value                = lower(trimspace(try(local.kubernetes_log_collector, "promtail")))
-  kubernetes_events_enabled_value               = try(local.kubernetes_events_enabled, false)
-  alloy_image_tag_value                         = try(local.alloy_image_tag, "v1.18.1")
-  alloy_logs_cpu_request_value                  = try(local.alloy_logs_cpu_request, "100m")
-  alloy_logs_cpu_limit_value                    = try(local.alloy_logs_cpu_limit, "300m")
-  alloy_logs_mem_request_value                  = try(local.alloy_logs_mem_request, "256Mi")
-  alloy_logs_mem_limit_value                    = try(local.alloy_logs_mem_limit, "256Mi")
-  alloy_events_cpu_request_value                = try(local.alloy_events_cpu_request, "50m")
-  alloy_events_cpu_limit_value                  = try(local.alloy_events_cpu_limit, "200m")
-  alloy_events_mem_request_value                = try(local.alloy_events_mem_request, "128Mi")
-  alloy_events_mem_limit_value                  = try(local.alloy_events_mem_limit, "128Mi")
-  alloy_events_storage_class_value              = try(local.alloy_events_storage_class, local.prometheus_storage_class)
-  alloy_events_storage_size_value               = try(local.alloy_events_storage_size, "1Gi")
-  prometheus_auth_keycloak_realm_value          = trimspace(try(local.prometheus_auth_keycloak_realm, ""))
-  prometheus_auth_enabled                       = local.prometheus_auth_keycloak_realm_value != ""
-  prometheus_auth_allowed_groups_value          = distinct(compact(try(local.prometheus_auth_allowed_groups, [])))
-  prometheus_auth_ca_secret_name_value          = try(local.prometheus_auth_ca_secret_name, "prometheus-oauth-ca")
-  prometheus_oauth_secret_name_value            = "prometheus-oauth"
-  prometheus_oauth_redirect_uri                 = format("https://%s/oauth2/callback", local.prometheus_hostname)
-  prometheus_oauth2_proxy_image_tag_value       = try(local.prometheus_oauth2_proxy_image_tag, "v7.12.0")
-  prometheus_oauth2_proxy_cookie_name_value     = try(local.prometheus_oauth2_proxy_cookie_name, "_prometheus_oauth2_proxy")
-  prometheus_oauth2_proxy_cpu_request_value     = try(local.prometheus_oauth2_proxy_cpu_request, "50m")
-  prometheus_oauth2_proxy_cpu_limit_value       = try(local.prometheus_oauth2_proxy_cpu_limit, "200m")
-  prometheus_oauth2_proxy_mem_request_value     = try(local.prometheus_oauth2_proxy_mem_request, "256Mi")
-  prometheus_oauth2_proxy_mem_limit_value       = try(local.prometheus_oauth2_proxy_mem_limit, "256Mi")
+  policy_reporter_hostname_value                 = try(local.policy_reporter_hostname, "")
+  policy_reporter_tls_secret_name_value          = try(local.policy_reporter_tls_secret_name, "")
+  policy_reporter_auth_keycloak_realm_value      = trimspace(try(local.policy_reporter_auth_keycloak_realm, ""))
+  policy_reporter_auth_allowed_groups_value      = distinct(compact(try(local.policy_reporter_auth_allowed_groups, [])))
+  monitoring_credentials                         = try(local.cluster_credentials.monitoring, {})
+  monitoring_grafana_admin_password              = try(local.monitoring_credentials.grafana_admin_password, "")
+  monitoring_grafana_postgres_password           = try(local.monitoring_credentials.grafana_postgres_password, "")
+  monitoring_prometheus_api_basic_auth_password  = try(local.monitoring_credentials.prometheus_api_basic_auth_password, "")
+  monitoring_prometheus_api_basic_auth_hash      = try(local.monitoring_credentials.prometheus_api_basic_auth_hash, "")
+  monitoring_prometheus_oauth_cookie_secret      = try(local.monitoring_credentials.prometheus_oauth_cookie_secret, "")
+  monitoring_policy_reporter_oauth_cookie_secret = try(local.monitoring_credentials.policy_reporter_oauth_cookie_secret, "")
+  kubernetes_log_collector_value                 = lower(trimspace(try(local.kubernetes_log_collector, "promtail")))
+  kubernetes_events_enabled_value                = try(local.kubernetes_events_enabled, false)
+  alloy_image_tag_value                          = try(local.alloy_image_tag, "v1.18.1")
+  alloy_logs_cpu_request_value                   = try(local.alloy_logs_cpu_request, "100m")
+  alloy_logs_cpu_limit_value                     = try(local.alloy_logs_cpu_limit, "300m")
+  alloy_logs_mem_request_value                   = try(local.alloy_logs_mem_request, "256Mi")
+  alloy_logs_mem_limit_value                     = try(local.alloy_logs_mem_limit, "256Mi")
+  alloy_events_cpu_request_value                 = try(local.alloy_events_cpu_request, "50m")
+  alloy_events_cpu_limit_value                   = try(local.alloy_events_cpu_limit, "200m")
+  alloy_events_mem_request_value                 = try(local.alloy_events_mem_request, "128Mi")
+  alloy_events_mem_limit_value                   = try(local.alloy_events_mem_limit, "128Mi")
+  alloy_events_storage_class_value               = try(local.alloy_events_storage_class, local.prometheus_storage_class)
+  alloy_events_storage_size_value                = try(local.alloy_events_storage_size, "1Gi")
+  prometheus_auth_keycloak_realm_value           = trimspace(try(local.prometheus_auth_keycloak_realm, ""))
+  prometheus_auth_enabled                        = local.prometheus_auth_keycloak_realm_value != ""
+  prometheus_auth_allowed_groups_value           = distinct(compact(try(local.prometheus_auth_allowed_groups, [])))
+  prometheus_auth_ca_secret_name_value           = try(local.prometheus_auth_ca_secret_name, "prometheus-oauth-ca")
+  prometheus_oauth_secret_name_value             = "prometheus-oauth"
+  prometheus_oauth_redirect_uri                  = format("https://%s/oauth2/callback", local.prometheus_hostname)
+  prometheus_oauth2_proxy_image_tag_value        = try(local.prometheus_oauth2_proxy_image_tag, "v7.12.0")
+  prometheus_oauth2_proxy_cookie_name_value      = try(local.prometheus_oauth2_proxy_cookie_name, "_prometheus_oauth2_proxy")
+  prometheus_oauth2_proxy_cpu_request_value      = try(local.prometheus_oauth2_proxy_cpu_request, "50m")
+  prometheus_oauth2_proxy_cpu_limit_value        = try(local.prometheus_oauth2_proxy_cpu_limit, "200m")
+  prometheus_oauth2_proxy_mem_request_value      = try(local.prometheus_oauth2_proxy_mem_request, "256Mi")
+  prometheus_oauth2_proxy_mem_limit_value        = try(local.prometheus_oauth2_proxy_mem_limit, "256Mi")
+  policy_reporter_oauth_secret_name_value        = "policy-reporter-oauth"
+  policy_reporter_oauth_redirect_uri             = format("https://%s/oauth2/callback", local.policy_reporter_hostname_value)
+  policy_reporter_oauth2_proxy_image_tag_value   = try(local.policy_reporter_oauth2_proxy_image_tag, "v7.15.3")
+  policy_reporter_oauth2_proxy_cookie_name_value = try(local.policy_reporter_oauth2_proxy_cookie_name, "_policy_reporter_oauth2_proxy")
+  policy_reporter_oauth2_proxy_cpu_request_value = try(local.policy_reporter_oauth2_proxy_cpu_request, "50m")
+  policy_reporter_oauth2_proxy_cpu_limit_value   = try(local.policy_reporter_oauth2_proxy_cpu_limit, "200m")
+  policy_reporter_oauth2_proxy_mem_request_value = try(local.policy_reporter_oauth2_proxy_mem_request, "128Mi")
+  policy_reporter_oauth2_proxy_mem_limit_value   = try(local.policy_reporter_oauth2_proxy_mem_limit, "128Mi")
   beyla_enabled_value = can(regex("(?m)^\\s*beyla_enabled\\s*=\\s*(true|false)\\s*$", local.monitoring_constants_source)[0]) ? (
     tobool(regex("(?m)^\\s*beyla_enabled\\s*=\\s*(true|false)\\s*$", local.monitoring_constants_source)[0])
   ) : true
@@ -473,6 +482,14 @@ locals {
     flatten([
       for group_name in local.prometheus_auth_allowed_groups_value : [
         for ldap_group in try(local.identity_realm_groups[local.prometheus_auth_keycloak_realm_value][group_name].included_ldap_groups, []) : ldap_group.group_name
+      ]
+    ])
+  )))
+  policy_reporter_auth_effective_allowed_groups = distinct(compact(concat(
+    local.policy_reporter_auth_allowed_groups_value,
+    flatten([
+      for group_name in local.policy_reporter_auth_allowed_groups_value : [
+        for ldap_group in try(local.identity_realm_groups[local.policy_reporter_auth_keycloak_realm_value][group_name].included_ldap_groups, []) : ldap_group.group_name
       ]
     ])
   )))
@@ -892,6 +909,25 @@ locals {
     yamldecode(doc)
     if local.prometheus_auth_enabled && length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
   ]
+  policy_reporter_oauth2_proxy_manifests = [
+    for doc in split("\n---\n", templatefile("${path.module}/policy-reporter-oauth2-proxy.yaml", {
+      policy_reporter_hostname                    = local.policy_reporter_hostname_value
+      policy_reporter_tls_secret_name             = local.policy_reporter_tls_secret_name_value
+      policy_reporter_oauth_secret_name           = local.policy_reporter_oauth_secret_name_value
+      policy_reporter_oidc_issuer                 = local.policy_reporter_oidc_issuer
+      policy_reporter_oidc_client_id              = local.policy_reporter_oidc_client_id
+      policy_reporter_oauth_redirect_uri          = local.policy_reporter_oauth_redirect_uri
+      policy_reporter_oauth2_proxy_image_tag      = local.policy_reporter_oauth2_proxy_image_tag_value
+      policy_reporter_oauth2_proxy_cookie_name    = local.policy_reporter_oauth2_proxy_cookie_name_value
+      policy_reporter_oauth2_proxy_allowed_groups = local.policy_reporter_auth_effective_allowed_groups
+      policy_reporter_oauth2_proxy_cpu_request    = local.policy_reporter_oauth2_proxy_cpu_request_value
+      policy_reporter_oauth2_proxy_cpu_limit      = local.policy_reporter_oauth2_proxy_cpu_limit_value
+      policy_reporter_oauth2_proxy_mem_request    = local.policy_reporter_oauth2_proxy_mem_request_value
+      policy_reporter_oauth2_proxy_mem_limit      = local.policy_reporter_oauth2_proxy_mem_limit_value
+    })) :
+    yamldecode(doc)
+    if local.enable_policy_reporter_value && length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
+  ]
 
   monitoring_resources = concat(
     local.prometheus_manifests,
@@ -941,7 +977,8 @@ locals {
     ],
     local.kube_state_metrics_manifests,
     local.node_exporter_manifests,
-    local.prometheus_oauth2_proxy_manifests
+    local.prometheus_oauth2_proxy_manifests,
+    local.policy_reporter_oauth2_proxy_manifests
   )
 
   monitoring_certificates = [
@@ -1139,7 +1176,8 @@ check "policy_reporter_configuration" {
       trimspace(local.policy_reporter_oidc_issuer) != "" &&
       trimspace(local.policy_reporter_oidc_client_id) != "" &&
       trimspace(local.policy_reporter_oidc_client_secret) != "" &&
-      trimspace(local.policy_reporter_auth_ca_content) != ""
+      trimspace(local.policy_reporter_auth_ca_content) != "" &&
+      trimspace(local.monitoring_policy_reporter_oauth_cookie_secret) != ""
     )
     error_message = "Enabled Policy Reporter requires hostname, TLS, Keycloak realm/groups, OIDC client credentials, and a trusted root CA."
   }
@@ -1177,9 +1215,10 @@ check "monitoring_credentials" {
       trimspace(local.monitoring_grafana_postgres_password) != "" &&
       trimspace(local.monitoring_prometheus_api_basic_auth_password) != "" &&
       trimspace(local.monitoring_prometheus_api_basic_auth_hash) != "" &&
-      (!local.prometheus_auth_enabled || trimspace(local.monitoring_prometheus_oauth_cookie_secret) != "")
+      (!local.prometheus_auth_enabled || trimspace(local.monitoring_prometheus_oauth_cookie_secret) != "") &&
+      (!local.enable_policy_reporter_value || trimspace(local.monitoring_policy_reporter_oauth_cookie_secret) != "")
     )
-    error_message = "credentials.json must define monitoring.grafana_admin_password, monitoring.grafana_postgres_password, monitoring.prometheus_api_basic_auth_password, monitoring.prometheus_api_basic_auth_hash, and monitoring.prometheus_oauth_cookie_secret when Prometheus OAuth is enabled."
+    error_message = "credentials.json must define the monitoring service credentials, including dedicated OAuth cookie secrets when Prometheus or Policy Reporter authentication is enabled."
   }
 }
 
@@ -1362,6 +1401,8 @@ resource "kubernetes_manifest" "monitoring_other" {
     kubernetes_secret_v1.prometheus_oauth,
     kubernetes_secret_v1.prometheus_oauth_ca,
     kubernetes_secret_v1.otlp_public_oidc_ca,
+    kubernetes_secret_v1.policy_reporter_oauth,
+    kubernetes_secret_v1.policy_reporter_oidc_ca,
   ]
 }
 
@@ -1462,6 +1503,23 @@ resource "kubernetes_secret_v1" "policy_reporter_oidc_ca" {
   depends_on = [kubernetes_manifest.monitoring_namespace]
 }
 
+resource "kubernetes_secret_v1" "policy_reporter_oauth" {
+  count = local.enable_policy_reporter_value ? 1 : 0
+
+  metadata {
+    name      = local.policy_reporter_oauth_secret_name_value
+    namespace = "monitoring"
+  }
+
+  data = {
+    "client-secret" = local.policy_reporter_oidc_client_secret
+    "cookie-secret" = local.monitoring_policy_reporter_oauth_cookie_secret
+  }
+
+  type       = "Opaque"
+  depends_on = [kubernetes_manifest.monitoring_namespace]
+}
+
 resource "helm_release" "policy_reporter" {
   count = local.enable_policy_reporter_value ? 1 : 0
 
@@ -1489,33 +1547,20 @@ resource "helm_release" "policy_reporter" {
         limits   = { cpu = "500m", memory = "256Mi" }
       }
       openIDConnect = {
-        enabled      = true
-        discoveryUrl = format("%s/.well-known/openid-configuration", local.policy_reporter_oidc_issuer)
-        callbackUrl  = format("https://%s/callback", local.policy_reporter_hostname_value)
-        clientId     = local.policy_reporter_oidc_client_id
-        clientSecret = local.policy_reporter_oidc_client_secret
-        groupClaim   = "groups"
-        scopes       = ["openid", "profile", "email"]
-        certificate  = "/run/secrets/policy-reporter-oidc-ca/ca.crt"
+        enabled = false
       }
-      boards  = { accessControl = { groups = local.policy_reporter_auth_allowed_groups_value } }
       sources = [{ name = "kyverno", type = "result", exceptions = false }]
       ingress = {
-        enabled     = true
-        className   = "nginx"
-        annotations = { "nginx.ingress.kubernetes.io/ssl-redirect" = "true" }
-        hosts       = [{ host = local.policy_reporter_hostname_value, paths = [{ path = "/", pathType = "Prefix" }] }]
-        tls         = [{ secretName = local.policy_reporter_tls_secret_name_value, hosts = [local.policy_reporter_hostname_value] }]
-      }
-      extraVolumes = {
-        volumeMounts = [
-          { name = "policy-reporter-oidc-ca", mountPath = "/run/secrets/policy-reporter-oidc-ca", readOnly = true },
-          { name = "policy-reporter-ui-sessions", mountPath = "/tmp" },
-        ]
-        volumes = [
-          { name = "policy-reporter-oidc-ca", secret = { secretName = "policy-reporter-oidc-ca" } },
-          { name = "policy-reporter-ui-sessions", emptyDir = {} },
-        ]
+        enabled   = true
+        className = "nginx"
+        annotations = {
+          "nginx.ingress.kubernetes.io/ssl-redirect"          = "true"
+          "nginx.ingress.kubernetes.io/auth-url"              = "http://policy-reporter-oauth2-proxy.monitoring.svc.cluster.local:4180/oauth2/auth"
+          "nginx.ingress.kubernetes.io/auth-signin"           = "https://$host/oauth2/start?rd=$escaped_request_uri"
+          "nginx.ingress.kubernetes.io/auth-response-headers" = "X-Auth-Request-User,X-Auth-Request-Email,X-Auth-Request-Groups"
+        }
+        hosts = [{ host = local.policy_reporter_hostname_value, paths = [{ path = "/", pathType = "Prefix" }] }]
+        tls   = [{ secretName = local.policy_reporter_tls_secret_name_value, hosts = [local.policy_reporter_hostname_value] }]
       }
     }
     plugin = { kyverno = {
@@ -1530,7 +1575,7 @@ resource "helm_release" "policy_reporter" {
   })]
 
   depends_on = [
-    kubernetes_secret_v1.policy_reporter_oidc_ca,
+    kubernetes_secret_v1.policy_reporter_oauth,
     kubernetes_secret_v1.preissued_tls,
     kubernetes_manifest.monitoring_certificates,
     null_resource.ingress_nginx_webhook_ready,

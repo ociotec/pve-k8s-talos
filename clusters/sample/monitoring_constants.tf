@@ -6,6 +6,19 @@ locals {
   prometheus_tls_secret_name     = "prometheus-tls"
   prometheus_api_tls_secret_name = local.prometheus_tls_secret_name
 
+  # Policy Reporter is optional and its public UI is protected by Keycloak through oauth2-proxy.
+  enable_policy_reporter                   = false
+  policy_reporter_hostname                 = "kyverno.${local.domain}"
+  policy_reporter_tls_secret_name          = "policy-reporter-tls"
+  policy_reporter_auth_keycloak_realm      = "company"
+  policy_reporter_auth_allowed_groups      = ["k8s-admins", "monitoring-view"]
+  policy_reporter_oauth2_proxy_image_tag   = "v7.15.3"
+  policy_reporter_oauth2_proxy_cookie_name = "_policy_reporter_oauth2_proxy"
+  policy_reporter_oauth2_proxy_cpu_request = "50m"
+  policy_reporter_oauth2_proxy_cpu_limit   = "200m"
+  policy_reporter_oauth2_proxy_mem_request = "128Mi"
+  policy_reporter_oauth2_proxy_mem_limit   = "128Mi"
+
   ec_storage_class      = "${local.ceph_name_prefix}-rbd-ec"
   replica_storage_class = "${local.ceph_name_prefix}-rbd-replica"
 
