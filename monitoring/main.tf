@@ -1508,8 +1508,14 @@ resource "helm_release" "policy_reporter" {
         tls         = [{ secretName = local.policy_reporter_tls_secret_name_value, hosts = [local.policy_reporter_hostname_value] }]
       }
       extraVolumes = {
-        volumeMounts = [{ name = "policy-reporter-oidc-ca", mountPath = "/run/secrets/policy-reporter-oidc-ca", readOnly = true }]
-        volumes      = [{ name = "policy-reporter-oidc-ca", secret = { secretName = "policy-reporter-oidc-ca" } }]
+        volumeMounts = [
+          { name = "policy-reporter-oidc-ca", mountPath = "/run/secrets/policy-reporter-oidc-ca", readOnly = true },
+          { name = "policy-reporter-ui-sessions", mountPath = "/tmp" },
+        ]
+        volumes = [
+          { name = "policy-reporter-oidc-ca", secret = { secretName = "policy-reporter-oidc-ca" } },
+          { name = "policy-reporter-ui-sessions", emptyDir = {} },
+        ]
       }
     }
     plugin = { kyverno = {
