@@ -738,7 +738,15 @@ resource "helm_release" "kyverno" {
     admissionController = {
       replicas          = 2
       priorityClassName = "infra-high"
+      initContainer = {
+        image = {
+          registry = "ghcr.io"
+        }
+      }
       container = {
+        image = {
+          registry = "ghcr.io"
+        }
         resources = {
           requests = { cpu = local.kyverno_resources.admission_cpu_request, memory = local.kyverno_resources.admission_memory }
           limits   = { cpu = "1", memory = local.kyverno_resources.admission_memory }
@@ -754,6 +762,9 @@ resource "helm_release" "kyverno" {
     reportsController = {
       replicas          = 1
       priorityClassName = "infra-high"
+      image = {
+        registry = "ghcr.io"
+      }
       annotations = {
         "policy.pve-k8s-talos.io/allow-missing-probes" = "true"
         "policy.pve-k8s-talos.io/exception-reason"     = "The Kyverno reports controller does not expose supported readiness and liveness health endpoints."
