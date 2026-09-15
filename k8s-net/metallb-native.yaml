@@ -2007,10 +2007,11 @@ spec:
           httpGet:
             path: /metrics
             port: monitoring
+            scheme: HTTP
           initialDelaySeconds: 10
           periodSeconds: 10
           successThreshold: 1
-          timeoutSeconds: 1
+          timeoutSeconds: 2
         name: controller
         ports:
         - containerPort: 7472
@@ -2023,17 +2024,27 @@ spec:
           httpGet:
             path: /metrics
             port: monitoring
+            scheme: HTTP
           initialDelaySeconds: 10
           periodSeconds: 10
           successThreshold: 1
-          timeoutSeconds: 1
+          timeoutSeconds: 2
+        startupProbe:
+          failureThreshold: 30
+          httpGet:
+            path: /metrics
+            port: monitoring
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 2
         resources:
           requests:
-            cpu: 50m
-            memory: 64Mi
+            cpu: "${metallb_controller_cpu_request}"
+            memory: "${metallb_controller_mem_request}"
           limits:
-            cpu: 200m
-            memory: 64Mi
+            cpu: "${metallb_controller_cpu_limit}"
+            memory: "${metallb_controller_mem_limit}"
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -2114,6 +2125,7 @@ spec:
           httpGet:
             path: /metrics
             port: monitoring
+            scheme: HTTP
           initialDelaySeconds: 10
           periodSeconds: 10
           successThreshold: 1
@@ -2132,17 +2144,18 @@ spec:
           httpGet:
             path: /metrics
             port: monitoring
+            scheme: HTTP
           initialDelaySeconds: 10
           periodSeconds: 10
           successThreshold: 1
           timeoutSeconds: 2
         resources:
           requests:
-            cpu: 50m
-            memory: 64Mi
+            cpu: "${metallb_speaker_cpu_request}"
+            memory: "${metallb_speaker_mem_request}"
           limits:
-            cpu: 200m
-            memory: 64Mi
+            cpu: "${metallb_speaker_cpu_limit}"
+            memory: "${metallb_speaker_mem_limit}"
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:

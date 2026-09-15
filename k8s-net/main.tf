@@ -270,7 +270,16 @@ locals {
     if try(m.kind, "") != "CustomResourceDefinition" && try(m.kind, "") != "Namespace"
   ]
   metallb_native = [
-    for doc in split("\n---\n", file("${path.module}/metallb-native.yaml")) :
+    for doc in split("\n---\n", templatefile("${path.module}/metallb-native.yaml", {
+      metallb_controller_cpu_request = local.metallb_controller_cpu_request
+      metallb_controller_cpu_limit   = local.metallb_controller_cpu_limit
+      metallb_controller_mem_request = local.metallb_controller_mem_request
+      metallb_controller_mem_limit   = local.metallb_controller_mem_limit
+      metallb_speaker_cpu_request    = local.metallb_speaker_cpu_request
+      metallb_speaker_cpu_limit      = local.metallb_speaker_cpu_limit
+      metallb_speaker_mem_request    = local.metallb_speaker_mem_request
+      metallb_speaker_mem_limit      = local.metallb_speaker_mem_limit
+    })) :
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
   ]

@@ -20,6 +20,15 @@ locals {
   enable_kyverno_audit   = false
   enable_kyverno_enforce = false
 
+  metallb_controller_cpu_request = "50m"
+  metallb_controller_cpu_limit   = "200m"
+  metallb_controller_mem_request = "128Mi"
+  metallb_controller_mem_limit   = "128Mi"
+  metallb_speaker_cpu_request    = "50m"
+  metallb_speaker_cpu_limit      = "200m"
+  metallb_speaker_mem_request    = "128Mi"
+  metallb_speaker_mem_limit      = "128Mi"
+
   ingress_nginx_controller_cpu_request = "100m"
   ingress_nginx_controller_cpu_limit   = "500m"
   ingress_nginx_controller_mem_request = "512Mi"
