@@ -360,18 +360,22 @@ locals {
   rook_managed_workload_label_patches = {
     "deployment/csi-cephfsplugin-provisioner" = {
       resource = "deployment"
+      kind     = "Deployment"
       name     = "csi-cephfsplugin-provisioner"
     }
     "deployment/csi-rbdplugin-provisioner" = {
       resource = "deployment"
+      kind     = "Deployment"
       name     = "csi-rbdplugin-provisioner"
     }
     "daemonset/csi-cephfsplugin" = {
       resource = "daemonset"
+      kind     = "DaemonSet"
       name     = "csi-cephfsplugin"
     }
     "daemonset/csi-rbdplugin" = {
       resource = "daemonset"
+      kind     = "DaemonSet"
       name     = "csi-rbdplugin"
     }
   }
@@ -380,10 +384,6 @@ locals {
     metadata = {
       labels = {
         "app.kubernetes.io/part-of" = "rook-ceph"
-      }
-      annotations = {
-        "policy.pve-k8s-talos.io/allow-missing-probes" = "true"
-        "policy.pve-k8s-talos.io/exception-reason"     = "Rook-managed Ceph CSI sidecars do not expose Kubernetes-compatible readiness and liveness health endpoints."
       }
     }
     spec = {
@@ -474,4 +474,26 @@ resource "null_resource" "rook_managed_workload_labels" {
   depends_on = [
     kubernetes_manifest.rook_storageclass,
   ]
+}
+
+resource "kubernetes_annotations" "rook_managed_workload_probe_exceptions" {
+  for_each = local.rook_managed_workload_label_patches
+
+  api_version = "apps/v1"
+  kind        = each.value.kind
+
+  metadata {
+    namespace = local.effective_ceph_namespace
+    name      = each.value.name
+  }
+
+  annotations = {
+    "policy.pve-k8s-talos.io/allow-missing-probes" = "true"
+    "policy.pve-k8s-talos.io/exception-reason"     = "Rook-managed Ceph CSI sidecars do not expose Kubernetes-compatible readiness and liveness health endpoints."
+  }
+
+  field_manager = "opentofu-rook-exceptions"
+  force         = true
+
+  depends_on = [null_resource.rook_managed_workload_labels]
 }

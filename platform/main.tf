@@ -732,6 +732,21 @@ locals {
     ? local.rancher_managed_resource_patches_v212
     : local.rancher_managed_resource_patches_v214plus
   )
+
+  rancher_managed_probe_exceptions = {
+    "cattle-fleet-system/fleet-controller" = {
+      namespace = "cattle-fleet-system"
+      name      = "fleet-controller"
+    }
+    "cattle-fleet-system/gitjob" = {
+      namespace = "cattle-fleet-system"
+      name      = "gitjob"
+    }
+    "cattle-fleet-system/helmops" = {
+      namespace = "cattle-fleet-system"
+      name      = "helmops"
+    }
+  }
 }
 
 check "tls_source_valid" {
@@ -1179,6 +1194,28 @@ resource "null_resource" "rancher_managed_resource_patches" {
     null_resource.rancher_ready,
     null_resource.rancher_keycloakoidc_authconfig,
   ]
+}
+
+resource "kubernetes_annotations" "rancher_managed_probe_exceptions" {
+  for_each = !var.skip_platform && local.rancher_enabled ? local.rancher_managed_probe_exceptions : {}
+
+  api_version = "apps/v1"
+  kind        = "Deployment"
+
+  metadata {
+    namespace = each.value.namespace
+    name      = each.value.name
+  }
+
+  annotations = {
+    "policy.pve-k8s-talos.io/allow-missing-probes" = "true"
+    "policy.pve-k8s-talos.io/exception-reason"     = "Rancher-managed Fleet controllers do not expose supported Kubernetes readiness and liveness health endpoints."
+  }
+
+  field_manager = "opentofu-platform-exceptions"
+  force         = true
+
+  depends_on = [null_resource.rancher_managed_resource_patches]
 }
 
 resource "local_sensitive_file" "portainer_oauth_configure" {
