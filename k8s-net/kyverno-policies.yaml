@@ -1,0 +1,111 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-workload-resources
+  labels:
+    app.kubernetes.io/part-of: kyverno
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: k8s-net
+spec:
+  validationFailureAction: ${failure_action}
+  background: true
+  rules:
+    - name: require-resources-for-regular-containers
+      match:
+        any:
+          - resources:
+              kinds: [Deployment, StatefulSet, DaemonSet, Job, CronJob]
+      preconditions:
+        all:
+          - key: "{{ request.object.metadata.annotations.\"policy.pve-k8s-talos.io/allow-missing-resources\" || '' }}"
+            operator: NotEquals
+            value: "true"
+      validate:
+        message: Every container must define CPU and memory requests and limits, or use the approved resource exception.
+        foreach:
+          - list: "request.object.spec.template.spec.containers[]"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.resources.requests.cpu || '' }}"
+                    operator: Equals
+                    value: ""
+                  - key: "{{ element.resources.requests.memory || '' }}"
+                    operator: Equals
+                    value: ""
+                  - key: "{{ element.resources.limits.cpu || '' }}"
+                    operator: Equals
+                    value: ""
+                  - key: "{{ element.resources.limits.memory || '' }}"
+                    operator: Equals
+                    value: ""
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-service-probes
+  labels:
+    app.kubernetes.io/part-of: kyverno
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: k8s-net
+spec:
+  validationFailureAction: ${failure_action}
+  background: true
+  rules:
+    - name: require-readiness-and-liveness
+      match:
+        any:
+          - resources:
+              kinds: [Deployment, StatefulSet, DaemonSet]
+      preconditions:
+        all:
+          - key: "{{ request.object.metadata.annotations.\"policy.pve-k8s-talos.io/allow-missing-probes\" || '' }}"
+            operator: NotEquals
+            value: "true"
+      validate:
+        message: Every service container must define readiness and liveness probes, or use the approved probe exception.
+        foreach:
+          - list: "request.object.spec.template.spec.containers[]"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.readinessProbe || '' }}"
+                    operator: Equals
+                    value: ""
+                  - key: "{{ element.livenessProbe || '' }}"
+                    operator: Equals
+                    value: ""
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-workload-exception-reason
+  labels:
+    app.kubernetes.io/part-of: kyverno
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: k8s-net
+spec:
+  validationFailureAction: ${failure_action}
+  background: true
+  rules:
+    - name: require-reason-for-approved-exception
+      match:
+        any:
+          - resources:
+              kinds: [Deployment, StatefulSet, DaemonSet, Job, CronJob]
+      preconditions:
+        any:
+          - key: "{{ request.object.metadata.annotations.\"policy.pve-k8s-talos.io/allow-missing-resources\" || '' }}"
+            operator: Equals
+            value: "true"
+          - key: "{{ request.object.metadata.annotations.\"policy.pve-k8s-talos.io/allow-missing-probes\" || '' }}"
+            operator: Equals
+            value: "true"
+      validate:
+        message: An approved workload exception requires a non-empty exception-reason annotation.
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.object.metadata.annotations.\"policy.pve-k8s-talos.io/exception-reason\" || '' }}"
+                operator: Equals
+                value: ""

@@ -16,10 +16,14 @@ locals {
   metallb_pool_end   = "192.168.1.79"
   ingress_lb_ip      = "192.168.1.70"
 
-  ingress_nginx_controller_cpu_request    = "100m"
-  ingress_nginx_controller_cpu_limit      = "500m"
-  ingress_nginx_controller_mem_request    = "512Mi"
-  ingress_nginx_controller_mem_limit      = "512Mi"
+  # Kyverno is absent unless exactly one mode is enabled for a cluster.
+  enable_kyverno_audit   = false
+  enable_kyverno_enforce = false
+
+  ingress_nginx_controller_cpu_request = "100m"
+  ingress_nginx_controller_cpu_limit   = "500m"
+  ingress_nginx_controller_mem_request = "512Mi"
+  ingress_nginx_controller_mem_limit   = "512Mi"
   # The OTLP collector is provided by the monitoring deployment.
   # Tracing is enabled by default. Uncomment to disable it.
   # ingress_nginx_tracing_enabled = false

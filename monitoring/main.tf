@@ -12,6 +12,10 @@ terraform {
       source  = "hashicorp/null"
       version = ">= 3.2.4"
     }
+    helm = {
+      source  = "hashicorp/helm"
+      version = ">= 3.0.0"
+    }
   }
 }
 
@@ -51,7 +55,7 @@ variable "constants" {
 }
 
 data "terraform_remote_state" "identity" {
-  count = trimspace(try(local.grafana_auth_keycloak_realm, "")) != "" || trimspace(try(local.prometheus_auth_keycloak_realm, "")) != "" || local.otlp_public_enabled_value ? 1 : 0
+  count = trimspace(try(local.grafana_auth_keycloak_realm, "")) != "" || trimspace(try(local.prometheus_auth_keycloak_realm, "")) != "" || local.otlp_public_enabled_value || local.enable_policy_reporter_value ? 1 : 0
 
   backend = "local"
   config = {
@@ -63,9 +67,22 @@ provider "kubernetes" {
   config_path = abspath("${path.module}/${var.kubeconfig_path}")
 }
 
+provider "helm" {
+  kubernetes = {
+    config_path = abspath("${path.module}/${var.kubeconfig_path}")
+  }
+}
+
 locals {
-  cluster_credentials                           = try(jsondecode(file("${path.module}/credentials.json")), {})
-  monitoring_constants_source                   = file("${path.module}/constants.tf")
+  cluster_credentials         = try(jsondecode(file("${path.module}/credentials.json")), {})
+  monitoring_constants_source = file("${path.module}/constants.tf")
+  enable_policy_reporter_value = can(regex("(?m)^\\s*enable_policy_reporter\\s*=\\s*(true|false)\\s*$", local.monitoring_constants_source)[0]) ? (
+    tobool(regex("(?m)^\\s*enable_policy_reporter\\s*=\\s*(true|false)\\s*$", local.monitoring_constants_source)[0])
+  ) : false
+  policy_reporter_hostname_value                = try(local.policy_reporter_hostname, "")
+  policy_reporter_tls_secret_name_value         = try(local.policy_reporter_tls_secret_name, "")
+  policy_reporter_auth_keycloak_realm_value     = trimspace(try(local.policy_reporter_auth_keycloak_realm, ""))
+  policy_reporter_auth_allowed_groups_value     = distinct(compact(try(local.policy_reporter_auth_allowed_groups, [])))
   monitoring_credentials                        = try(local.cluster_credentials.monitoring, {})
   monitoring_grafana_admin_password             = try(local.monitoring_credentials.grafana_admin_password, "")
   monitoring_grafana_postgres_password          = try(local.monitoring_credentials.grafana_postgres_password, "")
@@ -366,7 +383,7 @@ locals {
   )
   grafana_go_mem_limit_mib         = floor(local.grafana_mem_limit_mib * local.grafana_go_mem_limit_percent_value / 100)
   grafana_go_mem_limit             = format("%dMiB", local.grafana_go_mem_limit_mib)
-  monitoring_keycloak_auth_enabled = local.grafana_auth_enabled || local.prometheus_auth_enabled || local.otlp_public_enabled_value
+  monitoring_keycloak_auth_enabled = local.grafana_auth_enabled || local.prometheus_auth_enabled || local.otlp_public_enabled_value || local.enable_policy_reporter_value
   identity_realm_groups = local.monitoring_keycloak_auth_enabled ? try(
     data.terraform_remote_state.identity[0].outputs.keycloak_realm_groups,
     {}
@@ -404,9 +421,22 @@ locals {
     local.identity_oidc_client_secrets[format("%s/prometheus", local.prometheus_auth_keycloak_realm_value)],
     ""
   ) : ""
-  grafana_oidc_auth_url  = local.grafana_oidc_issuer != "" ? format("%s/protocol/openid-connect/auth", local.grafana_oidc_issuer) : ""
-  grafana_oidc_token_url = local.grafana_oidc_issuer != "" ? format("%s/protocol/openid-connect/token", local.grafana_oidc_issuer) : ""
-  grafana_oidc_api_url   = local.grafana_oidc_issuer != "" ? format("%s/protocol/openid-connect/userinfo", local.grafana_oidc_issuer) : ""
+  policy_reporter_oidc_issuer = local.enable_policy_reporter_value ? try(
+    local.identity_oidc_metadata[local.policy_reporter_auth_keycloak_realm_value].issuer_url,
+    ""
+  ) : ""
+  policy_reporter_oidc_client_id = local.enable_policy_reporter_value ? try(
+    local.identity_oidc_metadata[local.policy_reporter_auth_keycloak_realm_value].clients["policy-reporter"].client_id,
+    ""
+  ) : ""
+  policy_reporter_oidc_client_secret = local.enable_policy_reporter_value ? try(
+    local.identity_oidc_client_secrets[format("%s/policy-reporter", local.policy_reporter_auth_keycloak_realm_value)],
+    ""
+  ) : ""
+  policy_reporter_auth_ca_content = local.enable_policy_reporter_value ? try(file(local.root_ca_crt), "") : ""
+  grafana_oidc_auth_url           = local.grafana_oidc_issuer != "" ? format("%s/protocol/openid-connect/auth", local.grafana_oidc_issuer) : ""
+  grafana_oidc_token_url          = local.grafana_oidc_issuer != "" ? format("%s/protocol/openid-connect/token", local.grafana_oidc_issuer) : ""
+  grafana_oidc_api_url            = local.grafana_oidc_issuer != "" ? format("%s/protocol/openid-connect/userinfo", local.grafana_oidc_issuer) : ""
   grafana_oidc_jwk_set_url = local.grafana_oidc_issuer != "" ? format(
     "%s/protocol/openid-connect/certs",
     local.grafana_oidc_issuer
@@ -468,6 +498,11 @@ locals {
   available_identity_realms = keys(local.identity_oidc_metadata)
   monitoring_tls_secrets = concat(
     local.tls_secrets,
+    local.enable_policy_reporter_value ? [{
+      certificate = local.default_certificate_name
+      namespace   = "monitoring"
+      secret_name = local.policy_reporter_tls_secret_name_value
+    }] : [],
     local.otlp_public_enabled_value ? [{
       certificate = local.default_certificate_name
       namespace   = "monitoring"
@@ -1094,6 +1129,22 @@ check "prometheus_auth_groups" {
   }
 }
 
+check "policy_reporter_configuration" {
+  assert {
+    condition = !local.enable_policy_reporter_value || (
+      trimspace(local.policy_reporter_hostname_value) != "" &&
+      trimspace(local.policy_reporter_tls_secret_name_value) != "" &&
+      trimspace(local.policy_reporter_auth_keycloak_realm_value) != "" &&
+      length(local.policy_reporter_auth_allowed_groups_value) > 0 &&
+      trimspace(local.policy_reporter_oidc_issuer) != "" &&
+      trimspace(local.policy_reporter_oidc_client_id) != "" &&
+      trimspace(local.policy_reporter_oidc_client_secret) != "" &&
+      trimspace(local.policy_reporter_auth_ca_content) != ""
+    )
+    error_message = "Enabled Policy Reporter requires hostname, TLS, Keycloak realm/groups, OIDC client credentials, and a trusted root CA."
+  }
+}
+
 check "otlp_public_configuration" {
   assert {
     condition = !local.otlp_public_enabled_value || (
@@ -1394,6 +1445,89 @@ resource "kubernetes_secret_v1" "preissued_tls" {
   depends_on = [
     kubernetes_manifest.monitoring_namespace,
     kubernetes_manifest.extra_namespaces,
+  ]
+}
+
+resource "kubernetes_secret_v1" "policy_reporter_oidc_ca" {
+  count = local.enable_policy_reporter_value ? 1 : 0
+
+  metadata {
+    name      = "policy-reporter-oidc-ca"
+    namespace = "monitoring"
+  }
+
+  data = { "ca.crt" = local.policy_reporter_auth_ca_content }
+  type = "Opaque"
+
+  depends_on = [kubernetes_manifest.monitoring_namespace]
+}
+
+resource "helm_release" "policy_reporter" {
+  count = local.enable_policy_reporter_value ? 1 : 0
+
+  name       = "policy-reporter"
+  namespace  = "monitoring"
+  repository = "oci://ghcr.io/kyverno/charts"
+  chart      = "policy-reporter"
+  version    = "3.7.4"
+  wait       = true
+  timeout    = 600
+  atomic     = true
+
+  values = [yamlencode({
+    priorityClassName = "infra-observability"
+    resources = {
+      requests = { cpu = "100m", memory = "256Mi" }
+      limits   = { cpu = "500m", memory = "256Mi" }
+    }
+    ui = {
+      enabled           = true
+      replicaCount      = 1
+      priorityClassName = "infra-observability"
+      resources = {
+        requests = { cpu = "100m", memory = "256Mi" }
+        limits   = { cpu = "500m", memory = "256Mi" }
+      }
+      openIDConnect = {
+        enabled      = true
+        discoveryUrl = format("%s/.well-known/openid-configuration", local.policy_reporter_oidc_issuer)
+        callbackUrl  = format("https://%s/callback", local.policy_reporter_hostname_value)
+        clientId     = local.policy_reporter_oidc_client_id
+        clientSecret = local.policy_reporter_oidc_client_secret
+        groupClaim   = "groups"
+        scopes       = ["openid", "profile", "email"]
+        certificate  = "/run/secrets/policy-reporter-oidc-ca/ca.crt"
+      }
+      boards  = { accessControl = { groups = local.policy_reporter_auth_allowed_groups_value } }
+      sources = [{ name = "kyverno", type = "result", exceptions = false }]
+      ingress = {
+        enabled     = true
+        className   = "nginx"
+        annotations = { "nginx.ingress.kubernetes.io/ssl-redirect" = "true" }
+        hosts       = [{ host = local.policy_reporter_hostname_value, paths = [{ path = "/", pathType = "Prefix" }] }]
+        tls         = [{ secretName = local.policy_reporter_tls_secret_name_value, hosts = [local.policy_reporter_hostname_value] }]
+      }
+      extraVolumes = {
+        volumeMounts = [{ name = "policy-reporter-oidc-ca", mountPath = "/run/secrets/policy-reporter-oidc-ca", readOnly = true }]
+        volumes      = [{ name = "policy-reporter-oidc-ca", secret = { secretName = "policy-reporter-oidc-ca" } }]
+      }
+    }
+    plugin = { kyverno = {
+      enabled           = true
+      replicaCount      = 1
+      priorityClassName = "infra-observability"
+      resources = {
+        requests = { cpu = "100m", memory = "256Mi" }
+        limits   = { cpu = "500m", memory = "256Mi" }
+      }
+    } }
+  })]
+
+  depends_on = [
+    kubernetes_secret_v1.policy_reporter_oidc_ca,
+    kubernetes_secret_v1.preissued_tls,
+    kubernetes_manifest.monitoring_certificates,
+    null_resource.ingress_nginx_webhook_ready,
   ]
 }
 

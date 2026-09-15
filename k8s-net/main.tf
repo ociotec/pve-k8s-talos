@@ -20,6 +20,10 @@ terraform {
       source  = "hashicorp/null"
       version = ">= 3.2.4"
     }
+    helm = {
+      source  = "hashicorp/helm"
+      version = ">= 3.0.0"
+    }
   }
 }
 
@@ -84,6 +88,12 @@ provider "kubernetes" {
   config_path = abspath("${path.module}/${var.kubeconfig_path}")
 }
 
+provider "helm" {
+  kubernetes = {
+    config_path = abspath("${path.module}/${var.kubeconfig_path}")
+  }
+}
+
 provider "proxmox" {
   endpoint  = var.proxmox_endpoint
   api_token = var.proxmox_api_token
@@ -107,6 +117,25 @@ locals {
   }
 
   constants_source = file("${path.module}/constants.tf")
+  enable_kyverno_audit_value = can(regex("(?m)^\\s*enable_kyverno_audit\\s*=\\s*(true|false)\\s*$", local.constants_source)[0]) ? (
+    tobool(regex("(?m)^\\s*enable_kyverno_audit\\s*=\\s*(true|false)\\s*$", local.constants_source)[0])
+  ) : false
+  enable_kyverno_enforce_value = can(regex("(?m)^\\s*enable_kyverno_enforce\\s*=\\s*(true|false)\\s*$", local.constants_source)[0]) ? (
+    tobool(regex("(?m)^\\s*enable_kyverno_enforce\\s*=\\s*(true|false)\\s*$", local.constants_source)[0])
+  ) : false
+  kyverno_enabled_value  = local.enable_kyverno_audit_value || local.enable_kyverno_enforce_value
+  kyverno_failure_action = local.enable_kyverno_enforce_value ? "Enforce" : "Audit"
+  kyverno_resources = local.enable_kyverno_enforce_value ? {
+    admission_cpu_request = "500m"
+    admission_memory      = "768Mi"
+    reports_cpu_request   = "200m"
+    reports_memory        = "384Mi"
+    } : {
+    admission_cpu_request = "250m"
+    admission_memory      = "512Mi"
+    reports_cpu_request   = "150m"
+    reports_memory        = "256Mi"
+  }
   node_remediation_enabled_value = can(regex("(?m)^\\s*node_remediation_enabled\\s*=\\s*(true|false)\\s*$", local.constants_source)[0]) ? (
     tobool(regex("(?m)^\\s*node_remediation_enabled\\s*=\\s*(true|false)\\s*$", local.constants_source)[0])
   ) : false
@@ -220,6 +249,12 @@ locals {
   cert_manager = [
     for doc in split("\n---\n", file("${path.module}/cert-manager.yaml")) :
     yamldecode(doc)
+    if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
+  ]
+  kyverno_policies = [
+    for doc in split("\n---\n", templatefile("${path.module}/kyverno-policies.yaml", {
+      failure_action = local.kyverno_failure_action
+    })) : yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
   ]
   cert_manager_crds = [
@@ -534,6 +569,13 @@ check "tls_source_valid" {
   }
 }
 
+check "kyverno_mode" {
+  assert {
+    condition     = !(local.enable_kyverno_audit_value && local.enable_kyverno_enforce_value)
+    error_message = "enable_kyverno_audit and enable_kyverno_enforce are mutually exclusive."
+  }
+}
+
 check "node_remediation_configuration" {
   assert {
     condition = !local.node_remediation_enabled_value || (
@@ -676,6 +718,70 @@ resource "kubernetes_manifest" "infrastructure_priority_classes" {
     preemptionPolicy = "PreemptLowerPriority"
     description      = each.value.description
   }
+}
+
+resource "helm_release" "kyverno" {
+  count = local.kyverno_enabled_value ? 1 : 0
+
+  name             = "kyverno"
+  namespace        = "kyverno"
+  create_namespace = true
+  repository       = "oci://ghcr.io/kyverno/charts"
+  chart            = "kyverno"
+  version          = "3.7.0"
+  wait             = true
+  timeout          = 600
+  atomic           = true
+  cleanup_on_fail  = true
+
+  values = [yamlencode({
+    admissionController = {
+      replicas          = 2
+      priorityClassName = "infra-high"
+      resources = {
+        requests = { cpu = local.kyverno_resources.admission_cpu_request, memory = local.kyverno_resources.admission_memory }
+        limits   = { cpu = "1", memory = local.kyverno_resources.admission_memory }
+      }
+      nodeAffinity = {
+        requiredDuringSchedulingIgnoredDuringExecution = {
+          nodeSelectorTerms = [{ matchExpressions = [{ key = "node-role.kubernetes.io/control-plane", operator = "DoesNotExist" }] }]
+        }
+      }
+      podDisruptionBudget = { enabled = true, minAvailable = 1 }
+    }
+    reportsController = {
+      replicas          = 1
+      priorityClassName = "infra-high"
+      resources = {
+        requests = { cpu = local.kyverno_resources.reports_cpu_request, memory = local.kyverno_resources.reports_memory }
+        limits   = { cpu = "500m", memory = local.kyverno_resources.reports_memory }
+      }
+      nodeAffinity = {
+        requiredDuringSchedulingIgnoredDuringExecution = {
+          nodeSelectorTerms = [{ matchExpressions = [{ key = "node-role.kubernetes.io/control-plane", operator = "DoesNotExist" }] }]
+        }
+      }
+    }
+    backgroundController = { enabled = false }
+    cleanupController    = { enabled = false }
+  })]
+
+  depends_on = [kubernetes_manifest.infrastructure_priority_classes]
+}
+
+resource "kubernetes_manifest" "kyverno_policies" {
+  for_each = local.kyverno_enabled_value ? {
+    for policy in local.kyverno_policies : policy.metadata.name => policy
+  } : {}
+
+  manifest = each.value
+
+  field_manager {
+    name            = "opentofu"
+    force_conflicts = true
+  }
+
+  depends_on = [helm_release.kyverno]
 }
 
 resource "kubernetes_manifest" "cert_manager_crds" {

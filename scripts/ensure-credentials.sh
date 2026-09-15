@@ -186,6 +186,7 @@ ensure_service_credentials() {
     ensure_json_string ".monitoring.prometheus_oauth_cookie_secret" 32
     ensure_oidc_client_secret "$(tf_string_value "${cluster_monitoring_constants_path}" grafana_auth_keycloak_realm)" "grafana"
     ensure_oidc_client_secret "$(tf_string_value "${cluster_monitoring_constants_path}" prometheus_auth_keycloak_realm)" "prometheus"
+    ensure_oidc_client_secret "$(tf_string_value "${cluster_monitoring_constants_path}" policy_reporter_auth_keycloak_realm)" "policy-reporter"
   fi
 
   if [[ -r "${cluster_s3_storage_constants_path}" ]]; then

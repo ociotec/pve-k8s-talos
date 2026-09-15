@@ -1989,6 +1989,7 @@ prepare_k8s_net_workspace() {
   link_into_workspace "${repo_root}/k8s-net/metallb-native.yaml" "${workspace}/metallb-native.yaml"
   link_into_workspace "${repo_root}/k8s-net/metallb-pool.yaml" "${workspace}/metallb-pool.yaml"
   link_into_workspace "${repo_root}/k8s-net/metrics-server.yaml" "${workspace}/metrics-server.yaml"
+  link_into_workspace "${repo_root}/k8s-net/kyverno-policies.yaml" "${workspace}/kyverno-policies.yaml"
   link_into_workspace "${repo_root}/k8s-net/node-remediation-controller.py" "${workspace}/node-remediation-controller.py"
   link_into_workspace "${repo_root}/k8s-net/node-remediation.yaml" "${workspace}/node-remediation.yaml"
   link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/constants.tf"

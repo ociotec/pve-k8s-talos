@@ -1,0 +1,22 @@
+{
+  "annotations": {"list": []},
+  "description": "Operational view of Kyverno admission availability, latency, policy outcomes, and policy-report volume.",
+  "editable": true,
+  "graphTooltip": 0,
+  "panels": [
+    {"datasource":{"type":"prometheus","uid":"${datasource}"},"fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"thresholds":{"mode":"absolute","steps":[{"color":"red","value":null},{"color":"green","value":1}]},"unit":"none"},"overrides":[]},"gridPos":{"h":4,"w":4,"x":0,"y":0},"id":1,"options":{"colorMode":"background","graphMode":"none","reduceOptions":{"calcs":["min"],"fields":"","values":false}},"targets":[{"expr":"min(up{namespace=\"kyverno\"}) or on() vector(0)","refId":"A"}],"title":"Kyverno targets up","type":"stat"},
+    {"datasource":{"type":"prometheus","uid":"${datasource}"},"fieldConfig":{"defaults":{"unit":"ops"},"overrides":[]},"gridPos":{"h":4,"w":4,"x":4,"y":0},"id":2,"options":{"colorMode":"value","graphMode":"area","reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false}},"targets":[{"expr":"sum(rate(kyverno_admission_requests_total[5m])) or vector(0)","refId":"A"}],"title":"Admission requests / second","type":"stat"},
+    {"datasource":{"type":"prometheus","uid":"${datasource}"},"fieldConfig":{"defaults":{"unit":"s"},"overrides":[]},"gridPos":{"h":4,"w":4,"x":8,"y":0},"id":3,"options":{"colorMode":"value","graphMode":"area","reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false}},"targets":[{"expr":"histogram_quantile(0.99, sum by (le) (rate(kyverno_admission_review_duration_seconds_bucket[5m])))","refId":"A"}],"title":"Admission review p99","type":"stat"},
+    {"datasource":{"type":"prometheus","uid":"${datasource}"},"fieldConfig":{"defaults":{"unit":"short"},"overrides":[]},"gridPos":{"h":8,"w":12,"x":0,"y":4},"id":4,"options":{"legend":{"displayMode":"table","placement":"bottom"},"tooltip":{"mode":"multi","sort":"desc"}},"targets":[{"expr":"sum by (policy_name, rule_name, result) (increase(kyverno_policy_results_total[24h]))","legendFormat":"{{policy_name}} / {{rule_name}} — {{result}}","refId":"A"}],"title":"Policy results in the last 24 hours","type":"timeseries"},
+    {"datasource":{"type":"prometheus","uid":"${datasource}"},"fieldConfig":{"defaults":{"unit":"s"},"overrides":[]},"gridPos":{"h":8,"w":12,"x":12,"y":4},"id":5,"options":{"legend":{"displayMode":"table","placement":"bottom"},"tooltip":{"mode":"multi","sort":"desc"}},"targets":[{"expr":"histogram_quantile(0.99, sum by (le, policy_name, rule_name) (rate(kyverno_policy_execution_duration_seconds_bucket[5m])))","legendFormat":"{{policy_name}} / {{rule_name}}","refId":"A"}],"title":"Policy execution p99","type":"timeseries"},
+    {"datasource":{"type":"prometheus","uid":"${datasource}"},"fieldConfig":{"defaults":{"unit":"bytes"},"overrides":[]},"gridPos":{"h":8,"w":12,"x":0,"y":12},"id":6,"options":{"legend":{"displayMode":"table","placement":"bottom"},"tooltip":{"mode":"multi","sort":"desc"}},"targets":[{"expr":"sum by (pod) (container_memory_working_set_bytes{namespace=\"kyverno\",container!~\"POD|\"})","legendFormat":"{{pod}}","refId":"A"}],"title":"Kyverno memory by pod","type":"timeseries"},
+    {"datasource":{"type":"prometheus","uid":"${datasource}"},"fieldConfig":{"defaults":{"unit":"cores"},"overrides":[]},"gridPos":{"h":8,"w":12,"x":12,"y":12},"id":7,"options":{"legend":{"displayMode":"table","placement":"bottom"},"tooltip":{"mode":"multi","sort":"desc"}},"targets":[{"expr":"sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"kyverno\",container!~\"POD|\"}[5m]))","legendFormat":"{{pod}}","refId":"A"}],"title":"Kyverno CPU by pod","type":"timeseries"}
+  ],
+  "schemaVersion": 41,
+  "tags": ["kubernetes", "k8s-net", "kyverno"],
+  "templating":{"list":[{"current":{"text":"Prometheus","value":"prometheus"},"hide":0,"label":"Datasource","name":"datasource","query":"prometheus","refresh":1,"type":"datasource"}]},
+  "time":{"from":"now-24h","to":"now"},
+  "title":"Kyverno policy engine",
+  "uid":"kyverno-policy-engine",
+  "version":1
+}
