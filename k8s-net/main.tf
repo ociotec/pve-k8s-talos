@@ -770,9 +770,9 @@ resource "helm_release" "kyverno" {
 }
 
 resource "kubernetes_manifest" "kyverno_policies" {
-  for_each = local.kyverno_enabled_value ? {
-    for policy in local.kyverno_policies : policy.metadata.name => policy
-  } : {}
+  for_each = local.kyverno_enabled_value ? tomap({
+    for index, policy in local.kyverno_policies : tostring(index) => policy
+  }) : tomap({})
 
   manifest = each.value
 
