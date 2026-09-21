@@ -253,6 +253,57 @@ locals {
     local.grafana_dashboard_provisioning_pvc_folders_from_files_structure,
     true
   )
+  # These settings are parsed from the cluster constants source so older real
+  # cluster repositories can use the defaults without declaring new locals.
+  grafana_dynamic_provisioning_enabled_match = regexall(
+    "(?m)^\\s*grafana_dynamic_provisioning_enabled\\s*=\\s*(true|false)\\s*$",
+    local.monitoring_constants_source
+  )
+  grafana_dynamic_provisioning_enabled_value = length(local.grafana_dynamic_provisioning_enabled_match) > 0 ? (
+    tobool(local.grafana_dynamic_provisioning_enabled_match[0][0])
+  ) : true
+  grafana_provisioning_sidecar_image_tag_match = regexall(
+    "(?m)^\\s*grafana_provisioning_sidecar_image_tag\\s*=\\s*\"([^\"]+)\"\\s*$",
+    local.monitoring_constants_source
+  )
+  grafana_provisioning_sidecar_image_tag_value = length(local.grafana_provisioning_sidecar_image_tag_match) > 0 ? (
+    local.grafana_provisioning_sidecar_image_tag_match[0][0]
+  ) : "2.10.1"
+  grafana_provisioning_sidecar_cpu_request_match = regexall(
+    "(?m)^\\s*grafana_provisioning_sidecar_cpu_request\\s*=\\s*\"([^\"]+)\"\\s*$",
+    local.monitoring_constants_source
+  )
+  grafana_provisioning_sidecar_cpu_request_value = length(local.grafana_provisioning_sidecar_cpu_request_match) > 0 ? (
+    local.grafana_provisioning_sidecar_cpu_request_match[0][0]
+  ) : "20m"
+  grafana_provisioning_sidecar_cpu_limit_match = regexall(
+    "(?m)^\\s*grafana_provisioning_sidecar_cpu_limit\\s*=\\s*\"([^\"]+)\"\\s*$",
+    local.monitoring_constants_source
+  )
+  grafana_provisioning_sidecar_cpu_limit_value = length(local.grafana_provisioning_sidecar_cpu_limit_match) > 0 ? (
+    local.grafana_provisioning_sidecar_cpu_limit_match[0][0]
+  ) : "100m"
+  grafana_provisioning_sidecar_mem_request_match = regexall(
+    "(?m)^\\s*grafana_provisioning_sidecar_mem_request\\s*=\\s*\"([^\"]+)\"\\s*$",
+    local.monitoring_constants_source
+  )
+  grafana_provisioning_sidecar_mem_request_value = length(local.grafana_provisioning_sidecar_mem_request_match) > 0 ? (
+    local.grafana_provisioning_sidecar_mem_request_match[0][0]
+  ) : "128Mi"
+  grafana_provisioning_sidecar_mem_limit_match = regexall(
+    "(?m)^\\s*grafana_provisioning_sidecar_mem_limit\\s*=\\s*\"([^\"]+)\"\\s*$",
+    local.monitoring_constants_source
+  )
+  grafana_provisioning_sidecar_mem_limit_value = length(local.grafana_provisioning_sidecar_mem_limit_match) > 0 ? (
+    local.grafana_provisioning_sidecar_mem_limit_match[0][0]
+  ) : "128Mi"
+  grafana_dynamic_provisioning_update_interval_seconds_match = regexall(
+    "(?m)^\\s*grafana_dynamic_provisioning_update_interval_seconds\\s*=\\s*([0-9]+)\\s*$",
+    local.monitoring_constants_source
+  )
+  grafana_dynamic_provisioning_update_interval_seconds_value = length(local.grafana_dynamic_provisioning_update_interval_seconds_match) > 0 ? (
+    tonumber(local.grafana_dynamic_provisioning_update_interval_seconds_match[0][0])
+  ) : 10
   worker_vms = {
     for name, vm in var.vms : name => vm
     if try(var.resources[vm.type].k8s_node, "") == "worker"
@@ -751,6 +802,12 @@ locals {
       )
       grafana_dashboard_provisioning_pvc_size         = local.grafana_dashboard_provisioning_pvc_size_value
       grafana_dashboard_provisioning_pvc_access_modes = local.grafana_dashboard_provisioning_pvc_access_modes_value
+      grafana_dynamic_provisioning_enabled            = local.grafana_dynamic_provisioning_enabled_value
+      grafana_provisioning_sidecar_image_tag          = local.grafana_provisioning_sidecar_image_tag_value
+      grafana_provisioning_sidecar_cpu_request        = local.grafana_provisioning_sidecar_cpu_request_value
+      grafana_provisioning_sidecar_cpu_limit          = local.grafana_provisioning_sidecar_cpu_limit_value
+      grafana_provisioning_sidecar_mem_request        = local.grafana_provisioning_sidecar_mem_request_value
+      grafana_provisioning_sidecar_mem_limit          = local.grafana_provisioning_sidecar_mem_limit_value
     })) :
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
@@ -957,6 +1014,8 @@ locals {
             grafana_dashboard_provisioning_pvc_folders_from_files_structure = (
               local.grafana_dashboard_provisioning_pvc_folders_from_files_structure_value
             )
+            grafana_dynamic_provisioning_enabled                 = local.grafana_dynamic_provisioning_enabled_value
+            grafana_dynamic_provisioning_update_interval_seconds = local.grafana_dynamic_provisioning_update_interval_seconds_value
           })
         }
       },
@@ -1097,6 +1156,20 @@ check "grafana_dashboard_provisioning_pvc_required" {
       length(local.grafana_dashboard_provisioning_pvc_access_modes_value) > 0
     )
     error_message = "Dashboard provisioning PVC requires grafana_dashboard_provisioning_pvc_name, grafana_dashboard_provisioning_pvc_storage_class, grafana_dashboard_provisioning_pvc_size, and at least one access mode."
+  }
+}
+
+check "grafana_dynamic_provisioning_settings" {
+  assert {
+    condition = !local.grafana_dynamic_provisioning_enabled_value || (
+      trimspace(local.grafana_provisioning_sidecar_image_tag_value) != "" &&
+      trimspace(local.grafana_provisioning_sidecar_cpu_request_value) != "" &&
+      trimspace(local.grafana_provisioning_sidecar_cpu_limit_value) != "" &&
+      trimspace(local.grafana_provisioning_sidecar_mem_request_value) != "" &&
+      local.grafana_provisioning_sidecar_mem_request_value == local.grafana_provisioning_sidecar_mem_limit_value &&
+      local.grafana_dynamic_provisioning_update_interval_seconds_value > 0
+    )
+    error_message = "Dynamic Grafana provisioning requires a sidecar image tag, non-empty CPU/memory resources, equal memory request and limit, and a positive dashboard update interval."
   }
 }
 

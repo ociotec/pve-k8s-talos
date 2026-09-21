@@ -111,6 +111,16 @@ locals {
   grafana_auth_allow_sign_up            = true
   grafana_auth_ca_secret_name           = "grafana-oauth-ca"
 
+  # Watches labeled ConfigMaps in every namespace and hot-reloads
+  # dashboards, data sources, and Grafana-managed alerting resources.
+  grafana_dynamic_provisioning_enabled                 = true
+  grafana_provisioning_sidecar_image_tag               = "2.10.1"
+  grafana_provisioning_sidecar_cpu_request             = "20m"
+  grafana_provisioning_sidecar_cpu_limit               = "100m"
+  grafana_provisioning_sidecar_mem_request             = "128Mi"
+  grafana_provisioning_sidecar_mem_limit               = "128Mi"
+  grafana_dynamic_provisioning_update_interval_seconds = 10
+
   grafana_dashboard_provisioning_enabled           = true
   grafana_dashboard_provisioning_pvc_create        = true
   grafana_dashboard_provisioning_pvc_name          = "dashboards-provisioning"
