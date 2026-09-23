@@ -111,14 +111,15 @@ locals {
   grafana_auth_allow_sign_up            = true
   grafana_auth_ca_secret_name           = "grafana-oauth-ca"
 
-  # Install the cluster-wide Grafana Operator controller and CRDs through Helm.
-  # Grafana itself remains independently managed until it is registered later.
-  grafana_operator_enabled       = true
-  grafana_operator_chart_version = "5.25.0"
-  grafana_operator_cpu_request   = "100m"
-  grafana_operator_cpu_limit     = "500m"
-  grafana_operator_mem_request   = "256Mi"
-  grafana_operator_mem_limit     = "256Mi"
+  # Install the cluster-wide Grafana Operator through Helm and register the
+  # existing platform-managed Grafana without transferring workload ownership.
+  grafana_operator_enabled                    = true
+  grafana_operator_register_existing_instance = true
+  grafana_operator_chart_version              = "5.25.0"
+  grafana_operator_cpu_request                = "100m"
+  grafana_operator_cpu_limit                  = "500m"
+  grafana_operator_mem_request                = "256Mi"
+  grafana_operator_mem_limit                  = "256Mi"
 
   grafana_dashboard_provisioning_enabled           = true
   grafana_dashboard_provisioning_pvc_create        = true

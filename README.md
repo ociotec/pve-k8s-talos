@@ -596,12 +596,17 @@ When `grafana_auth_keycloak_realm` is set in `monitoring_constants.tf`, OpenTofu
 
 Set `grafana_operator_enabled = true` to install Grafana Operator and its CRDs
 from the pinned Helm chart. The operator watches Grafana custom resources in
-all namespaces and runs with `infra-observability` priority. Enabling it only
-installs the controller and APIs: it does not take ownership of the existing
-Grafana Deployment or register that instance automatically. CRDs are rendered
-as Helm-managed templates so chart upgrades can update their schemas, and are
-retained by the chart if the release is removed. Do not disable the operator
-while managed Grafana resources still depend on its finalizers.
+all namespaces and runs with `infra-observability` priority. Set
+`grafana_operator_register_existing_instance = true` to add the existing
+Grafana as the external `Grafana/grafana-primary` instance selected by the
+`grafana/instance: primary` label. Registration references the existing
+`grafana-admin` Secret and does not transfer ownership of the Grafana workload
+to the operator. Resources in other namespaces must use that instance selector
+and set `spec.allowCrossNamespaceImport: true`. CRDs are rendered as
+Helm-managed templates so chart upgrades can update their schemas, and are
+retained by the chart if the release is removed. Delete managed Grafana
+resources before disabling registration or the operator so their finalizers
+can complete remote cleanup.
 
 When `prometheus_auth_keycloak_realm` is set in `monitoring_constants.tf`, OpenTofu deploys an `oauth2-proxy` instance for Prometheus and protects the Prometheus ingress with ingress-nginx external auth annotations. The selected Keycloak realm must expose a confidential `prometheus` OIDC client with redirect URI `https://<prometheus-host>/oauth2/callback`. Use `prometheus_auth_allowed_groups` to restrict access.
 

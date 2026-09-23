@@ -86,6 +86,13 @@ locals {
   grafana_operator_enabled_value = length(local.grafana_operator_enabled_match) > 0 ? (
     tobool(local.grafana_operator_enabled_match[0][0])
   ) : false
+  grafana_operator_register_existing_instance_match = regexall(
+    "(?m)^\\s*grafana_operator_register_existing_instance\\s*=\\s*(true|false)\\s*$",
+    local.monitoring_constants_source,
+  )
+  grafana_operator_register_existing_instance_value = length(local.grafana_operator_register_existing_instance_match) > 0 ? (
+    tobool(local.grafana_operator_register_existing_instance_match[0][0])
+  ) : false
   grafana_operator_chart_version_match = regexall(
     "(?m)^\\s*grafana_operator_chart_version\\s*=\\s*\"([^\"]+)\"\\s*$",
     local.monitoring_constants_source,
@@ -1191,14 +1198,18 @@ check "grafana_auth_groups" {
 
 check "grafana_operator_configuration" {
   assert {
-    condition = !local.grafana_operator_enabled_value || (
-      trimspace(local.grafana_operator_chart_version_value) != "" &&
-      trimspace(local.grafana_operator_cpu_request_value) != "" &&
-      trimspace(local.grafana_operator_cpu_limit_value) != "" &&
-      trimspace(local.grafana_operator_mem_request_value) != "" &&
-      local.grafana_operator_mem_request_value == local.grafana_operator_mem_limit_value
+    condition = (
+      !local.grafana_operator_register_existing_instance_value || local.grafana_operator_enabled_value
+      ) && (
+      !local.grafana_operator_enabled_value || (
+        trimspace(local.grafana_operator_chart_version_value) != "" &&
+        trimspace(local.grafana_operator_cpu_request_value) != "" &&
+        trimspace(local.grafana_operator_cpu_limit_value) != "" &&
+        trimspace(local.grafana_operator_mem_request_value) != "" &&
+        local.grafana_operator_mem_request_value == local.grafana_operator_mem_limit_value
+      )
     )
-    error_message = "Enabled Grafana Operator requires a chart version and CPU/memory resources; memory request and limit must be equal."
+    error_message = "Grafana registration requires the operator; an enabled operator requires a chart version and CPU/memory resources, with equal memory request and limit."
   }
 }
 
@@ -1719,9 +1730,42 @@ resource "helm_release" "grafana_operator" {
     dashboard = {
       enabled = false
     }
+    extraObjects = local.grafana_operator_register_existing_instance_value ? [{
+      apiVersion = "grafana.integreatly.org/v1beta1"
+      kind       = "Grafana"
+      metadata = {
+        name      = "grafana-primary"
+        namespace = "monitoring"
+        labels = {
+          "grafana/instance"             = "primary"
+          "app.kubernetes.io/name"       = "grafana"
+          "app.kubernetes.io/instance"   = "grafana"
+          "app.kubernetes.io/component"  = "server"
+          "app.kubernetes.io/part-of"    = "grafana"
+          "app.kubernetes.io/managed-by" = "infrastructure"
+          "pve-k8s-talos/section"        = "monitoring"
+        }
+      }
+      spec = {
+        external = {
+          url = "http://grafana.monitoring.svc.cluster.local:3000"
+          adminUser = {
+            name = "grafana-admin"
+            key  = "admin-user"
+          }
+          adminPassword = {
+            name = "grafana-admin"
+            key  = "admin-password"
+          }
+        }
+      }
+    }] : []
   })]
 
-  depends_on = [kubernetes_manifest.monitoring_namespace]
+  depends_on = [
+    kubernetes_manifest.monitoring_namespace,
+    kubernetes_secret_v1.grafana_admin,
+  ]
 }
 
 resource "kubernetes_manifest" "monitoring_certificates" {
