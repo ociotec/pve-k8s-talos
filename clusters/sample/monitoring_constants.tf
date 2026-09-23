@@ -111,8 +111,15 @@ locals {
   grafana_auth_allow_sign_up            = true
   grafana_auth_ca_secret_name           = "grafana-oauth-ca"
 
-  # Install the cluster-wide Grafana Operator through Helm and register the
-  # existing platform-managed Grafana without transferring workload ownership.
+  # New clusters deploy the Grafana workload with the official Helm chart.
+  # Keep takeover disabled; it is only for a reviewed migration of an existing
+  # manifest-managed Deployment and Service.
+  grafana_helm_enabled        = true
+  grafana_helm_take_ownership = false
+  grafana_helm_chart_version  = "13.2.5"
+
+  # Install the cluster-wide Grafana Operator and register the platform-managed
+  # Grafana without transferring workload ownership to the operator.
   grafana_operator_enabled                    = true
   grafana_operator_register_existing_instance = true
   grafana_operator_chart_version              = "5.25.0"

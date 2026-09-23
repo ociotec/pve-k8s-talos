@@ -594,6 +594,14 @@ Kubernetes pod-log collection is selected per cluster with `kubernetes_log_colle
 
 When `grafana_auth_keycloak_realm` is set in `monitoring_constants.tf`, OpenTofu configures Grafana generic OAuth against the generated Keycloak `grafana` client. Use `grafana_auth_view_groups` for Grafana `Viewer` access and `grafana_auth_edit_groups` for Grafana `Editor` access. Keep the local Grafana admin credentials for server administration and break-glass recovery.
 
+Set `grafana_helm_enabled = true` to manage the Grafana workload with the
+official chart pinned by `grafana_helm_chart_version`. The chart keeps the
+existing PostgreSQL service, PVCs, ingress, secrets, datasource provisioning,
+and dashboard synchronization outside the release. New clusters must leave
+`grafana_helm_take_ownership = false`. Existing manifest-managed clusters must
+follow [the Grafana Helm migration procedure](docs/grafana-helm-migration.md),
+which uses that flag only for the first reviewed takeover deployment.
+
 Set `grafana_operator_enabled = true` to install Grafana Operator and its CRDs
 from the pinned Helm chart. The operator watches Grafana custom resources in
 all namespaces and runs with `infra-observability` priority. Set

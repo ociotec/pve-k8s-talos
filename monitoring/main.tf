@@ -79,6 +79,27 @@ locals {
   enable_policy_reporter_value = can(regex("(?m)^\\s*enable_policy_reporter\\s*=\\s*(true|false)\\s*$", local.monitoring_constants_source)[0]) ? (
     tobool(regex("(?m)^\\s*enable_policy_reporter\\s*=\\s*(true|false)\\s*$", local.monitoring_constants_source)[0])
   ) : false
+  grafana_helm_enabled_match = regexall(
+    "(?m)^\\s*grafana_helm_enabled\\s*=\\s*(true|false)\\s*$",
+    local.monitoring_constants_source,
+  )
+  grafana_helm_enabled_value = length(local.grafana_helm_enabled_match) > 0 ? (
+    tobool(local.grafana_helm_enabled_match[0][0])
+  ) : false
+  grafana_helm_take_ownership_match = regexall(
+    "(?m)^\\s*grafana_helm_take_ownership\\s*=\\s*(true|false)\\s*$",
+    local.monitoring_constants_source,
+  )
+  grafana_helm_take_ownership_value = length(local.grafana_helm_take_ownership_match) > 0 ? (
+    tobool(local.grafana_helm_take_ownership_match[0][0])
+  ) : false
+  grafana_helm_chart_version_match = regexall(
+    "(?m)^\\s*grafana_helm_chart_version\\s*=\\s*\"([^\"]+)\"\\s*$",
+    local.monitoring_constants_source,
+  )
+  grafana_helm_chart_version_value = length(local.grafana_helm_chart_version_match) > 0 ? (
+    local.grafana_helm_chart_version_match[0][0]
+  ) : "13.2.5"
   grafana_operator_enabled_match = regexall(
     "(?m)^\\s*grafana_operator_enabled\\s*=\\s*(true|false)\\s*$",
     local.monitoring_constants_source,
@@ -633,6 +654,38 @@ locals {
     }
     if group != local.grafana_dashboard_root_group
   ]
+  grafana_helm_extra_configmap_mounts = concat(
+    [
+      {
+        name      = "datasources"
+        configMap = "grafana-datasources"
+        mountPath = "/etc/grafana/provisioning/datasources"
+        readOnly  = true
+      },
+      {
+        name      = "dashboard-provider"
+        configMap = "grafana-dashboard-provider"
+        mountPath = "/etc/grafana/provisioning/dashboards"
+        readOnly  = true
+      },
+      {
+        name      = "dashboards"
+        configMap = local.grafana_dashboard_root_source.name
+        mountPath = local.grafana_dashboard_root_mount_path
+        readOnly  = true
+        items     = local.grafana_dashboard_root_source.items
+      },
+    ],
+    [
+      for source in local.grafana_dashboard_group_sources : {
+        name      = source.volume_name
+        configMap = source.configmap_name
+        mountPath = source.mount_path
+        readOnly  = true
+        items     = source.items
+      }
+    ],
+  )
   grafana_dashboard_sync_hash = substr(sha256(join("", concat(
     [file("${path.module}/grafana.yaml")],
     [file("${path.module}/grafana/grafana.yaml")],
@@ -729,7 +782,7 @@ locals {
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
   ]
-  grafana_manifests = [
+  grafana_manifests_all = [
     for doc in split("\n---\n", templatefile("${path.module}/grafana.yaml", {
       storage_class                       = local.grafana_storage_class
       grafana_storage_size                = local.grafana_storage_size
@@ -803,6 +856,15 @@ locals {
     })) :
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
+  ]
+  grafana_manifests = [
+    for manifest in local.grafana_manifests_all : manifest
+    if !(
+      local.grafana_helm_enabled_value &&
+      try(manifest.metadata.namespace, "") == "monitoring" &&
+      try(manifest.metadata.name, "") == "grafana" &&
+      contains(["Deployment", "Service"], try(manifest.kind, ""))
+    )
   ]
   loki_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/loki.yaml", {
@@ -1196,6 +1258,17 @@ check "grafana_auth_groups" {
   }
 }
 
+check "grafana_helm_configuration" {
+  assert {
+    condition = (
+      !local.grafana_helm_take_ownership_value || local.grafana_helm_enabled_value
+      ) && (
+      !local.grafana_helm_enabled_value || trimspace(local.grafana_helm_chart_version_value) != ""
+    )
+    error_message = "Grafana Helm takeover requires Grafana Helm to be enabled; an enabled release requires a chart version."
+  }
+}
+
 check "grafana_operator_configuration" {
   assert {
     condition = (
@@ -1521,6 +1594,7 @@ resource "null_resource" "monitoring_jobs" {
     kubernetes_manifest.extra_namespaces,
     kubernetes_manifest.monitoring_other,
     kubernetes_secret_v1.grafana_admin,
+    helm_release.grafana,
     local_file.monitoring_jobs,
   ]
 
@@ -1658,6 +1732,276 @@ resource "helm_release" "policy_reporter" {
   ]
 }
 
+resource "helm_release" "grafana" {
+  count = local.grafana_helm_enabled_value ? 1 : 0
+
+  name       = "grafana"
+  namespace  = "monitoring"
+  repository = "oci://ghcr.io/grafana-community/helm-charts"
+  chart      = "grafana"
+  version    = local.grafana_helm_chart_version_value
+  wait       = true
+  timeout    = 600
+
+  # During the one-time migration Helm adopts the existing Service after the
+  # deployment script removes the legacy Deployment with its immutable selector.
+  take_ownership = local.grafana_helm_take_ownership_value
+  atomic         = !local.grafana_helm_take_ownership_value
+
+  values = [yamlencode({
+    fullnameOverride     = "grafana"
+    replicas             = 1
+    revisionHistoryLimit = 10
+    deploymentStrategy = {
+      type = "Recreate"
+    }
+    image = {
+      registry   = "docker.io"
+      repository = "grafana/grafana"
+      tag        = local.grafana_image_tag
+      pullPolicy = "IfNotPresent"
+    }
+    extraLabels = {
+      "app.kubernetes.io/component"  = "server"
+      "app.kubernetes.io/part-of"    = "grafana"
+      "app.kubernetes.io/managed-by" = "Helm"
+      "pve-k8s-talos/section"        = "monitoring"
+    }
+    podLabels = {
+      app = "grafana"
+    }
+    podAnnotations = {
+      "prometheus.io/scrape" = "true"
+      "prometheus.io/port"   = "3000"
+      "prometheus.io/path"   = "/metrics"
+    }
+    podPortName       = "monitoring"
+    priorityClassName = "infra-observability"
+    rbac = {
+      create = false
+    }
+    serviceAccount = {
+      create                       = true
+      name                         = "grafana"
+      automountServiceAccountToken = false
+      labels = {
+        "app.kubernetes.io/component"  = "server"
+        "app.kubernetes.io/part-of"    = "grafana"
+        "app.kubernetes.io/managed-by" = "Helm"
+        "pve-k8s-talos/section"        = "monitoring"
+      }
+    }
+    automountServiceAccountToken = false
+    enableServiceLinks           = true
+    service = {
+      enabled    = true
+      type       = "ClusterIP"
+      port       = 3000
+      targetPort = 3000
+      portName   = "http"
+    }
+    ingress = {
+      enabled = false
+    }
+    persistence = {
+      enabled       = true
+      type          = "pvc"
+      existingClaim = "grafana-data"
+    }
+    initChownData = {
+      enabled = false
+    }
+    admin = {
+      existingSecret = "grafana-admin"
+      userKey        = "admin-user"
+      passwordKey    = "admin-password"
+    }
+    securityContext = {
+      runAsUser    = 472
+      runAsGroup   = 472
+      fsGroup      = 472
+      runAsNonRoot = true
+      seccompProfile = {
+        type = "RuntimeDefault"
+      }
+    }
+    containerSecurityContext = {
+      allowPrivilegeEscalation = false
+      privileged               = false
+      runAsNonRoot             = true
+      readOnlyRootFilesystem   = false
+      capabilities = {
+        drop = ["ALL"]
+      }
+      seccompProfile = {
+        type = "RuntimeDefault"
+      }
+    }
+    resources = {
+      requests = {
+        cpu    = local.grafana_cpu_request_value
+        memory = local.grafana_mem_request_value
+      }
+      limits = {
+        cpu    = local.grafana_cpu_limit_value
+        memory = local.grafana_mem_limit_value
+      }
+    }
+    goMemLimit = {
+      enabled = false
+    }
+    startupProbe = {
+      httpGet = {
+        path   = "/api/health"
+        port   = "monitoring"
+        scheme = "HTTP"
+      }
+      periodSeconds    = 5
+      timeoutSeconds   = 5
+      successThreshold = 1
+      failureThreshold = 60
+    }
+    readinessProbe = {
+      httpGet = {
+        path   = "/api/health"
+        port   = "monitoring"
+        scheme = "HTTP"
+      }
+      periodSeconds    = 10
+      timeoutSeconds   = 5
+      successThreshold = 1
+      failureThreshold = 3
+    }
+    livenessProbe = {
+      httpGet = {
+        path   = "/api/health"
+        port   = "monitoring"
+        scheme = "HTTP"
+      }
+      initialDelaySeconds = 0
+      periodSeconds       = 30
+      timeoutSeconds      = 5
+      successThreshold    = 1
+      failureThreshold    = 5
+    }
+    extraInitContainers = [{
+      name    = "wait-for-postgres"
+      image   = "postgres:${local.grafana_postgres_image_tag_value}"
+      command = ["sh", "-c", "until pg_isready -h grafana-postgres -p 5432 -U \"$POSTGRES_USER\"; do sleep 5; done"]
+      env = [{
+        name = "POSTGRES_USER"
+        valueFrom = {
+          secretKeyRef = {
+            name = "grafana-db"
+            key  = "username"
+          }
+        }
+      }]
+      resources = {
+        requests = {
+          cpu    = try(local.grafana_wait_for_postgres_cpu_request, "20m")
+          memory = try(local.grafana_wait_for_postgres_mem_request, "32Mi")
+        }
+        limits = {
+          cpu    = try(local.grafana_wait_for_postgres_cpu_limit, "100m")
+          memory = try(local.grafana_wait_for_postgres_mem_limit, "32Mi")
+        }
+      }
+    }]
+    env = merge({
+      GF_SERVER_ROOT_URL        = "https://${local.grafana_hostname}"
+      GF_METRICS_ENABLED        = "true"
+      GF_DATABASE_TYPE          = "postgres"
+      GF_DATABASE_HOST          = "grafana-postgres:5432"
+      GF_DATABASE_SSL_MODE      = "disable"
+      GF_DATABASE_MAX_OPEN_CONN = "20"
+      GOMEMLIMIT                = local.grafana_go_mem_limit
+      GOGC                      = tostring(try(local.grafana_go_gc_percent, 50))
+      }, local.grafana_auth_enabled ? {
+      GF_AUTH_GENERIC_OAUTH_ENABLED               = "true"
+      GF_AUTH_GENERIC_OAUTH_NAME                  = local.grafana_auth_name_value
+      GF_AUTH_GENERIC_OAUTH_CLIENT_ID             = local.grafana_oidc_client_id
+      GF_AUTH_GENERIC_OAUTH_SCOPES                = local.grafana_auth_scopes_value
+      GF_AUTH_GENERIC_OAUTH_AUTH_URL              = local.grafana_oidc_auth_url
+      GF_AUTH_GENERIC_OAUTH_TOKEN_URL             = local.grafana_oidc_token_url
+      GF_AUTH_GENERIC_OAUTH_API_URL               = local.grafana_oidc_api_url
+      GF_AUTH_GENERIC_OAUTH_USE_PKCE              = "true"
+      GF_AUTH_GENERIC_OAUTH_LOGIN_ATTRIBUTE_PATH  = "preferred_username"
+      GF_AUTH_GENERIC_OAUTH_NAME_ATTRIBUTE_PATH   = "name"
+      GF_AUTH_GENERIC_OAUTH_EMAIL_ATTRIBUTE_PATH  = "email"
+      GF_AUTH_GENERIC_OAUTH_GROUPS_ATTRIBUTE_PATH = "groups"
+      GF_AUTH_GENERIC_OAUTH_ALLOWED_GROUPS        = join(",", local.grafana_auth_allowed_groups)
+      GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_PATH   = local.grafana_auth_role_attribute_path
+      GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_STRICT = "true"
+      GF_AUTH_GENERIC_OAUTH_ALLOW_SIGN_UP         = tostring(local.grafana_auth_allow_sign_up_value)
+      GF_AUTH_OAUTH_ALLOW_INSECURE_EMAIL_LOOKUP   = "true"
+      GF_AUTH_OAUTH_AUTO_LOGIN                    = tostring(local.grafana_auth_auto_login_value)
+      GF_AUTH_GENERIC_OAUTH_JWK_SET_URL           = local.grafana_oidc_jwk_set_url
+      GF_AUTH_SIGNOUT_REDIRECT_URL                = local.grafana_oauth_signout_redirect_url
+      GF_AUTH_GENERIC_OAUTH_TLS_CLIENT_CA         = local.grafana_auth_ca_enabled ? "/run/secrets/grafana-oauth-ca/ca.crt" : ""
+    } : {})
+    envValueFrom = merge({
+      GF_DATABASE_NAME = {
+        secretKeyRef = {
+          name = "grafana-db"
+          key  = "database"
+        }
+      }
+      GF_DATABASE_USER = {
+        secretKeyRef = {
+          name = "grafana-db"
+          key  = "username"
+        }
+      }
+      GF_DATABASE_PASSWORD = {
+        secretKeyRef = {
+          name = "grafana-db"
+          key  = "password"
+        }
+      }
+      }, local.grafana_auth_enabled ? {
+      GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET = {
+        secretKeyRef = {
+          name = local.grafana_oauth_secret_name_value
+          key  = "client-secret"
+        }
+      }
+    } : {})
+    extraConfigmapMounts = local.grafana_helm_extra_configmap_mounts
+    extraSecretMounts = local.grafana_auth_ca_enabled ? [{
+      name        = "grafana-oauth-ca"
+      mountPath   = "/run/secrets/grafana-oauth-ca"
+      secretName  = local.grafana_auth_ca_secret_name_value
+      readOnly    = true
+      defaultMode = 420
+    }] : []
+    extraVolumes = local.grafana_dashboard_provisioning_enabled_value ? [{
+      name          = "dashboards-provisioning"
+      existingClaim = local.grafana_dashboard_provisioning_pvc_name_value
+    }] : []
+    extraVolumeMounts = local.grafana_dashboard_provisioning_enabled_value ? [{
+      name      = "dashboards-provisioning"
+      mountPath = "/var/lib/grafana/dashboards-provisioning"
+      readOnly  = true
+    }] : []
+    testFramework = {
+      enabled = false
+    }
+    serviceMonitor = {
+      enabled = false
+    }
+  })]
+
+  depends_on = [
+    kubernetes_manifest.monitoring_namespace,
+    kubernetes_manifest.monitoring_other,
+    kubernetes_secret_v1.grafana_admin,
+    kubernetes_secret_v1.grafana_db,
+    kubernetes_secret_v1.grafana_oauth,
+    kubernetes_secret_v1.grafana_oauth_ca,
+  ]
+}
+
 resource "helm_release" "grafana_operator" {
   count = local.grafana_operator_enabled_value ? 1 : 0
 
@@ -1765,6 +2109,7 @@ resource "helm_release" "grafana_operator" {
   depends_on = [
     kubernetes_manifest.monitoring_namespace,
     kubernetes_secret_v1.grafana_admin,
+    helm_release.grafana,
   ]
 }
 
@@ -1792,6 +2137,7 @@ resource "kubernetes_manifest" "monitoring_ingress" {
     kubernetes_manifest.monitoring_certificates,
     kubernetes_secret_v1.prometheus_api_basic_auth,
     kubernetes_secret_v1.preissued_tls,
+    helm_release.grafana,
     null_resource.ingress_nginx_webhook_ready,
   ]
 }

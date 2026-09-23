@@ -1699,6 +1699,149 @@ migrate_platform_rancher_deployment_state() {
   message "Rancher Deployment state migration completed."
 }
 
+migrate_grafana_workload_state_to_helm() {
+  local workspace="$1"
+  local helm_enabled
+  local take_ownership
+  local migration_dir
+  local working_state
+  local address
+  local -a legacy_addresses=(
+    'kubernetes_manifest.monitoring_other["monitoring/Deployment/grafana"]'
+    'kubernetes_manifest.monitoring_other["monitoring/Service/grafana"]'
+  )
+  local -a addresses_to_remove=()
+
+  helm_enabled="$(
+    printf 'local.grafana_helm_enabled_value\n' |
+      tofu -chdir="${workspace}" console 2>/dev/null |
+      tail -n 1 |
+      tr -d '[:space:]'
+  )"
+  take_ownership="$(
+    printf 'local.grafana_helm_take_ownership_value\n' |
+      tofu -chdir="${workspace}" console 2>/dev/null |
+      tail -n 1 |
+      tr -d '[:space:]'
+  )"
+
+  case "${helm_enabled}" in
+    true|false)
+      ;;
+    *)
+      error "Unable to determine whether the Grafana Helm release is enabled." >&2
+      return 1
+      ;;
+  esac
+  case "${take_ownership}" in
+    true|false)
+      ;;
+    *)
+      error "Unable to determine whether Grafana Helm takeover is enabled." >&2
+      return 1
+      ;;
+  esac
+
+  if [[ "${helm_enabled}" != "true" || "${take_ownership}" != "true" ]]; then
+    return 0
+  fi
+
+  if ! kubectl -n monitoring get service grafana >/dev/null 2>&1; then
+    error "Grafana Helm takeover was requested, but Service/monitoring/grafana is absent." >&2
+    return 1
+  fi
+  if [[ "$(kubectl -n monitoring get pvc grafana-data -o jsonpath='{.status.phase}' 2>/dev/null || true)" != "Bound" ]]; then
+    error "Grafana Helm takeover requires PVC/monitoring/grafana-data to be Bound." >&2
+    return 1
+  fi
+  if ! kubectl -n monitoring rollout status deployment/grafana-postgres --timeout=120s >/dev/null; then
+    error "Grafana Helm takeover requires a healthy grafana-postgres Deployment." >&2
+    return 1
+  fi
+
+  for address in "${legacy_addresses[@]}"; do
+    if tofu -chdir="${workspace}" state list 2>/dev/null | grep -Fxq "${address}"; then
+      addresses_to_remove+=("${address}")
+    fi
+  done
+
+  if tofu -chdir="${workspace}" state list 2>/dev/null |
+    grep -Fxq 'helm_release.grafana[0]'; then
+    if [[ "${#addresses_to_remove[@]}" -gt 0 ]]; then
+      error "Helm and legacy manifest resources both own Grafana in OpenTofu state." >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  if [[ "${#addresses_to_remove[@]}" -gt 0 ]]; then
+    if kubectl -n monitoring get configmap grafana >/dev/null 2>&1 \
+      || kubectl -n monitoring get serviceaccount grafana >/dev/null 2>&1; then
+      error "Grafana Helm takeover found a pre-existing ConfigMap or ServiceAccount named grafana." >&2
+      return 1
+    fi
+    if ! kubectl -n monitoring rollout status deployment/grafana --timeout=120s >/dev/null; then
+      error "Legacy Grafana state exists, but Deployment/monitoring/grafana is not healthy." >&2
+      return 1
+    fi
+
+    message "Handing the existing Grafana Deployment and Service from manifest state to Helm..."
+    migration_dir="$(mktemp -d "${TMPDIR:-/tmp}/pve-k8s-talos-grafana-helm.XXXXXX")"
+    working_state="${migration_dir}/terraform.tfstate"
+    chmod 700 "${migration_dir}"
+
+    if ! tofu -chdir="${workspace}" state pull >"${working_state}"; then
+      rm -rf "${migration_dir}"
+      return 1
+    fi
+    chmod 600 "${working_state}"
+    if ! tofu -chdir="${workspace}" state rm \
+      -state="${working_state}" \
+      -backup="${migration_dir}/terraform.tfstate.backup" \
+      "${addresses_to_remove[@]}" >/dev/null; then
+      rm -rf "${migration_dir}"
+      return 1
+    fi
+    if ! jq -e . "${working_state}" >/dev/null; then
+      rm -rf "${migration_dir}"
+      error "Grafana Helm state handoff produced invalid JSON." >&2
+      return 1
+    fi
+
+    cp "${working_state}" "${workspace}/terraform.tfstate"
+    chmod 600 "${workspace}/terraform.tfstate"
+    rm -rf "${migration_dir}"
+
+    for address in "${legacy_addresses[@]}"; do
+      if tofu -chdir="${workspace}" state list 2>/dev/null | grep -Fxq "${address}"; then
+        error "Legacy Grafana resource remains in OpenTofu state after the Helm handoff: ${address}" >&2
+        return 1
+      fi
+    done
+    message "Grafana workload state handoff completed; the live resources remain unchanged."
+  else
+    message "Grafana workload state was already handed off; continuing Helm takeover."
+  fi
+
+  if kubectl -n monitoring get deployment grafana >/dev/null 2>&1; then
+    message "Removing the legacy Grafana Deployment so Helm can recreate it with its immutable selector..."
+    if ! kubectl -n monitoring delete deployment grafana --wait=true --timeout=120s >/dev/null; then
+      error "Failed to remove the legacy Grafana Deployment before Helm takeover." >&2
+      return 1
+    fi
+  else
+    message "Legacy Grafana Deployment is already absent; continuing Helm takeover retry."
+  fi
+
+  if ! kubectl -n monitoring get service grafana >/dev/null 2>&1 \
+    || [[ "$(kubectl -n monitoring get pvc grafana-data -o jsonpath='{.status.phase}' 2>/dev/null || true)" != "Bound" ]]; then
+    error "Grafana Service or data PVC disappeared during the Helm takeover preparation." >&2
+    return 1
+  fi
+
+  message "Grafana Helm takeover preparation completed; Service and PVC were preserved."
+}
+
 rook_external_csi_configuration_sha256() {
   if ! kubectl get namespace rook-ceph >/dev/null 2>&1; then
     printf "absent"
@@ -3741,6 +3884,7 @@ else
   message "Deploying monitoring stack..."
   run_tofu_init "${cluster_monitoring_workspace}"
   run tofu -chdir="${cluster_monitoring_workspace}" validate
+  migrate_grafana_workload_state_to_helm "${cluster_monitoring_workspace}"
   reset_legacy_loki_storage
   monitoring_prometheus_config_hash_before=""
   monitoring_loki_config_hash_before=""
