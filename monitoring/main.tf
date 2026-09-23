@@ -79,6 +79,48 @@ locals {
   enable_policy_reporter_value = can(regex("(?m)^\\s*enable_policy_reporter\\s*=\\s*(true|false)\\s*$", local.monitoring_constants_source)[0]) ? (
     tobool(regex("(?m)^\\s*enable_policy_reporter\\s*=\\s*(true|false)\\s*$", local.monitoring_constants_source)[0])
   ) : false
+  grafana_operator_enabled_match = regexall(
+    "(?m)^\\s*grafana_operator_enabled\\s*=\\s*(true|false)\\s*$",
+    local.monitoring_constants_source,
+  )
+  grafana_operator_enabled_value = length(local.grafana_operator_enabled_match) > 0 ? (
+    tobool(local.grafana_operator_enabled_match[0][0])
+  ) : false
+  grafana_operator_chart_version_match = regexall(
+    "(?m)^\\s*grafana_operator_chart_version\\s*=\\s*\"([^\"]+)\"\\s*$",
+    local.monitoring_constants_source,
+  )
+  grafana_operator_chart_version_value = length(local.grafana_operator_chart_version_match) > 0 ? (
+    local.grafana_operator_chart_version_match[0][0]
+  ) : "5.25.0"
+  grafana_operator_cpu_request_match = regexall(
+    "(?m)^\\s*grafana_operator_cpu_request\\s*=\\s*\"([^\"]+)\"\\s*$",
+    local.monitoring_constants_source,
+  )
+  grafana_operator_cpu_request_value = length(local.grafana_operator_cpu_request_match) > 0 ? (
+    local.grafana_operator_cpu_request_match[0][0]
+  ) : "100m"
+  grafana_operator_cpu_limit_match = regexall(
+    "(?m)^\\s*grafana_operator_cpu_limit\\s*=\\s*\"([^\"]+)\"\\s*$",
+    local.monitoring_constants_source,
+  )
+  grafana_operator_cpu_limit_value = length(local.grafana_operator_cpu_limit_match) > 0 ? (
+    local.grafana_operator_cpu_limit_match[0][0]
+  ) : "500m"
+  grafana_operator_mem_request_match = regexall(
+    "(?m)^\\s*grafana_operator_mem_request\\s*=\\s*\"([^\"]+)\"\\s*$",
+    local.monitoring_constants_source,
+  )
+  grafana_operator_mem_request_value = length(local.grafana_operator_mem_request_match) > 0 ? (
+    local.grafana_operator_mem_request_match[0][0]
+  ) : "256Mi"
+  grafana_operator_mem_limit_match = regexall(
+    "(?m)^\\s*grafana_operator_mem_limit\\s*=\\s*\"([^\"]+)\"\\s*$",
+    local.monitoring_constants_source,
+  )
+  grafana_operator_mem_limit_value = length(local.grafana_operator_mem_limit_match) > 0 ? (
+    local.grafana_operator_mem_limit_match[0][0]
+  ) : "256Mi"
   policy_reporter_hostname_value                 = try(local.policy_reporter_hostname, "")
   policy_reporter_tls_secret_name_value          = try(local.policy_reporter_tls_secret_name, "")
   policy_reporter_auth_keycloak_realm_value      = trimspace(try(local.policy_reporter_auth_keycloak_realm, ""))
@@ -1147,6 +1189,19 @@ check "grafana_auth_groups" {
   }
 }
 
+check "grafana_operator_configuration" {
+  assert {
+    condition = !local.grafana_operator_enabled_value || (
+      trimspace(local.grafana_operator_chart_version_value) != "" &&
+      trimspace(local.grafana_operator_cpu_request_value) != "" &&
+      trimspace(local.grafana_operator_cpu_limit_value) != "" &&
+      trimspace(local.grafana_operator_mem_request_value) != "" &&
+      local.grafana_operator_mem_request_value == local.grafana_operator_mem_limit_value
+    )
+    error_message = "Enabled Grafana Operator requires a chart version and CPU/memory resources; memory request and limit must be equal."
+  }
+}
+
 check "prometheus_auth_identity_client" {
   assert {
     condition = !local.prometheus_auth_enabled || (
@@ -1590,6 +1645,83 @@ resource "helm_release" "policy_reporter" {
     kubernetes_manifest.monitoring_certificates,
     null_resource.ingress_nginx_webhook_ready,
   ]
+}
+
+resource "helm_release" "grafana_operator" {
+  count = local.grafana_operator_enabled_value ? 1 : 0
+
+  name       = "grafana-operator"
+  namespace  = "monitoring"
+  repository = "oci://ghcr.io/grafana/helm-charts"
+  chart      = "grafana-operator"
+  version    = local.grafana_operator_chart_version_value
+  wait       = true
+  timeout    = 600
+  atomic     = true
+
+  values = [yamlencode({
+    namespaceScope     = false
+    leaderElect        = true
+    replicas           = 1
+    watchNamespaces    = ""
+    enforceCacheLabels = "safe"
+    rbac = {
+      create         = true
+      useClusterRole = true
+    }
+    crds = {
+      immutable = false
+    }
+    additionalLabels = {
+      "pve-k8s-talos/section" = "monitoring"
+    }
+    podAnnotations = {
+      "prometheus.io/scrape" = "true"
+      "prometheus.io/port"   = "9090"
+      "prometheus.io/path"   = "/metrics"
+    }
+    priorityClassName = "infra-observability"
+    resources = {
+      requests = {
+        cpu    = local.grafana_operator_cpu_request_value
+        memory = local.grafana_operator_mem_request_value
+      }
+      limits = {
+        cpu    = local.grafana_operator_cpu_limit_value
+        memory = local.grafana_operator_mem_limit_value
+      }
+    }
+    livenessProbe = {
+      httpGet = {
+        path   = "/healthz"
+        port   = 8081
+        scheme = "HTTP"
+      }
+      periodSeconds    = 30
+      timeoutSeconds   = 1
+      successThreshold = 1
+      failureThreshold = 3
+    }
+    readinessProbe = {
+      httpGet = {
+        path   = "/readyz"
+        port   = 8081
+        scheme = "HTTP"
+      }
+      periodSeconds    = 10
+      timeoutSeconds   = 1
+      successThreshold = 1
+      failureThreshold = 3
+    }
+    serviceMonitor = {
+      enabled = false
+    }
+    dashboard = {
+      enabled = false
+    }
+  })]
+
+  depends_on = [kubernetes_manifest.monitoring_namespace]
 }
 
 resource "kubernetes_manifest" "monitoring_certificates" {

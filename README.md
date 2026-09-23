@@ -594,6 +594,15 @@ Kubernetes pod-log collection is selected per cluster with `kubernetes_log_colle
 
 When `grafana_auth_keycloak_realm` is set in `monitoring_constants.tf`, OpenTofu configures Grafana generic OAuth against the generated Keycloak `grafana` client. Use `grafana_auth_view_groups` for Grafana `Viewer` access and `grafana_auth_edit_groups` for Grafana `Editor` access. Keep the local Grafana admin credentials for server administration and break-glass recovery.
 
+Set `grafana_operator_enabled = true` to install Grafana Operator and its CRDs
+from the pinned Helm chart. The operator watches Grafana custom resources in
+all namespaces and runs with `infra-observability` priority. Enabling it only
+installs the controller and APIs: it does not take ownership of the existing
+Grafana Deployment or register that instance automatically. CRDs are rendered
+as Helm-managed templates so chart upgrades can update their schemas, and are
+retained by the chart if the release is removed. Do not disable the operator
+while managed Grafana resources still depend on its finalizers.
+
 When `prometheus_auth_keycloak_realm` is set in `monitoring_constants.tf`, OpenTofu deploys an `oauth2-proxy` instance for Prometheus and protects the Prometheus ingress with ingress-nginx external auth annotations. The selected Keycloak realm must expose a confidential `prometheus` OIDC client with redirect URI `https://<prometheus-host>/oauth2/callback`. Use `prometheus_auth_allowed_groups` to restrict access.
 
 OpenTofu also exposes a separate Prometheus API ingress at `prometheus_api_hostname`, intended for external Grafana instances and other non-interactive clients. It reuses `prometheus_api_tls_secret_name` (by default the same TLS secret as the browser Prometheus ingress) and protects the endpoint with ingress-nginx Basic Auth. The service username is `prometheus-external`; the password and htpasswd hash are persisted in `secrets/credentials.json`.
