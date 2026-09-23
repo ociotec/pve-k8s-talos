@@ -3,16 +3,6 @@ kind: ConfigMap
 metadata:
   name: grafana-datasources
   namespace: monitoring
-  labels:
-    app.kubernetes.io/name: grafana
-    app.kubernetes.io/instance: grafana
-    app.kubernetes.io/component: datasource-provisioning
-    app.kubernetes.io/part-of: grafana
-    app.kubernetes.io/managed-by: infrastructure
-    pve-k8s-talos/section: monitoring
-%{ if grafana_dynamic_provisioning_enabled ~}
-    grafana/provisioning: datasource
-%{ endif ~}
 data:
   datasources.yaml: |
     apiVersion: 1
@@ -261,74 +251,13 @@ spec:
       storage: ${grafana_dashboard_provisioning_pvc_size}
 %{ endif ~}
 ---
-%{ if grafana_dynamic_provisioning_enabled ~}
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: grafana-provisioning
-  namespace: monitoring
-  labels:
-    app.kubernetes.io/name: grafana
-    app.kubernetes.io/instance: grafana
-    app.kubernetes.io/component: provisioning
-    app.kubernetes.io/part-of: grafana
-    app.kubernetes.io/managed-by: infrastructure
-    pve-k8s-talos/section: monitoring
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: grafana-provisioning
-  labels:
-    app.kubernetes.io/name: grafana
-    app.kubernetes.io/instance: grafana
-    app.kubernetes.io/component: provisioning
-    app.kubernetes.io/part-of: grafana
-    app.kubernetes.io/managed-by: infrastructure
-    pve-k8s-talos/section: monitoring
-rules:
-  - apiGroups:
-      - ""
-    resources:
-      - configmaps
-    verbs:
-      - get
-      - list
-      - watch
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: grafana-provisioning
-  labels:
-    app.kubernetes.io/name: grafana
-    app.kubernetes.io/instance: grafana
-    app.kubernetes.io/component: provisioning
-    app.kubernetes.io/part-of: grafana
-    app.kubernetes.io/managed-by: infrastructure
-    pve-k8s-talos/section: monitoring
-subjects:
-  - kind: ServiceAccount
-    name: grafana-provisioning
-    namespace: monitoring
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: grafana-provisioning
----
-%{ endif ~}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: grafana
   namespace: monitoring
   labels:
-    app.kubernetes.io/name: grafana
-    app.kubernetes.io/instance: grafana
-    app.kubernetes.io/component: server
     app.kubernetes.io/part-of: grafana
-    app.kubernetes.io/managed-by: infrastructure
-    pve-k8s-talos/section: monitoring
 spec:
   replicas: 1
   strategy:
@@ -340,21 +269,13 @@ spec:
     metadata:
       labels:
         app: grafana
-        app.kubernetes.io/name: grafana
-        app.kubernetes.io/instance: grafana
-        app.kubernetes.io/component: server
         app.kubernetes.io/part-of: grafana
-        app.kubernetes.io/managed-by: infrastructure
-        pve-k8s-talos/section: monitoring
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "3000"
         prometheus.io/path: /metrics
     spec:
       priorityClassName: infra-observability
-%{ if grafana_dynamic_provisioning_enabled ~}
-      serviceAccountName: grafana-provisioning
-%{ endif ~}
       securityContext:
         runAsUser: 472
         runAsGroup: 472
@@ -541,230 +462,18 @@ spec:
               mountPath: /var/lib/grafana/dashboards-provisioning
               readOnly: true
 %{ endif ~}
-%{ if grafana_dynamic_provisioning_enabled ~}
-            - name: dynamic-dashboards
-              mountPath: /var/lib/grafana/dynamic-dashboards
-              readOnly: true
-            - name: alerting
-              mountPath: /etc/grafana/provisioning/alerting
-              readOnly: true
-%{ endif ~}
 %{ for source in grafana_dashboard_group_sources ~}
             - name: ${source.volume_name}
               mountPath: ${source.mount_path}
               readOnly: true
 %{ endfor ~}
-%{ if grafana_dynamic_provisioning_enabled ~}
-        - name: dashboards-sidecar
-          image: quay.io/kiwigrid/k8s-sidecar:${grafana_provisioning_sidecar_image_tag}
-          securityContext:
-            allowPrivilegeEscalation: false
-            runAsNonRoot: true
-            capabilities:
-              drop:
-                - ALL
-          ports:
-            - name: dash-health
-              containerPort: 8081
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: dash-health
-              scheme: HTTP
-            periodSeconds: 10
-            timeoutSeconds: 1
-            successThreshold: 1
-            failureThreshold: 3
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: dash-health
-              scheme: HTTP
-            periodSeconds: 30
-            timeoutSeconds: 1
-            successThreshold: 1
-            failureThreshold: 3
-          env:
-            - name: LABEL
-              value: grafana/provisioning
-            - name: LABEL_VALUE
-              value: dashboard
-            - name: FOLDER
-              value: /var/lib/grafana/dynamic-dashboards
-            - name: FOLDER_ANNOTATION
-              value: grafana/folder
-            - name: NAMESPACE
-              value: ALL
-            - name: RESOURCE
-              value: configmap
-            - name: METHOD
-              value: WATCH
-            - name: UNIQUE_FILENAMES
-              value: "true"
-            - name: DEFAULT_FILE_MODE
-              value: "440"
-            - name: HEALTH_PORT
-              value: "8081"
-          resources:
-            requests:
-              cpu: ${grafana_provisioning_sidecar_cpu_request}
-              memory: ${grafana_provisioning_sidecar_mem_request}
-            limits:
-              cpu: ${grafana_provisioning_sidecar_cpu_limit}
-              memory: ${grafana_provisioning_sidecar_mem_limit}
-          volumeMounts:
-            - name: dynamic-dashboards
-              mountPath: /var/lib/grafana/dynamic-dashboards
-        - name: datasources-sidecar
-          image: quay.io/kiwigrid/k8s-sidecar:${grafana_provisioning_sidecar_image_tag}
-          securityContext:
-            allowPrivilegeEscalation: false
-            runAsNonRoot: true
-            capabilities:
-              drop:
-                - ALL
-          ports:
-            - name: data-health
-              containerPort: 8082
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: data-health
-              scheme: HTTP
-            periodSeconds: 10
-            timeoutSeconds: 1
-            successThreshold: 1
-            failureThreshold: 3
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: data-health
-              scheme: HTTP
-            periodSeconds: 30
-            timeoutSeconds: 1
-            successThreshold: 1
-            failureThreshold: 3
-          env:
-            - name: LABEL
-              value: grafana/provisioning
-            - name: LABEL_VALUE
-              value: datasource
-            - name: FOLDER
-              value: /etc/grafana/provisioning/datasources
-            - name: NAMESPACE
-              value: ALL
-            - name: RESOURCE
-              value: configmap
-            - name: METHOD
-              value: WATCH
-            - name: UNIQUE_FILENAMES
-              value: "true"
-            - name: DEFAULT_FILE_MODE
-              value: "440"
-            - name: REQ_URL
-              value: http://127.0.0.1:3000/api/admin/provisioning/datasources/reload
-            - name: REQ_METHOD
-              value: POST
-            - name: REQ_USERNAME_FILE
-              value: /run/secrets/grafana-admin/username
-            - name: REQ_PASSWORD_FILE
-              value: /run/secrets/grafana-admin/password
-            - name: HEALTH_PORT
-              value: "8082"
-          resources:
-            requests:
-              cpu: ${grafana_provisioning_sidecar_cpu_request}
-              memory: ${grafana_provisioning_sidecar_mem_request}
-            limits:
-              cpu: ${grafana_provisioning_sidecar_cpu_limit}
-              memory: ${grafana_provisioning_sidecar_mem_limit}
-          volumeMounts:
-            - name: datasources
-              mountPath: /etc/grafana/provisioning/datasources
-            - name: grafana-admin-credentials
-              mountPath: /run/secrets/grafana-admin
-              readOnly: true
-        - name: alerting-sidecar
-          image: quay.io/kiwigrid/k8s-sidecar:${grafana_provisioning_sidecar_image_tag}
-          securityContext:
-            allowPrivilegeEscalation: false
-            runAsNonRoot: true
-            capabilities:
-              drop:
-                - ALL
-          ports:
-            - name: alert-health
-              containerPort: 8083
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: alert-health
-              scheme: HTTP
-            periodSeconds: 10
-            timeoutSeconds: 1
-            successThreshold: 1
-            failureThreshold: 3
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: alert-health
-              scheme: HTTP
-            periodSeconds: 30
-            timeoutSeconds: 1
-            successThreshold: 1
-            failureThreshold: 3
-          env:
-            - name: LABEL
-              value: grafana/provisioning
-            - name: LABEL_VALUE
-              value: alerting
-            - name: FOLDER
-              value: /etc/grafana/provisioning/alerting
-            - name: NAMESPACE
-              value: ALL
-            - name: RESOURCE
-              value: configmap
-            - name: METHOD
-              value: WATCH
-            - name: UNIQUE_FILENAMES
-              value: "true"
-            - name: DEFAULT_FILE_MODE
-              value: "440"
-            - name: REQ_URL
-              value: http://127.0.0.1:3000/api/admin/provisioning/alerting/reload
-            - name: REQ_METHOD
-              value: POST
-            - name: REQ_USERNAME_FILE
-              value: /run/secrets/grafana-admin/username
-            - name: REQ_PASSWORD_FILE
-              value: /run/secrets/grafana-admin/password
-            - name: HEALTH_PORT
-              value: "8083"
-          resources:
-            requests:
-              cpu: ${grafana_provisioning_sidecar_cpu_request}
-              memory: ${grafana_provisioning_sidecar_mem_request}
-            limits:
-              cpu: ${grafana_provisioning_sidecar_cpu_limit}
-              memory: ${grafana_provisioning_sidecar_mem_limit}
-          volumeMounts:
-            - name: alerting
-              mountPath: /etc/grafana/provisioning/alerting
-            - name: grafana-admin-credentials
-              mountPath: /run/secrets/grafana-admin
-              readOnly: true
-%{ endif ~}
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: grafana-data
         - name: datasources
-%{ if grafana_dynamic_provisioning_enabled ~}
-          emptyDir: {}
-%{ else ~}
           configMap:
             name: grafana-datasources
-%{ endif ~}
         - name: dashboard-provider
           configMap:
             name: grafana-dashboard-provider
@@ -786,21 +495,6 @@ spec:
           persistentVolumeClaim:
             claimName: ${grafana_dashboard_provisioning_pvc_name}
             readOnly: true
-%{ endif ~}
-%{ if grafana_dynamic_provisioning_enabled ~}
-        - name: dynamic-dashboards
-          emptyDir: {}
-        - name: alerting
-          emptyDir: {}
-        - name: grafana-admin-credentials
-          secret:
-            secretName: grafana-admin
-            defaultMode: 288
-            items:
-              - key: admin-user
-                path: username
-              - key: admin-password
-                path: password
 %{ endif ~}
 %{ for source in grafana_dashboard_group_sources ~}
         - name: ${source.volume_name}

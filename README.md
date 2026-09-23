@@ -625,14 +625,7 @@ tofu -chdir=monitoring output -raw prometheus_api_basic_auth_password
 
 Configure an external Grafana Prometheus datasource with URL `prometheus_api_url`, server-side/proxy access, Basic Auth enabled, user `prometheus-external`, and the persisted password.
 
-Grafana dashboards owned by this repository are provisioned from `monitoring/grafana/dashboards/*.json`. After adding or editing one, re-run the monitoring apply; the deployment script runs the dashboard sync job without restarting Grafana unless datasource or provisioning configuration changes require it.
-
-Later deployment phases can independently provision dashboards, data sources,
-alert rules, contact points, notification policies, mute timings, and notification
-templates through labeled ConfigMaps in any namespace. Grafana watches those
-resources and hot-reloads changes without another monitoring apply. See
-[Dynamic Grafana provisioning](docs/grafana-dynamic-provisioning.md) for the
-label contract, examples, lifecycle rules, and security boundary.
+Grafana dashboards are provisioned from `monitoring/grafana/dashboards/*.json`. After adding or editing a dashboard, re-run the monitoring apply; the deployment script runs the dashboard sync job without restarting Grafana unless datasource or provisioning configuration changes require it.
 
 ```bash
 cd clusters/<cluster>
