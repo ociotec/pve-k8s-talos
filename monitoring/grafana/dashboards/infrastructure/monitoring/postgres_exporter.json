@@ -919,7 +919,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Postgres exporter",
+  "title": "Grafana Postgres",
   "uid": "postgres-exporter",
   "version": 1,
   "weekStart": ""

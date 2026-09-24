@@ -2072,6 +2072,8 @@ resource "helm_release" "grafana_operator" {
       enabled = false
     }
     dashboard = {
+      # A repository-managed dashboard is adapted to annotation-based scraping;
+      # the chart dashboard assumes ServiceMonitor-specific job/cluster labels.
       enabled = false
     }
     extraObjects = local.grafana_operator_register_existing_instance_value ? [{
