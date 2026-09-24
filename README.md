@@ -616,6 +616,11 @@ retained by the chart if the release is removed. Delete managed Grafana
 resources before disabling registration or the operator so their finalizers
 can complete remote cleanup.
 
+See [Grafana Operator resource provisioning](docs/grafana-operator-provisioning.md)
+for validated `GrafanaDatasource`, `GrafanaDashboard`, `GrafanaFolder`, and
+`GrafanaAlertRuleGroup` examples, Helm ownership guidance, RBAC, status checks,
+and deletion behavior.
+
 When `prometheus_auth_keycloak_realm` is set in `monitoring_constants.tf`, OpenTofu deploys an `oauth2-proxy` instance for Prometheus and protects the Prometheus ingress with ingress-nginx external auth annotations. The selected Keycloak realm must expose a confidential `prometheus` OIDC client with redirect URI `https://<prometheus-host>/oauth2/callback`. Use `prometheus_auth_allowed_groups` to restrict access.
 
 OpenTofu also exposes a separate Prometheus API ingress at `prometheus_api_hostname`, intended for external Grafana instances and other non-interactive clients. It reuses `prometheus_api_tls_secret_name` (by default the same TLS secret as the browser Prometheus ingress) and protects the endpoint with ingress-nginx Basic Auth. The service username is `prometheus-external`; the password and htpasswd hash are persisted in `secrets/credentials.json`.
