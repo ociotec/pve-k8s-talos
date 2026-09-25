@@ -221,6 +221,12 @@ For any non-trivial change:
 
 - When the user asks to audit or update pinned versions across the repository, follow `docs/agent-workflows/update-versions.md`.
 - When the user asks to migrate, upgrade, or deploy updated monitoring components in a real cluster, follow `docs/agent-workflows/monitoring-version-migration.md` in addition to the version-update workflow. Apply its preflight and post-deployment checks whenever the change includes Tempo, OpenTelemetry Collector, Prometheus, Loki, Grafana, PostgreSQL, exporters, or their monitoring configuration.
+- When the user asks to migrate an existing Grafana workload to Helm, enable
+  Grafana Operator for an existing cluster, or complete both operations, follow
+  `docs/agent-workflows/migrate-grafana-to-helm-operator.md` in addition to the
+  general monitoring migration workflow. Treat the user's request as one
+  end-to-end migration objective, while retaining every required review,
+  commit/push authorization, and deployment permission boundary.
 - When the user asks to update a real cluster directory to match current repository changes or newly required constants, follow `docs/agent-workflows/update-cluster-from-repo.md`.
   As part of that analysis, explicitly report whether deployment sections or
   generated workspaces have appeared or disappeared compared with the target
