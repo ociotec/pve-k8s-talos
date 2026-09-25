@@ -30,8 +30,9 @@ can enable Helm immediately while keeping takeover disabled.
 ## Preflight
 
 1. Confirm the platform and cluster repositories are clean and pushed.
-2. Confirm Grafana, PostgreSQL, the `grafana-data` PVC, and
-   `Grafana/grafana-primary` are healthy.
+2. Confirm Grafana, PostgreSQL, and the `grafana-data` PVC are healthy. If the
+   Operator and `Grafana/grafana-primary` already exist, confirm they are also
+   healthy.
 3. Run `tofu init`, `tofu validate`, and a refresh-free plan from the generated
    monitoring workspace.
 4. Record the Grafana image, pod restart count, Service ClusterIP, PVC/PV, and
@@ -56,8 +57,11 @@ existing `grafana-data` claim is mounted through
 
 ## Migration deployment
 
-After review, set both flags to `true`, commit and push the platform and cluster
-changes, then deploy only monitoring:
+After review, set both flags to `true`. When installing Grafana Operator in the
+same migration, enable the Operator but keep
+`grafana_operator_register_existing_instance = false` for this first
+deployment. Commit and push the platform and cluster changes, then deploy only
+monitoring:
 
 ```bash
 cd clusters/<cluster>
@@ -89,13 +93,16 @@ Require all of the following before considering the migration complete:
 - `/api/health`, Prometheus scraping, local admin login, and Keycloak login
   work.
 - the existing dashboards and datasources remain available.
-- `Grafana/grafana-primary` reports `GrafanaReady=True`.
-- a temporary Operator datasource/dashboard/alert CRUD test succeeds.
+- Grafana Operator and its CRDs are healthy when installed by this deployment.
 
 After the first successful install, set
-`grafana_helm_take_ownership = false`, commit and push that change, and run the
-same monitoring-only deployment again. This restores atomic Helm upgrades and
-normal ownership checks on later updates.
+`grafana_helm_take_ownership = false`. If this migration installed the
+Operator, also set `grafana_operator_register_existing_instance = true` now
+that the CRDs exist. Commit and push those changes, and run the same
+monitoring-only deployment again. This restores atomic Helm upgrades and normal
+ownership checks on later updates. Require `Grafana/grafana-primary` to report
+`GrafanaReady=True`, then run a temporary Operator
+datasource/dashboard/alert CRUD and deletion test.
 
 If the initial takeover fails, do not uninstall the release, remove finalizers,
 delete PVCs, or retry with broader flags. Preserve the generated state, inspect

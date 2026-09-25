@@ -1774,6 +1774,14 @@ migrate_grafana_workload_state_to_helm() {
     return 0
   fi
 
+  # A failed apply may have installed the Helm release before its updated local
+  # state was durably published. Never treat a live Helm-owned Deployment as a
+  # legacy Deployment merely because the state address is missing.
+  if helm -n monitoring status grafana >/dev/null 2>&1; then
+    error "Grafana Helm release exists in Kubernetes but is absent from OpenTofu state; refusing to delete its Deployment." >&2
+    return 1
+  fi
+
   if [[ "${#addresses_to_remove[@]}" -gt 0 ]]; then
     if kubectl -n monitoring get configmap grafana >/dev/null 2>&1 \
       || kubectl -n monitoring get serviceaccount grafana >/dev/null 2>&1; then

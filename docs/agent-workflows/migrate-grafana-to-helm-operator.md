@@ -41,13 +41,15 @@ At completion, all of the following must be true:
 The migration normally requires two monitoring deployments under one migration
 objective:
 
-1. a takeover deployment with `grafana_helm_take_ownership = true`
-2. a steady-state deployment after returning that value to `false`
+1. a takeover deployment with `grafana_helm_take_ownership = true` and external
+   instance registration disabled; this installs Grafana Operator and its CRDs
+2. a steady-state deployment that returns takeover to `false` and enables
+   external instance registration
 
-Operator installation, CRD installation, external-instance registration, and
-the Grafana Helm takeover may be performed in the first deployment. The
-operator release explicitly depends on the Grafana release, and its chart
-installs the CRDs before rendering the registered `Grafana` custom resource.
+Do not create `Grafana/grafana-primary` in the first Operator installation.
+With mutable CRDs, the chart renders the CRDs from `templates/`; Helm cannot
+map a `Grafana` custom resource from the same release before its CRD exists.
+The second deployment registers the instance after the CRDs are established.
 
 ## Human Interaction and Authorization
 
@@ -157,7 +159,7 @@ grafana_helm_take_ownership = true
 grafana_helm_chart_version  = "13.2.5"
 
 grafana_operator_enabled                    = true
-grafana_operator_register_existing_instance = true
+grafana_operator_register_existing_instance = false
 grafana_operator_chart_version              = "5.25.0"
 grafana_operator_cpu_request                = "100m"
 grafana_operator_cpu_limit                  = "500m"
@@ -197,10 +199,8 @@ PostgreSQL, and legacy Grafana Deployment; removes only the two expected legacy
 addresses from a validated state copy; deletes only the legacy Deployment; and
 lets Helm recreate the Deployment and adopt the Service.
 
-The same OpenTofu apply then installs Grafana Operator after Grafana. Do not
-split Operator installation and external-instance registration into separate
-deployments unless a cluster-specific failure or explicit user request makes
-that necessary.
+The same OpenTofu apply installs Grafana Operator and its mutable CRDs after
+Grafana. Keep external-instance registration disabled for this deployment.
 
 ## Validation After Takeover
 
@@ -221,15 +221,11 @@ Do not proceed to steady-state cleanup until all applicable checks pass:
 8. The expected Grafana CRDs are established, including `Grafana`,
    `GrafanaDashboard`, `GrafanaDatasource`, `GrafanaFolder`, and
    `GrafanaAlertRuleGroup`.
-9. The `Grafana` resource `monitoring/grafana-primary` reports
-   `GrafanaReady=True`.
+9. No `Grafana` custom resource is expected yet; the CRDs must be established
+   before the next deployment enables registration.
 10. Operator metrics are scraped and the Grafana Operator dashboard identifies
     the current Operator pod without mixing unrelated monitoring pods.
-11. Run the temporary datasource, dashboard, and alert-rule CRUD/deletion test
-    described by `docs/grafana-operator-provisioning.md`, unless the user
-    explicitly excluded functional tests. Remove all test resources and prove
-    their remote Grafana entities were deleted.
-12. Re-read deployment status and record the takeover deployment revisions.
+11. Re-read deployment status and record the takeover deployment revisions.
 
 If an interactive login cannot be verified by the agent, report it as a named
 manual check rather than silently declaring the migration complete.
@@ -244,18 +240,25 @@ After successful takeover validation, change only:
 grafana_helm_enabled        = true
 grafana_helm_take_ownership = false
 grafana_helm_chart_version  = "13.2.5"
+
+grafana_operator_enabled                    = true
+grafana_operator_register_existing_instance = true
 ```
 
-Keep Operator and external-instance registration enabled. Run `tofu validate`
-and a refresh-free plan again, show the focused diff, and obtain the required
-commit/push and monitoring deployment authorizations. Run the same
-monitoring-only deployment command.
+Keep Operator enabled and enable external-instance registration now that its
+CRDs exist. Run `tofu validate` and a refresh-free plan again, show the focused
+diff, and obtain the required commit/push and monitoring deployment
+authorizations. Run the same monitoring-only deployment command.
 
 The second apply restores atomic Helm upgrades and normal ownership checks. It
 must not recreate Grafana, replace PVCs, or change the Service ClusterIP. Verify
 the Helm releases, workload health, Grafana CR condition, and deployment status
-again. The migration is incomplete while the configured takeover value remains
-`true`, even if Grafana is serving traffic.
+again. Require `monitoring/grafana-primary` to report `GrafanaReady=True`, then
+run the temporary datasource, dashboard, and alert-rule CRUD/deletion test from
+`docs/grafana-operator-provisioning.md`. Remove all test resources and prove
+their remote Grafana entities were deleted. The migration is incomplete while
+takeover remains `true` or external-instance registration remains disabled,
+even if Grafana is serving traffic.
 
 ## Recovery and Resume Rules
 

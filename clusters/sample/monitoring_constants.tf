@@ -118,10 +118,10 @@ locals {
   grafana_helm_take_ownership = false
   grafana_helm_chart_version  = "13.2.5"
 
-  # Install the cluster-wide Grafana Operator and register the platform-managed
-  # Grafana without transferring workload ownership to the operator.
+  # Install the cluster-wide Grafana Operator and its mutable CRDs first.
+  # Enable registration in a second monitoring deployment after the CRDs exist.
   grafana_operator_enabled                    = true
-  grafana_operator_register_existing_instance = true
+  grafana_operator_register_existing_instance = false
   grafana_operator_chart_version              = "5.25.0"
   grafana_operator_cpu_request                = "100m"
   grafana_operator_cpu_limit                  = "500m"

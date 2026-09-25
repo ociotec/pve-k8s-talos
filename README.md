@@ -609,8 +609,10 @@ all namespaces and runs with `infra-observability` priority. Set
 Grafana as the external `Grafana/grafana-primary` instance selected by the
 `grafana/instance: primary` label. Registration references the existing
 `grafana-admin` Secret and does not transfer ownership of the Grafana workload
-to the operator. Resources in other namespaces must use that instance selector
-and set `spec.allowCrossNamespaceImport: true`. CRDs are rendered as
+to the operator. On the first Operator installation, keep registration disabled
+so Helm can establish the mutable CRDs; enable registration in the following
+monitoring deployment. Resources in other namespaces must use that instance
+selector and set `spec.allowCrossNamespaceImport: true`. CRDs are rendered as
 Helm-managed templates so chart upgrades can update their schemas, and are
 retained by the chart if the release is removed. Delete managed Grafana
 resources before disabling registration or the operator so their finalizers
