@@ -1706,6 +1706,7 @@ migrate_grafana_workload_state_to_helm() {
   local migration_dir
   local working_state
   local address
+  local backup_index=0
   local -a legacy_addresses=(
     'kubernetes_manifest.monitoring_other["monitoring/Deployment/grafana"]'
     'kubernetes_manifest.monitoring_other["monitoring/Service/grafana"]'
@@ -1803,13 +1804,16 @@ migrate_grafana_workload_state_to_helm() {
       return 1
     fi
     chmod 600 "${working_state}"
-    if ! tofu -chdir="${workspace}" state rm \
-      -state="${working_state}" \
-      -backup="${migration_dir}/terraform.tfstate.backup" \
-      "${addresses_to_remove[@]}" >/dev/null; then
-      rm -rf "${migration_dir}"
-      return 1
-    fi
+    for address in "${addresses_to_remove[@]}"; do
+      if ! tofu -chdir="${workspace}" state rm \
+        -state="${working_state}" \
+        -backup="${migration_dir}/terraform.tfstate.${backup_index}.backup" \
+        "${address}" >/dev/null; then
+        rm -rf "${migration_dir}"
+        return 1
+      fi
+      backup_index=$((backup_index + 1))
+    done
     if ! jq -e . "${working_state}" >/dev/null; then
       rm -rf "${migration_dir}"
       error "Grafana Helm state handoff produced invalid JSON." >&2
