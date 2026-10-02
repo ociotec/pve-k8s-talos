@@ -273,6 +273,7 @@ This repository currently pulls images from these upstream registries:
 - `ghcr.io`
 - `quay.io`
 - `registry.k8s.io`
+- `us-docker.pkg.dev`
 - `factory.talos.dev`
 
 If your registry manager exposes a single group endpoint that aggregates all required proxies and private images, point every mirror to that group. For Nexus repository URLs, include the Docker API suffix `/v2` in the endpoint and keep `override_path = "true"` so Talos does not append another `/v2`. Registry authentication is optional; leave both `username` and `password` empty to render no auth block.
@@ -289,6 +290,7 @@ If your registry manager exposes a single group endpoint that aggregates all req
       "ghcr.io"              = "https://registry.example.com/repository/docker-public/v2"
       "quay.io"              = "https://registry.example.com/repository/docker-public/v2"
       "registry.k8s.io"      = "https://registry.example.com/repository/docker-public/v2"
+      "us-docker.pkg.dev"    = "https://registry.example.com/repository/docker-public/v2"
       "factory.talos.dev"    = "https://registry.example.com/repository/docker-public/v2"
     }
     "skip_fallback"    = "true"

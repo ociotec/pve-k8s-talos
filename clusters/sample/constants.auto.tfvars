@@ -82,6 +82,7 @@ constants = {
     #     "ghcr.io"              = "https://registry.example.com/repository/docker-public/v2"
     #     "quay.io"              = "https://registry.example.com/repository/docker-public/v2"
     #     "registry.k8s.io"      = "https://registry.example.com/repository/docker-public/v2"
+    #     "us-docker.pkg.dev"    = "https://registry.example.com/repository/docker-public/v2"
     #     "factory.talos.dev"    = "https://registry.example.com/repository/docker-public/v2"
     #   }
     #   "skip_fallback"   = "true"
