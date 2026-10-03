@@ -8,11 +8,11 @@ Codex skill.
 
 ## Consolidation Status
 
-Only the read-only discovery phase, Nexus registry onboarding, and
-registry-access validation have been consolidated using the registry path of a
-real cluster. Follow this document only through those phases. Do not infer VPA
-or Goldilocks installation, configuration, deployment, validation, or rollback
-steps that are not yet documented here.
+Only the read-only discovery phase, Nexus registry onboarding, Talos mirror
+enablement, and registry-access validation have been consolidated using the
+registry path of a real cluster. Follow this document only through those
+phases. Do not infer VPA or Goldilocks installation, configuration, deployment,
+validation, or rollback steps that are not yet documented here.
 
 Extend this workflow only after a new step has been completed successfully on a
 real cluster and its result has been reviewed. Keep all instructions generic:
@@ -125,6 +125,87 @@ Keep Nexus credentials out of URLs, command arguments, output, shell tracing,
 and temporary files. Load them from the approved service configuration and pass
 them to the HTTP client using its protected configuration mechanism. Do not
 print the private Nexus URL in reports or shared documentation.
+
+## Consolidated Talos Mirror Enablement
+
+Use this phase only after the exact pinned image manifest returns `HTTP 200`
+through the client-facing Nexus Docker group.
+
+1. Add the upstream registry hostname to the cluster's
+   `constants.auto.tfvars` registry mirror map. Reuse the same client-facing
+   Nexus Docker group endpoint as the cluster's existing registry entries. Do
+   not add a direct upstream URL or a URL for the dedicated Nexus proxy
+   repository.
+
+2. Regenerate the Talos assets from `clusters/<cluster>` without excluding
+   deployed service sections whose hostnames must remain in `no_proxy`:
+
+   ```bash
+   direnv exec . ../../scripts/gen-talos-assets.sh --cluster <cluster>
+   ```
+
+   Add `--skip-*` flags only for sections that are intentionally absent and
+   whose hostnames must be excluded from the rendered Talos configuration.
+
+3. Validate the real root workspace and review a plan without applying it:
+
+   ```bash
+   direnv exec . tofu -chdir=out/root init -input=false
+   direnv exec . tofu -chdir=out/root validate
+   direnv exec . tofu -chdir=out/root plan -input=false
+   ```
+
+   Treat regenerated `local_sensitive_file` resources as local machineconfig
+   files, not VM replacements. Confirm separately that no VM resource is being
+   created, deleted, or replaced. Inspect any pre-existing Talos configuration
+   drift, such as `no_proxy` changes, rather than attributing all machineconfig
+   differences to the new mirror.
+
+4. Commit and push the platform and cluster source changes required by the
+   normal synchronized deployment flow. Obtain explicit permission for the
+   named cluster and the Talos/Kubernetes section before deploying.
+
+5. Deploy only Talos/Kubernetes from `clusters/<cluster>`:
+
+   ```bash
+   direnv exec . ../../scripts/deploy.sh -t
+   ```
+
+   Do not add service `--skip-*` flags merely to prevent service deployment;
+   `-t` exits before all Kubernetes service sections. In this mode, skip flags
+   affect only which service hostnames are included in the generated Talos
+   `no_proxy` value.
+
+6. Let the deployment reconcile staged machine configurations sequentially.
+   Confirm that every worker and control-plane node recovers with the desired
+   Talos configuration and returns `Ready`. Do not interrupt the deployment
+   while a node is rebooting unless a documented failure condition requires
+   operator intervention.
+
+7. After success, verify all of the following:
+
+   - both repositories are clean and synchronized with their upstream branches;
+   - development mode is inactive;
+   - the live deployment record advanced only the `k8s` section;
+   - all service section deployment records retained their previous revisions;
+   - the runtime-state commit was created and pushed by the normal deployment
+     flow.
+
+8. Select a worker that does not already contain the exact pinned image, then
+   pull it through Talos CRI and confirm the image reference and digest:
+
+   ```bash
+   task_node_ip="$(kubectl get node <worker> \
+     -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}')"
+   talosctl image pull -n "${task_node_ip}" \
+     <registry>/<repository>/<image>:<version>
+   talosctl image list -n "${task_node_ip}"
+   ```
+
+   With `skipFallback` enabled for the mirror, a successful pull on a node that
+   did not have the image cached validates the Talos-to-Nexus path. State that
+   this validation leaves the image in that node's CRI cache until runtime
+   garbage collection removes it.
 
 ## Consolidated Discovery Workflow
 
