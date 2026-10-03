@@ -408,6 +408,17 @@ print_grafana() {
   print_secret_bullet "Admin password" "${grafana_password}"
 }
 
+print_goldilocks() {
+  local goldilocks_url
+  goldilocks_url="$(output_raw "${cluster_monitoring_workspace}" goldilocks_url)"
+  if ! has_value "${goldilocks_url}"; then
+    return 0
+  fi
+  print_service "Goldilocks"
+  print_url_bullet "URL" "${goldilocks_url}"
+  print_data_bullet "Authentication" "Keycloak (oauth2-proxy)"
+}
+
 print_prometheus() {
   local prometheus_url
   local prometheus_api_url
@@ -569,6 +580,7 @@ print_rook_dashboard() {
 
 print_keycloak
 print_grafana
+print_goldilocks
 print_prometheus
 print_portainer
 print_rancher

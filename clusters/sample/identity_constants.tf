@@ -41,6 +41,7 @@ locals {
   rancher_url            = "https://rancher.${local.domain}"
   portainer_url          = "https://portainer.${local.domain}"
   grafana_url            = "https://grafana.${local.domain}"
+  goldilocks_url         = "https://goldilocks.${local.domain}"
   prometheus_url         = "https://prometheus.${local.domain}"
   redpanda_console_url   = "https://redpanda-console.${local.domain}"
   garage_console_url     = "https://s3-console.${local.domain}"
@@ -111,6 +112,28 @@ locals {
       ]
 
       oidc_clients = [
+        {
+          client_id                    = "goldilocks"
+          name                         = "Goldilocks"
+          description                  = "OIDC client for the Goldilocks recommendation dashboard"
+          access_type                  = "confidential"
+          client_secret_length         = 32
+          login_allowed_groups         = ["k8s-admins", "monitoring-view"]
+          valid_redirect_uris          = ["${local.goldilocks_url}/oauth2/callback"]
+          post_logout_redirect_uris    = ["${local.goldilocks_url}/", "${local.goldilocks_url}/*"]
+          web_origins                  = [local.goldilocks_url]
+          base_url                     = local.goldilocks_url
+          admin_url                    = local.goldilocks_url
+          standard_flow_enabled        = true
+          direct_access_grants_enabled = false
+          service_accounts_enabled     = false
+          full_scope_allowed           = false
+          include_groups_claim         = true
+          groups_claim_name            = "groups"
+          groups_claim_full_path       = false
+          default_scopes               = ["profile", "email", "roles"]
+          optional_scopes              = ["offline_access"]
+        },
         {
           client_id                    = "rancher"
           name                         = "Rancher"

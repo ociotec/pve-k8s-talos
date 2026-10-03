@@ -582,6 +582,14 @@ If you don't have internal DNS, add an `/etc/hosts` entry using `ingress_lb_ip` 
 
 ### Monitoring (Prometheus, Loki, Grafana, Tempo)
 
+Recommendation-only VPA and a Keycloak-protected Goldilocks dashboard are enabled
+by default and configured through `clusters/<cluster>/vpa-goldilocks.auto.tfvars`.
+Configure the cluster's Keycloak realm and Goldilocks client before deploying
+monitoring, or explicitly disable both components for clusters not using them.
+They belong to the monitoring deployment section; the Goldilocks OIDC client
+belongs to identity. See the [VPA and Goldilocks specification](docs/vpa-goldilocks.md)
+for the design, input contract, resource defaults and rollout status.
+
 Define your constants in `clusters/<cluster>/monitoring_constants.tf`: monitoring hostnames, storage class, PVC sizes, retention settings, and image versions.
 
 Define Portainer/Rancher constants in `clusters/<cluster>/platform_constants.tf`.

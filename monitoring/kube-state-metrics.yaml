@@ -9,6 +9,14 @@ kind: ClusterRole
 metadata:
   name: kube-state-metrics
 rules:
+%{ if vpa_metrics_enabled ~}
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["autoscaling.k8s.io"]
+    resources: ["verticalpodautoscalers"]
+    verbs: ["list", "watch"]
+%{ endif ~}
   - apiGroups:
       - ""
     resources:
@@ -132,6 +140,10 @@ spec:
       app: kube-state-metrics
   template:
     metadata:
+%{ if vpa_metrics_enabled ~}
+      annotations:
+        checksum/vpa-metrics-config: ${vpa_metrics_config_hash}
+%{ endif ~}
       labels:
         app: kube-state-metrics
         app.kubernetes.io/part-of: kube-state-metrics
@@ -142,6 +154,9 @@ spec:
         - name: kube-state-metrics
           image: registry.k8s.io/kube-state-metrics/kube-state-metrics:${kube_state_metrics_image_tag}
           args:
+%{ if vpa_metrics_enabled ~}
+            - --custom-resource-state-config-file=/etc/kube-state-metrics/vpa/config.yaml
+%{ endif ~}
             - --metric-labels-allowlist=pods=[app.kubernetes.io/component,component,app.kubernetes.io/name,app.kubernetes.io/part-of,app],deployments=[app.kubernetes.io/part-of,app.kubernetes.io/name,app],statefulsets=[app.kubernetes.io/part-of,app.kubernetes.io/name,app],daemonsets=[app.kubernetes.io/part-of,app.kubernetes.io/name,app],persistentvolumeclaims=[app.kubernetes.io/component,app.kubernetes.io/name,app.kubernetes.io/instance,app.kubernetes.io/part-of,app.kubernetes.io/managed-by,pve-k8s-talos/section,pve-k8s-talos/storage-role]
           ports:
             - name: metrics
@@ -173,6 +188,16 @@ spec:
             limits:
               cpu: ${kube_state_metrics_cpu_limit}
               memory: ${kube_state_metrics_mem_limit}
+%{ if vpa_metrics_enabled ~}
+          volumeMounts:
+            - name: vpa-metrics-config
+              mountPath: /etc/kube-state-metrics/vpa
+              readOnly: true
+      volumes:
+        - name: vpa-metrics-config
+          configMap:
+            name: kube-state-metrics-vpa
+%{ endif ~}
 ---
 apiVersion: v1
 kind: Service

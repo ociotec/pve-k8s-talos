@@ -2193,6 +2193,14 @@ prepare_monitoring_workspace() {
     link_into_workspace "${repo_root}/monitoring/.terraform" "${workspace}/.terraform"
   fi
   link_into_workspace "${repo_root}/monitoring/main.tf" "${workspace}/main.tf"
+  link_into_workspace "${repo_root}/monitoring/vpa-goldilocks.tf" "${workspace}/vpa-goldilocks.tf"
+  link_into_workspace "${repo_root}/monitoring/goldilocks-oauth2-proxy.yaml" "${workspace}/goldilocks-oauth2-proxy.yaml"
+  if [[ -r "${cluster_dir}/vpa-goldilocks.auto.tfvars" ]]; then
+    link_into_workspace "${cluster_dir}/vpa-goldilocks.auto.tfvars" "${workspace}/vpa-goldilocks.auto.tfvars"
+  else
+    # Do not retain an obsolete generated input after removing cluster opt-in.
+    rm -f "${workspace}/vpa-goldilocks.auto.tfvars"
+  fi
   link_into_workspace "${cluster_constants_path}" "${workspace}/constants.auto.tfvars"
   link_into_workspace "${cluster_monitoring_constants_path}" "${workspace}/constants.tf"
   link_into_workspace "${cluster_vms_path}" "${workspace}/vms.auto.tfvars"
@@ -4022,6 +4030,13 @@ else
     monitoring_deployments+=(policy-reporter-oauth2-proxy)
     monitoring_services+=(policy-reporter-oauth2-proxy)
   fi
+  if [[ "$(tofu -chdir="${cluster_monitoring_workspace}" output -raw goldilocks_enabled)" == "true" ]]; then
+    monitoring_deployments+=(goldilocks-controller goldilocks-dashboard goldilocks-oauth2-proxy)
+    monitoring_services+=(goldilocks-dashboard goldilocks-oauth2-proxy)
+  fi
+  if [[ "$(tofu -chdir="${cluster_monitoring_workspace}" output -raw vpa_enabled)" == "true" ]]; then
+    monitoring_deployments+=(vpa-recommender)
+  fi
   if kubectl -n monitoring get pvc dashboards-provisioning >/dev/null 2>&1; then
     monitoring_pvcs+=(dashboards-provisioning)
   fi
@@ -4051,6 +4066,9 @@ else
   prometheus_api_user="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw prometheus_api_basic_auth_user)"
   grafana_user="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw grafana_admin_user)"
   message "Grafana URL: ${URL_FMT_START}${grafana_url}${URL_FMT_END}"
+  if [[ "$(tofu -chdir="${cluster_monitoring_workspace}" output -raw goldilocks_enabled)" == "true" ]]; then
+    message "Goldilocks URL: ${URL_FMT_START}$(tofu -chdir="${cluster_monitoring_workspace}" output -raw goldilocks_url)${URL_FMT_END}"
+  fi
   message "Prometheus URL: ${URL_FMT_START}${prometheus_url}${URL_FMT_END}"
   message "Prometheus API URL: ${URL_FMT_START}${prometheus_api_url}${URL_FMT_END}"
   message "Prometheus API user: ${DATA_FMT_START}${prometheus_api_user}${DATA_FMT_END}"

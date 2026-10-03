@@ -1,0 +1,769 @@
+{
+  "uid": "vpa-goldilocks",
+  "title": "VPA and Goldilocks",
+  "description": "VPA recommendations per workload/container and exporter health. Recommendations are advisory, not automatic resource changes. Missing recommendations are not zero values.",
+  "id": null,
+  "version": 1,
+  "schemaVersion": 41,
+  "editable": true,
+  "graphTooltip": 1,
+  "tags": [
+    "infrastructure",
+    "monitoring",
+    "vpa",
+    "goldilocks"
+  ],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "title": "VPA objects",
+      "type": "stat",
+      "description": "",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short",
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "editorMode": "code",
+          "expr": "count(kube_verticalpodautoscaler_info{namespace=~\"$namespace\",target_kind=~\"$kind\",target_name=~\"$workload\"})",
+          "legendFormat": "{{namespace}} / {{target_name}} / {{container}} · {{bound}}",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "VPAs with recommendations",
+      "type": "stat",
+      "description": "",
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short",
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "editorMode": "code",
+          "expr": "count(kube_verticalpodautoscaler_status_condition{namespace=~\"$namespace\",target_kind=~\"$kind\",target_name=~\"$workload\",condition=\"RecommendationProvided\"} == 1) or (0 * count(kube_verticalpodautoscaler_info{namespace=~\"$namespace\",target_kind=~\"$kind\",target_name=~\"$workload\"}))",
+          "legendFormat": "{{namespace}} / {{target_name}} / {{container}} · {{bound}}",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "VPAs awaiting recommendations",
+      "type": "stat",
+      "description": "New workloads or workloads without usage samples may not have recommendations yet. An absent recommendation is not a zero recommendation.",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short",
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "editorMode": "code",
+          "expr": "count(kube_verticalpodautoscaler_info{namespace=~\"$namespace\",target_kind=~\"$kind\",target_name=~\"$workload\"} unless on(namespace,verticalpodautoscaler) (kube_verticalpodautoscaler_status_condition{namespace=~\"$namespace\",target_kind=~\"$kind\",target_name=~\"$workload\",condition=\"RecommendationProvided\"} == 1)) or (0 * count(kube_verticalpodautoscaler_info{namespace=~\"$namespace\",target_kind=~\"$kind\",target_name=~\"$workload\"}))",
+          "legendFormat": "{{namespace}} / {{target_name}} / {{container}} · {{bound}}",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Recommendation-only VPAs",
+      "type": "stat",
+      "description": "",
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short",
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "editorMode": "code",
+          "expr": "count(kube_verticalpodautoscaler_info{namespace=~\"$namespace\",target_kind=~\"$kind\",target_name=~\"$workload\",update_mode=\"Off\"}) or (0 * count(kube_verticalpodautoscaler_info{namespace=~\"$namespace\",target_kind=~\"$kind\",target_name=~\"$workload\"}))",
+          "legendFormat": "{{namespace}} / {{target_name}} / {{container}} · {{bound}}",
+          "range": false,
+          "instant": true
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "CPU recommendations per container",
+      "type": "timeseries",
+      "description": "Lower bound, target and upper bound in CPU cores. Recommendations do not modify workloads.",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "cores",
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "editorMode": "code",
+          "expr": "kube_verticalpodautoscaler_recommendation{namespace=~\"$namespace\",target_kind=~\"$kind\",target_name=~\"$workload\",container=~\"$container\",resource=\"cpu\",bound=~\"lowerBound|target|upperBound\"}",
+          "legendFormat": "{{namespace}} / {{target_name}} / {{container}} · {{bound}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Memory recommendations per container",
+      "type": "timeseries",
+      "description": "Lower bound, target and upper bound. Adapt accepted values to platform policy: memory request must equal its limit.",
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "bytes",
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "editorMode": "code",
+          "expr": "kube_verticalpodautoscaler_recommendation{namespace=~\"$namespace\",target_kind=~\"$kind\",target_name=~\"$workload\",container=~\"$container\",resource=\"memory\",bound=~\"lowerBound|target|upperBound\"}",
+          "legendFormat": "{{namespace}} / {{target_name}} / {{container}} · {{bound}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Current CPU targets",
+      "type": "table",
+      "description": "",
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "cores",
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "editorMode": "code",
+          "expr": "kube_verticalpodautoscaler_recommendation{namespace=~\"$namespace\",target_kind=~\"$kind\",target_name=~\"$workload\",container=~\"$container\",resource=\"cpu\",bound=\"target\"}",
+          "legendFormat": "{{namespace}} / {{target_name}} / {{container}} · {{bound}}",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "customresource_group": true,
+              "customresource_kind": true,
+              "customresource_version": true,
+              "target_api_version": true,
+              "unit": true,
+              "bound": true
+            },
+            "renameByName": {
+              "Value": "CPU (cores)"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Current memory targets",
+      "type": "table",
+      "description": "",
+      "gridPos": {
+        "x": 12,
+        "y": 13,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "bytes",
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "editorMode": "code",
+          "expr": "kube_verticalpodautoscaler_recommendation{namespace=~\"$namespace\",target_kind=~\"$kind\",target_name=~\"$workload\",container=~\"$container\",resource=\"memory\",bound=\"target\"}",
+          "legendFormat": "{{namespace}} / {{target_name}} / {{container}} · {{bound}}",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "customresource_group": true,
+              "customresource_kind": true,
+              "customresource_version": true,
+              "target_api_version": true,
+              "unit": true,
+              "bound": true
+            },
+            "renameByName": {
+              "Value": "Memory (bytes)"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "VPAs without a recommendation",
+      "type": "table",
+      "description": "",
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short",
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "editorMode": "code",
+          "expr": "kube_verticalpodautoscaler_info{namespace=~\"$namespace\",target_kind=~\"$kind\",target_name=~\"$workload\"} unless on(namespace,verticalpodautoscaler) (kube_verticalpodautoscaler_status_condition{namespace=~\"$namespace\",target_kind=~\"$kind\",target_name=~\"$workload\",condition=\"RecommendationProvided\"} == 1)",
+          "legendFormat": "{{namespace}} / {{target_name}} / {{container}} · {{bound}}",
+          "range": false,
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true,
+              "customresource_group": true,
+              "customresource_kind": true,
+              "customresource_version": true,
+              "target_api_version": true,
+              "unit": true,
+              "bound": true
+            },
+            "renameByName": {
+              "Value": "Value"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "VPA inventory by namespace and mode",
+      "type": "timeseries",
+      "description": "",
+      "gridPos": {
+        "x": 12,
+        "y": 22,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short",
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "editorMode": "code",
+          "expr": "count by(namespace,update_mode) (kube_verticalpodautoscaler_info{namespace=~\"$namespace\",target_kind=~\"$kind\",target_name=~\"$workload\"})",
+          "legendFormat": "{{namespace}} · {{update_mode}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      }
+    },
+    {
+      "id": 11,
+      "title": "Recommender and Goldilocks scrape health",
+      "type": "timeseries",
+      "description": "",
+      "gridPos": {
+        "x": 0,
+        "y": 30,
+        "w": 12,
+        "h": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short",
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "editorMode": "code",
+          "expr": "max by(app,component) (up{namespace=\"monitoring\",app=~\"vpa|goldilocks\",component=~\"recommender|controller\"})",
+          "legendFormat": "{{app}} / {{component}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      }
+    },
+    {
+      "id": 12,
+      "title": "Recommendation exporter scrape health",
+      "type": "timeseries",
+      "description": "",
+      "gridPos": {
+        "x": 12,
+        "y": 30,
+        "w": 12,
+        "h": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short",
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "editorMode": "code",
+          "expr": "up{job=\"kube-state-metrics\"}",
+          "legendFormat": "kube-state-metrics",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "options": {
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      }
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "text": "Prometheus",
+          "value": "Prometheus"
+        },
+        "options": [],
+        "refresh": 1
+      },
+      {
+        "name": "namespace",
+        "label": "Namespace",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kube_verticalpodautoscaler_info, namespace)",
+        "query": {
+          "qryType": 1,
+          "query": "label_values(kube_verticalpodautoscaler_info, namespace)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": []
+      },
+      {
+        "name": "kind",
+        "label": "Kind",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kube_verticalpodautoscaler_info{namespace=~\"$namespace\"}, target_kind)",
+        "query": {
+          "qryType": 1,
+          "query": "label_values(kube_verticalpodautoscaler_info{namespace=~\"$namespace\"}, target_kind)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": []
+      },
+      {
+        "name": "workload",
+        "label": "Workload",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kube_verticalpodautoscaler_info{namespace=~\"$namespace\",target_kind=~\"$kind\"}, target_name)",
+        "query": {
+          "qryType": 1,
+          "query": "label_values(kube_verticalpodautoscaler_info{namespace=~\"$namespace\",target_kind=~\"$kind\"}, target_name)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": []
+      },
+      {
+        "name": "container",
+        "label": "Container",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kube_verticalpodautoscaler_recommendation{namespace=~\"$namespace\",target_kind=~\"$kind\",target_name=~\"$workload\"}, container)",
+        "query": {
+          "qryType": 1,
+          "query": "label_values(kube_verticalpodautoscaler_recommendation{namespace=~\"$namespace\",target_kind=~\"$kind\",target_name=~\"$workload\"}, container)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": []
+      }
+    ]
+  }
+}

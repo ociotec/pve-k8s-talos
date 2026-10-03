@@ -219,6 +219,7 @@ extract_monitoring_credentials() {
   seed_json_string ".monitoring.prometheus_api_basic_auth_password" "$(state_resource_attr "${state_path}" random_password prometheus_api_basic_auth result)"
   seed_json_string ".monitoring.prometheus_api_basic_auth_hash" "$(state_resource_attr "${state_path}" random_password prometheus_api_basic_auth bcrypt_hash)"
   seed_json_string ".monitoring.prometheus_oauth_cookie_secret" "$(state_resource_attr "${state_path}" random_password prometheus_oauth_cookie_secret result)"
+  seed_json_string ".monitoring.goldilocks_oauth_cookie_secret" "$(state_resource_attr "${state_path}" kubernetes_secret_v1 goldilocks_oauth data | jq -r '."cookie-secret" // empty')"
 }
 
 extract_platform_credentials() {

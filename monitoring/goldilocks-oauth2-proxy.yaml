@@ -1,0 +1,169 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: goldilocks-oauth2-proxy
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: goldilocks-oauth2-proxy
+    app.kubernetes.io/instance: goldilocks
+    app.kubernetes.io/component: oauth2-proxy
+    app.kubernetes.io/part-of: goldilocks
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: goldilocks-oauth2-proxy
+      app.kubernetes.io/instance: goldilocks
+  template:
+    metadata:
+      annotations:
+        checksum/oauth-secret: "${goldilocks_oauth_secret_checksum}"
+        checksum/oidc-ca: "${goldilocks_oidc_ca_checksum}"
+      labels:
+        app.kubernetes.io/name: goldilocks-oauth2-proxy
+        app.kubernetes.io/instance: goldilocks
+        app.kubernetes.io/component: oauth2-proxy
+        app.kubernetes.io/part-of: goldilocks
+        app.kubernetes.io/managed-by: infrastructure
+        pve-k8s-talos/section: monitoring
+    spec:
+      priorityClassName: infra-observability
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: oauth2-proxy
+          image: quay.io/oauth2-proxy/oauth2-proxy:${goldilocks_oauth2_proxy_image_tag}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: ${goldilocks_oauth2_proxy_cpu_request}
+              memory: ${goldilocks_oauth2_proxy_mem_request}
+            limits:
+              cpu: ${goldilocks_oauth2_proxy_cpu_limit}
+              memory: ${goldilocks_oauth2_proxy_mem_limit}
+          args:
+            - --http-address=0.0.0.0:4180
+            - --provider=keycloak-oidc
+            - --oidc-issuer-url=${goldilocks_oidc_issuer}
+            - --client-id=${goldilocks_oidc_client_id}
+            - --redirect-url=${goldilocks_oauth_redirect_uri}
+            - --email-domain=*
+            - --scope=openid profile email
+            - --code-challenge-method=S256
+            - --reverse-proxy=true
+            - --set-xauthrequest=true
+            - --session-cookie-minimal=true
+            - --skip-provider-button=true
+            - --cookie-name=${goldilocks_oauth2_proxy_cookie_name}
+            - --cookie-secure=true
+            - --cookie-samesite=lax
+            - --upstream=static://202
+%{ for group_name in goldilocks_oauth2_proxy_allowed_groups ~}
+            - --allowed-group=${group_name}
+%{ endfor ~}
+            - --provider-ca-file=/run/secrets/goldilocks-oidc-ca/ca.crt
+            - --use-system-trust-store=true
+          env:
+            - name: OAUTH2_PROXY_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: ${goldilocks_oauth_secret_name}
+                  key: client-secret
+            - name: OAUTH2_PROXY_COOKIE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: ${goldilocks_oauth_secret_name}
+                  key: cookie-secret
+          ports:
+            - name: http
+              containerPort: 4180
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: http
+              scheme: HTTP
+            periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: http
+              scheme: HTTP
+            periodSeconds: 30
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+          volumeMounts:
+            - name: goldilocks-oidc-ca
+              mountPath: /run/secrets/goldilocks-oidc-ca
+              readOnly: true
+      volumes:
+        - name: goldilocks-oidc-ca
+          secret:
+            secretName: goldilocks-oidc-ca
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: goldilocks-oauth2-proxy
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: goldilocks-oauth2-proxy
+    app.kubernetes.io/instance: goldilocks
+    app.kubernetes.io/component: oauth2-proxy
+    app.kubernetes.io/part-of: goldilocks
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+spec:
+  selector:
+    app.kubernetes.io/name: goldilocks-oauth2-proxy
+    app.kubernetes.io/instance: goldilocks
+  ports:
+    - name: http
+      port: 4180
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: goldilocks-oauth2-proxy
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: goldilocks-oauth2-proxy
+    app.kubernetes.io/instance: goldilocks
+    app.kubernetes.io/component: oauth2-proxy
+    app.kubernetes.io/part-of: goldilocks
+    app.kubernetes.io/managed-by: infrastructure
+    pve-k8s-talos/section: monitoring
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-buffer-size: 128k
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - ${goldilocks_hostname}
+      secretName: ${goldilocks_tls_secret_name}
+  rules:
+    - host: ${goldilocks_hostname}
+      http:
+        paths:
+          - path: /oauth2
+            pathType: Prefix
+            backend:
+              service:
+                name: goldilocks-oauth2-proxy
+                port:
+                  number: 4180

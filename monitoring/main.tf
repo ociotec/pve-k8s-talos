@@ -55,7 +55,7 @@ variable "constants" {
 }
 
 data "terraform_remote_state" "identity" {
-  count = trimspace(try(local.grafana_auth_keycloak_realm, "")) != "" || trimspace(try(local.prometheus_auth_keycloak_realm, "")) != "" || local.otlp_public_enabled_value || local.enable_policy_reporter_value ? 1 : 0
+  count = trimspace(try(local.grafana_auth_keycloak_realm, "")) != "" || trimspace(try(local.prometheus_auth_keycloak_realm, "")) != "" || local.otlp_public_enabled_value || local.enable_policy_reporter_value || local.enable_goldilocks_value ? 1 : 0
 
   backend = "local"
   config = {
@@ -462,7 +462,7 @@ locals {
   )
   grafana_go_mem_limit_mib         = floor(local.grafana_mem_limit_mib * local.grafana_go_mem_limit_percent_value / 100)
   grafana_go_mem_limit             = format("%dMiB", local.grafana_go_mem_limit_mib)
-  monitoring_keycloak_auth_enabled = local.grafana_auth_enabled || local.prometheus_auth_enabled || local.otlp_public_enabled_value || local.enable_policy_reporter_value
+  monitoring_keycloak_auth_enabled = local.grafana_auth_enabled || local.prometheus_auth_enabled || local.otlp_public_enabled_value || local.enable_policy_reporter_value || local.enable_goldilocks_value
   identity_realm_groups = local.monitoring_keycloak_auth_enabled ? try(
     data.terraform_remote_state.identity[0].outputs.keycloak_realm_groups,
     {}
@@ -585,6 +585,11 @@ locals {
   available_identity_realms = keys(local.identity_oidc_metadata)
   monitoring_tls_secrets = concat(
     local.tls_secrets,
+    local.enable_goldilocks_value ? [{
+      certificate = local.default_certificate_name
+      namespace   = "monitoring"
+      secret_name = local.goldilocks_tls_secret_name_value
+    }] : [],
     local.enable_policy_reporter_value ? [{
       certificate = local.default_certificate_name
       namespace   = "monitoring"
@@ -608,6 +613,9 @@ locals {
       ) && (
       basename(filename) != "kubernetes_events.json" ||
       local.kubernetes_events_enabled_value
+    ) && (
+      basename(filename) != "vpa_goldilocks.json" ||
+      local.enable_vpa_value
     )
   ])
   grafana_dashboard_configmap_keys = {
@@ -984,6 +992,8 @@ locals {
       kube_state_metrics_cpu_limit   = local.kube_state_metrics_cpu_limit
       kube_state_metrics_mem_request = local.kube_state_metrics_mem_request
       kube_state_metrics_mem_limit   = local.kube_state_metrics_mem_limit
+      vpa_metrics_enabled            = local.enable_vpa_value
+      vpa_metrics_config_hash        = sha256(local.vpa_state_metrics_config)
     })) :
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
@@ -1542,6 +1552,7 @@ resource "kubernetes_manifest" "monitoring_other" {
     kubernetes_secret_v1.otlp_public_oidc_ca,
     kubernetes_secret_v1.policy_reporter_oauth,
     kubernetes_secret_v1.policy_reporter_oidc_ca,
+    kubernetes_config_map_v1.vpa_metrics,
   ]
 }
 
