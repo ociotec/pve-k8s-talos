@@ -724,6 +724,7 @@ Run with `-h` or `--help` to see help documentation. Common options:
 --skip-kafka      Skip Kafka/Redpanda services.
 --skip-monitoring Skip Prometheus/Loki/Grafana/Tempo stack.
 --skip-benchmark  Skip benchmark workloads.
+-t, --talos-only  Deploy and reconcile Talos/Kubernetes, then exit before all service sections.
 --services-only   Skip Talos VM/root apply and deploy Kubernetes services only.
 ```
 
@@ -734,6 +735,18 @@ For faster iterative deploys after the Talos VMs and kubeconfig already exist, u
 ```bash
 ../../scripts/deploy.sh --services-only
 ```
+
+To apply only Talos machine configuration or root workspace changes without
+deploying Kubernetes service sections, use:
+
+```bash
+../../scripts/deploy.sh -t
+```
+
+In `-t`/`--talos-only` mode, service skip flags do not select deployment sections;
+they only exclude the corresponding service hostnames from the generated Talos
+`no_proxy` value. Omit those flags when the existing service hostnames must be
+preserved.
 
 Normal deployment output shows service URLs and usernames but hides passwords
 and tokens. Use `--show-secrets` only from an authorized administrative

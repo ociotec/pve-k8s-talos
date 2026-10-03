@@ -37,6 +37,9 @@ Options:
   -k, --skip-kafka          Skip Kafka/Redpanda services.
   -m, --skip-monitoring     Skip monitoring stack (Prometheus, Loki, Grafana, Tempo).
   -b, --skip-benchmark      Skip benchmark workloads.
+  -t, --talos-only          Deploy and reconcile only Talos/Kubernetes, then exit before
+                            all Kubernetes service sections. Skip flags only shape the
+                            generated Talos no_proxy configuration in this mode.
       --services-only       Skip Talos VM/root apply and deploy Kubernetes services only.
                             Requires existing out/kubeconfig and out/talosconfig.
       --development         Allow uncommitted platform and cluster source changes.
@@ -68,6 +71,7 @@ skip_platform=false
 skip_kafka=false
 skip_monitoring=false
 skip_benchmark=false
+talos_only=false
 services_only=false
 development_mode=false
 consolidate_development=false
@@ -128,6 +132,10 @@ while [[ $# -gt 0 ]]; do
       skip_benchmark=true
       shift
       ;;
+    -t|--talos-only)
+      talos_only=true
+      shift
+      ;;
     --services-only)
       services_only=true
       shift
@@ -173,6 +181,18 @@ fi
 
 if [[ "${services_only}" == "true" && "${destroy_first}" == "true" ]]; then
   error "--services-only cannot be combined with --destroy or --destroy-only." >&2
+  exit 1
+fi
+
+if [[ "${talos_only}" == "true" && "${services_only}" == "true" ]]; then
+  error "--talos-only and --services-only are mutually exclusive." >&2
+  exit 1
+fi
+
+if [[ "${talos_only}" == "true" \
+  && ("${destroy_first}" == "true" || "${purge_external_ceph}" == "true" \
+    || "${purge_credentials}" == "true") ]]; then
+  error "--talos-only cannot be combined with destruction or purge flags." >&2
   exit 1
 fi
 
@@ -559,28 +579,28 @@ if [[ "${skip_benchmark}" == "true" ]]; then
 fi
 
 quantity_check_paths=()
-if [[ "${skip_ceph}" != "true" ]]; then
+if [[ "${talos_only}" != "true" && "${skip_ceph}" != "true" ]]; then
   quantity_check_paths+=("${repo_root}/rook")
 fi
-if [[ "${skip_k8s_net}" != "true" ]]; then
+if [[ "${talos_only}" != "true" && "${skip_k8s_net}" != "true" ]]; then
   quantity_check_paths+=("${repo_root}/k8s-net")
 fi
-if [[ "${skip_identity}" != "true" ]]; then
+if [[ "${talos_only}" != "true" && "${skip_identity}" != "true" ]]; then
   quantity_check_paths+=("${repo_root}/identity")
 fi
-if [[ "${skip_s3_storage}" != "true" ]]; then
+if [[ "${talos_only}" != "true" && "${skip_s3_storage}" != "true" ]]; then
   quantity_check_paths+=("${repo_root}/s3-storage")
 fi
-if [[ "${skip_platform}" != "true" ]]; then
+if [[ "${talos_only}" != "true" && "${skip_platform}" != "true" ]]; then
   quantity_check_paths+=("${repo_root}/platform")
 fi
-if [[ "${skip_kafka}" != "true" ]]; then
+if [[ "${talos_only}" != "true" && "${skip_kafka}" != "true" ]]; then
   quantity_check_paths+=("${repo_root}/kafka")
 fi
-if [[ "${skip_monitoring}" != "true" ]]; then
+if [[ "${talos_only}" != "true" && "${skip_monitoring}" != "true" ]]; then
   quantity_check_paths+=("${repo_root}/monitoring")
 fi
-if [[ "${skip_benchmark}" != "true" ]]; then
+if [[ "${talos_only}" != "true" && "${skip_benchmark}" != "true" ]]; then
   quantity_check_paths+=("${repo_root}/benchmark")
 fi
 check_integer_cpu_millicores "${quantity_check_paths[@]}"
@@ -3548,7 +3568,9 @@ if [[ "${purge_external_ceph}" == "true" ]]; then
   fi
 fi
 
-if [[ "${skip_k8s_net}" != "true" && "${destroy_only}" != "true" ]]; then
+if [[ "${talos_only}" != "true" \
+  && "${skip_k8s_net}" != "true" \
+  && "${destroy_only}" != "true" ]]; then
   validate_node_remediation_proxmox_access
 fi
 
@@ -3694,6 +3716,13 @@ else
   "${script_dir}/render-k8s-nodes.sh" --kubeconfig "${active_kubeconfig_path}"
   record_deployment_status "k8s"
   finish_deploy_section "Talos/Kubernetes"
+fi
+
+if [[ "${talos_only}" == "true" ]]; then
+  state_sync_finalized=true
+  persist_cluster_runtime_state "success"
+  message "Talos/Kubernetes deployed successfully in $(render_elapsed "${deploy_start}")."
+  exit 0
 fi
 
 start_deploy_section "k8s-net"

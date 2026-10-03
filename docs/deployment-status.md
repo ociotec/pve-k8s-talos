@@ -55,7 +55,8 @@ remote formats before writing them.
 
 Sections that have never been deployed are absent from the ConfigMap. Skipped
 sections keep their previous status when one exists. `--services-only` never
-updates `k8s`.
+updates `k8s`. `-t`/`--talos-only` updates only `k8s` and leaves every service
+section at its previous recorded revision.
 
 The Rook dashboard is a dependent Rook integration applied later in
 `scripts/deploy.sh`; the `ceph` revision is advanced after the main Rook Ceph
