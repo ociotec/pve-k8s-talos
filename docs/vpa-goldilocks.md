@@ -124,6 +124,17 @@ dashboard CPU request/limit are `100 × T m` / `max(500, 250 × T) m`.
 Whole cores and whole GiB are rendered in Kubernetes-canonical units. Memory
 requests equal limits.
 
+Both Goldilocks components set `GOMEMLIMIT` to
+`floor(effective_memory_MiB × go_mem_limit_percent / 100) MiB`, with an 80%
+default. The calculation follows automatic sizing and explicit memory overrides;
+it does not change Kubernetes requests or limits. For example, a 2Gi controller
+uses `1638MiB`, and a 1536Mi dashboard uses `1228MiB`. The optional
+`vpa_goldilocks.go_mem_limit_percent` must be greater than 0 and less than 100,
+and each resulting budget must be at least 1MiB. This is a soft Go runtime limit,
+not an OOM guarantee: earlier garbage collection may require more CPU. Validate
+startup and namespace reconciliation as well as dashboard rendering
+([Go GC guide](https://go.dev/doc/gc-guide#Memory_limit)).
+
 kube-state-metrics uses the same planned-capacity formula and power-of-two
 tiers, independently of current workload counts. Memory request and limit are
 `512 × T MiB`; CPU request is `100 × T m`, and CPU limit is

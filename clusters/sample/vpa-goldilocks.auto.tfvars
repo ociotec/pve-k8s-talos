@@ -12,6 +12,8 @@ vpa_goldilocks = {
   # are sized automatically from total planned worker vCPU and RAM, even on an
   # empty cluster. Omit their settings (or set null) to use automatic sizing.
   # Explicit settings override the calculated value; use only for exceptions.
+  # Go's soft limit defaults to 80% of each component's effective memory.
+  # go_mem_limit_percent    = 80
   # recommender_cpu_request = "100m"
   # recommender_cpu_limit   = "500m"
   # recommender_memory      = "512Mi"

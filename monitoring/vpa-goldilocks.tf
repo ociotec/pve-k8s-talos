@@ -21,8 +21,14 @@ variable "vpa_goldilocks" {
     dashboard_cpu_request  = optional(string)
     dashboard_cpu_limit    = optional(string)
     dashboard_memory       = optional(string)
+    # Go's soft memory budget leaves headroom below the effective container limit.
+    go_mem_limit_percent = optional(number, 80)
   })
   default = {}
+  validation {
+    condition     = var.vpa_goldilocks.go_mem_limit_percent > 0 && var.vpa_goldilocks.go_mem_limit_percent < 100
+    error_message = "go_mem_limit_percent must be greater than 0 and less than 100."
+  }
   validation {
     condition = alltrue([for cpu in [
       var.vpa_goldilocks.recommender_cpu_request, var.vpa_goldilocks.recommender_cpu_limit,
@@ -76,6 +82,21 @@ locals {
   goldilocks_effective_resources = {
     for name, automatic in local.goldilocks_automatic_resources :
     name => coalesce(var.vpa_goldilocks[name], automatic)
+  }
+  # Use effective resources, including explicit overrides. Kubernetes uses Mi/Gi,
+  # while GOMEMLIMIT requires Go's MiB units. Round down to retain headroom.
+  goldilocks_memory_mib = {
+    for component in ["controller", "dashboard"] : component =>
+    tonumber(regex("^[0-9]+", local.goldilocks_effective_resources["${component}_memory"])) * (
+      endswith(local.goldilocks_effective_resources["${component}_memory"], "Gi") ? 1024 : 1
+    )
+  }
+  goldilocks_go_mem_limit_mib = {
+    for component, memory in local.goldilocks_memory_mib : component =>
+    floor(memory * var.vpa_goldilocks.go_mem_limit_percent / 100)
+  }
+  goldilocks_go_mem_limit = {
+    for component, memory in local.goldilocks_go_mem_limit_mib : component => format("%dMiB", memory)
   }
 
   # KSM v2 no longer exposes VPA recommendations as built-in metrics.
@@ -234,6 +255,10 @@ resource "terraform_data" "vpa_goldilocks_configuration" {
   input = { vpa = local.enable_vpa_value, goldilocks = local.enable_goldilocks_value }
   lifecycle {
     precondition {
+      condition     = !local.enable_goldilocks_value || alltrue([for memory in values(local.goldilocks_go_mem_limit_mib) : memory >= 1])
+      error_message = "Goldilocks GOMEMLIMIT must be at least 1MiB after applying go_mem_limit_percent to the effective memory reservation."
+    }
+    precondition {
       condition     = !local.enable_goldilocks_value || local.enable_vpa_value
       error_message = "Goldilocks requires recommendation-only VPA to be enabled."
     }
@@ -387,6 +412,10 @@ resource "kubernetes_deployment_v1" "goldilocks" {
           image_pull_policy = "Always"
           command           = ["/goldilocks"]
           args              = each.value.args
+          env {
+            name  = "GOMEMLIMIT"
+            value = local.goldilocks_go_mem_limit[each.key]
+          }
           port {
             name           = "http"
             container_port = 8080
@@ -573,12 +602,14 @@ output "goldilocks_enabled" { value = local.enable_goldilocks_value }
 output "goldilocks_sizing" {
   description = "Planned worker capacity, automatic resource sizing and effective per-cluster overrides."
   value = {
-    worker_vcpu       = local.total_worker_vcpu
-    worker_memory_gib = local.total_worker_memory_gib
-    capacity_factor   = local.goldilocks_capacity_factor
-    capacity_tier     = local.goldilocks_capacity_tier
-    automatic         = local.goldilocks_automatic_resources
-    effective         = local.goldilocks_effective_resources
+    worker_vcpu          = local.total_worker_vcpu
+    worker_memory_gib    = local.total_worker_memory_gib
+    capacity_factor      = local.goldilocks_capacity_factor
+    capacity_tier        = local.goldilocks_capacity_tier
+    automatic            = local.goldilocks_automatic_resources
+    effective            = local.goldilocks_effective_resources
+    go_mem_limit_percent = var.vpa_goldilocks.go_mem_limit_percent
+    go_mem_limit         = local.goldilocks_go_mem_limit
   }
 }
 output "goldilocks_url" { value = local.enable_goldilocks_value ? "https://${local.goldilocks_hostname_value}" : "" }
