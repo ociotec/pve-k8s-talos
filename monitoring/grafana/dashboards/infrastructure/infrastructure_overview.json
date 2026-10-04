@@ -32,7 +32,7 @@
         "type": "prometheus",
         "uid": "Prometheus"
       },
-      "description": "Control-plane node CPU usage from node-exporter. Thresholds: gray = N/A when node/exporter is not ready; green < 50%; yellow >= 50% and < 80%; red >= 80%.",
+      "description": "Control-plane node CPU usage from node-exporter. Thresholds: gray = N/A when node/exporter is not ready; green < 50%; yellow >= 50% and < 80%; red >= 80%. Node membership and control-plane roles are discovered from Kubernetes at the end of the selected time range; historical utilization remains unchanged. No inventory is shown when kube-state-metrics is unavailable.",
       "fieldConfig": {
         "defaults": {
           "decimals": 1,
@@ -112,7 +112,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "((\n  100 * (1 - avg by(nodename) (\n  rate(node_cpu_seconds_total{job=\"node-exporter\",mode=\"idle\"}[5m])\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n))\n)\nor on(nodename)\n(\n  -1 * (max by(nodename) (label_replace(kube_node_info, \"nodename\", \"$1\", \"node\", \"(.*)\")) unless on(nodename) (max by(nodename) (label_replace(up{job=\"node-exporter\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\")) and on(nodename) max by(nodename) (label_replace(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\"))))\n))\n  * on(nodename) group_left() max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"}, \"nodename\", \"$1\", \"node\", \"(.*)\"))",
+          "expr": "(\n((\n  100 * (1 - avg by(nodename) (\n  rate(node_cpu_seconds_total{job=\"node-exporter\",mode=\"idle\"}[5m])\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n))\n)\nor on(nodename)\n(\n  -1 * (max by(nodename) (label_replace(kube_node_info, \"nodename\", \"$1\", \"node\", \"(.*)\")) unless on(nodename) (max by(nodename) (label_replace(up{job=\"node-exporter\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\")) and on(nodename) max by(nodename) (label_replace(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\"))))\n))\n  * on(nodename) group_left() max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"} @ end(), \"nodename\", \"$1\", \"node\", \"(.*)\"))\n)\nand on(nodename) max by(nodename) (label_replace(kube_node_info @ end(), \"nodename\", \"$1\", \"node\", \"(.*)\"))\nand on() (max(up{job=\"kube-state-metrics\"} @ end()) == 1)",
           "legendFormat": "{{nodename}}",
           "refId": "A"
         }
@@ -125,7 +125,7 @@
         "type": "prometheus",
         "uid": "Prometheus"
       },
-      "description": "Control-plane node RAM usage from node-exporter. Thresholds: gray = N/A when node/exporter is not ready; green < 50%; yellow >= 50% and < 80%; red >= 80%.",
+      "description": "Control-plane node RAM usage from node-exporter. Thresholds: gray = N/A when node/exporter is not ready; green < 50%; yellow >= 50% and < 80%; red >= 80%. Node membership and control-plane roles are discovered from Kubernetes at the end of the selected time range; historical utilization remains unchanged. No inventory is shown when kube-state-metrics is unavailable.",
       "fieldConfig": {
         "defaults": {
           "decimals": 1,
@@ -205,7 +205,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "((\n  100 * (1 - (sum by(nodename) (\n  node_memory_MemAvailable_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n) / clamp_min(sum by(nodename) (\n  node_memory_MemTotal_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n), 1)))\n)\nor on(nodename)\n(\n  -1 * (max by(nodename) (label_replace(kube_node_info, \"nodename\", \"$1\", \"node\", \"(.*)\")) unless on(nodename) (max by(nodename) (label_replace(up{job=\"node-exporter\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\")) and on(nodename) max by(nodename) (label_replace(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\"))))\n))\n  * on(nodename) group_left() max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"}, \"nodename\", \"$1\", \"node\", \"(.*)\"))",
+          "expr": "(\n((\n  100 * (1 - (sum by(nodename) (\n  node_memory_MemAvailable_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n) / clamp_min(sum by(nodename) (\n  node_memory_MemTotal_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n), 1)))\n)\nor on(nodename)\n(\n  -1 * (max by(nodename) (label_replace(kube_node_info, \"nodename\", \"$1\", \"node\", \"(.*)\")) unless on(nodename) (max by(nodename) (label_replace(up{job=\"node-exporter\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\")) and on(nodename) max by(nodename) (label_replace(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\"))))\n))\n  * on(nodename) group_left() max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"} @ end(), \"nodename\", \"$1\", \"node\", \"(.*)\"))\n)\nand on(nodename) max by(nodename) (label_replace(kube_node_info @ end(), \"nodename\", \"$1\", \"node\", \"(.*)\"))\nand on() (max(up{job=\"kube-state-metrics\"} @ end()) == 1)",
           "legendFormat": "{{nodename}}",
           "refId": "A"
         }
@@ -319,7 +319,7 @@
         "type": "prometheus",
         "uid": "Prometheus"
       },
-      "description": "Worker node CPU usage from node-exporter. Thresholds: gray = N/A when node/exporter is not ready; green < 50%; yellow >= 50% and < 80%; red >= 80%.",
+      "description": "Worker node CPU usage from node-exporter. Thresholds: gray = N/A when node/exporter is not ready; green < 50%; yellow >= 50% and < 80%; red >= 80%. Node membership and control-plane roles are discovered from Kubernetes at the end of the selected time range; historical utilization remains unchanged. No inventory is shown when kube-state-metrics is unavailable.",
       "fieldConfig": {
         "defaults": {
           "decimals": 1,
@@ -399,7 +399,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "((\n  100 * (1 - avg by(nodename) (\n  rate(node_cpu_seconds_total{job=\"node-exporter\",mode=\"idle\"}[5m])\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n))\n)\nor on(nodename)\n(\n  -1 * (max by(nodename) (label_replace(kube_node_info, \"nodename\", \"$1\", \"node\", \"(.*)\")) unless on(nodename) (max by(nodename) (label_replace(up{job=\"node-exporter\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\")) and on(nodename) max by(nodename) (label_replace(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\"))))\n))\n  unless on(nodename) max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"}, \"nodename\", \"$1\", \"node\", \"(.*)\"))",
+          "expr": "(\n((\n  100 * (1 - avg by(nodename) (\n  rate(node_cpu_seconds_total{job=\"node-exporter\",mode=\"idle\"}[5m])\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n))\n)\nor on(nodename)\n(\n  -1 * (max by(nodename) (label_replace(kube_node_info, \"nodename\", \"$1\", \"node\", \"(.*)\")) unless on(nodename) (max by(nodename) (label_replace(up{job=\"node-exporter\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\")) and on(nodename) max by(nodename) (label_replace(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\"))))\n))\n  unless on(nodename) max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"} @ end(), \"nodename\", \"$1\", \"node\", \"(.*)\"))\n)\nand on(nodename) max by(nodename) (label_replace(kube_node_info @ end(), \"nodename\", \"$1\", \"node\", \"(.*)\"))\nand on() (max(up{job=\"kube-state-metrics\"} @ end()) == 1)",
           "legendFormat": "{{nodename}}",
           "refId": "A"
         }
@@ -412,7 +412,7 @@
         "type": "prometheus",
         "uid": "Prometheus"
       },
-      "description": "Worker node RAM usage from node-exporter. Thresholds: gray = N/A when node/exporter is not ready; green < 50%; yellow >= 50% and < 80%; red >= 80%.",
+      "description": "Worker node RAM usage from node-exporter. Thresholds: gray = N/A when node/exporter is not ready; green < 50%; yellow >= 50% and < 80%; red >= 80%. Node membership and control-plane roles are discovered from Kubernetes at the end of the selected time range; historical utilization remains unchanged. No inventory is shown when kube-state-metrics is unavailable.",
       "fieldConfig": {
         "defaults": {
           "decimals": 1,
@@ -492,7 +492,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "((\n  100 * (1 - (sum by(nodename) (\n  node_memory_MemAvailable_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n) / clamp_min(sum by(nodename) (\n  node_memory_MemTotal_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n), 1)))\n)\nor on(nodename)\n(\n  -1 * (max by(nodename) (label_replace(kube_node_info, \"nodename\", \"$1\", \"node\", \"(.*)\")) unless on(nodename) (max by(nodename) (label_replace(up{job=\"node-exporter\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\")) and on(nodename) max by(nodename) (label_replace(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\"))))\n))\n  unless on(nodename) max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"}, \"nodename\", \"$1\", \"node\", \"(.*)\"))",
+          "expr": "(\n((\n  100 * (1 - (sum by(nodename) (\n  node_memory_MemAvailable_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n) / clamp_min(sum by(nodename) (\n  node_memory_MemTotal_bytes{job=\"node-exporter\"}\n    * on(instance) group_left(nodename) max by(instance,nodename) (node_uname_info{job=\"node-exporter\"})\n), 1)))\n)\nor on(nodename)\n(\n  -1 * (max by(nodename) (label_replace(kube_node_info, \"nodename\", \"$1\", \"node\", \"(.*)\")) unless on(nodename) (max by(nodename) (label_replace(up{job=\"node-exporter\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\")) and on(nodename) max by(nodename) (label_replace(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 1, \"nodename\", \"$1\", \"node\", \"(.*)\"))))\n))\n  unless on(nodename) max by(nodename) (label_replace(kube_node_role{role=~\"control-plane|master\"} @ end(), \"nodename\", \"$1\", \"node\", \"(.*)\"))\n)\nand on(nodename) max by(nodename) (label_replace(kube_node_info @ end(), \"nodename\", \"$1\", \"node\", \"(.*)\"))\nand on() (max(up{job=\"kube-state-metrics\"} @ end()) == 1)",
           "legendFormat": "{{nodename}}",
           "refId": "A"
         }
