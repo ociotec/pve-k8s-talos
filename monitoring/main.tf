@@ -372,7 +372,15 @@ locals {
     (1536 * (local.prometheus_sizing_factor - 1)) +
     local.prometheus_wal_replay_headroom_mib
   ) / 64) * 64
-  prometheus_mem_effective_mib = max(6144, local.prometheus_mem_computed_mib)
+  # Explicit cluster reservations are a floor, never a reduction of automatic
+  # sizing. Keep requests equal to limits even when legacy constants differ.
+  prometheus_mem_configured_mib = max([for quantity in [
+    try(local.prometheus_mem_request, "0Mi"),
+    try(local.prometheus_mem_limit, "0Mi")
+  ] : can(regex("^[0-9]+Gi$", quantity)) ? tonumber(trimsuffix(quantity, "Gi")) * 1024 : (
+    can(regex("^[0-9]+Mi$", quantity)) ? tonumber(trimsuffix(quantity, "Mi")) : 0
+  )]...)
+  prometheus_mem_effective_mib = max(6144, local.prometheus_mem_computed_mib, local.prometheus_mem_configured_mib)
 
   loki_cpu_request_value = "200m"
   loki_cpu_limit_value   = "1"
@@ -1232,6 +1240,16 @@ check "grafana_go_mem_limit_percent_valid" {
   assert {
     condition     = local.grafana_go_mem_limit_percent_value > 0 && local.grafana_go_mem_limit_percent_value < 100
     error_message = format("grafana_go_mem_limit_percent must be greater than 0 and less than 100. Got %s.", tostring(local.grafana_go_mem_limit_percent_value))
+  }
+}
+
+check "prometheus_configured_memory_supported" {
+  assert {
+    condition = alltrue([for quantity in [
+      try(local.prometheus_mem_request, "0Mi"),
+      try(local.prometheus_mem_limit, "0Mi")
+    ] : can(regex("^[0-9]+(Gi|Mi)$", quantity))])
+    error_message = "Prometheus memory reservations must use whole-number Mi or Gi quantities."
   }
 }
 
