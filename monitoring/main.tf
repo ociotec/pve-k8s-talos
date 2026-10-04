@@ -374,10 +374,11 @@ locals {
   ) / 64) * 64
   # Explicit cluster reservations are a floor, never a reduction of automatic
   # sizing. Keep requests equal to limits even when legacy constants differ.
-  prometheus_mem_configured_mib = max([for quantity in [
-    try(local.prometheus_mem_request, "0Mi"),
-    try(local.prometheus_mem_limit, "0Mi")
-  ] : can(regex("^[0-9]+Gi$", quantity)) ? tonumber(trimsuffix(quantity, "Gi")) * 1024 : (
+  # Read optional constants from source: try() cannot mask undeclared locals.
+  prometheus_mem_configured_quantities = [for setting in ["prometheus_mem_request", "prometheus_mem_limit"] :
+    try(regex(format("(?m)^\\s*%s\\s*=\\s*\"([^\"]+)\"\\s*$", setting), local.monitoring_constants_source)[0], "0Mi")
+  ]
+  prometheus_mem_configured_mib = max([for quantity in local.prometheus_mem_configured_quantities : can(regex("^[0-9]+Gi$", quantity)) ? tonumber(trimsuffix(quantity, "Gi")) * 1024 : (
     can(regex("^[0-9]+Mi$", quantity)) ? tonumber(trimsuffix(quantity, "Mi")) : 0
   )]...)
   prometheus_mem_effective_mib = max(6144, local.prometheus_mem_computed_mib, local.prometheus_mem_configured_mib)
@@ -1245,10 +1246,7 @@ check "grafana_go_mem_limit_percent_valid" {
 
 check "prometheus_configured_memory_supported" {
   assert {
-    condition = alltrue([for quantity in [
-      try(local.prometheus_mem_request, "0Mi"),
-      try(local.prometheus_mem_limit, "0Mi")
-    ] : can(regex("^[0-9]+(Gi|Mi)$", quantity))])
+    condition = alltrue([for quantity in local.prometheus_mem_configured_quantities : can(regex("^[0-9]+(Gi|Mi)$", quantity))])
     error_message = "Prometheus memory reservations must use whole-number Mi or Gi quantities."
   }
 }
