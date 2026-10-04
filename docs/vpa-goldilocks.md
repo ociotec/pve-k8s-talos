@@ -100,9 +100,31 @@ existing annotation-based Prometheus discovery.
 | Container | CPU request / limit | Memory request = limit |
 | --- | --- | --- |
 | VPA recommender | 100m / 500m | 512Mi |
-| Goldilocks controller | 50m / 200m | 256Mi |
-| Goldilocks dashboard | 50m / 200m | 256Mi |
+| Goldilocks controller | Automatic: minimum 200m / 1 | Automatic: minimum 1Gi |
+| Goldilocks dashboard | Automatic: minimum 100m / 500m | Automatic: minimum 768Mi |
 | oauth2-proxy | 50m / 200m | 128Mi |
+
+Goldilocks is sized from the final worker capacity declared in `vms` and
+`resources`, before nodes or applications exist. Sum vCPU and RAM across worker
+VMs only. The relative capacity is
+`max(1, min(total_vcpu / 328, total_memory_gib / 420))`; CPU and RAM are
+normalized separately and the limiting resource determines the workload
+capacity estimate. There is no independent worker-count factor.
+
+Round relative capacity up to the next power of two, giving tier `T` (1, 2,
+4, ...). Controller memory is `T GiB`; dashboard memory is `768 × T MiB`.
+Controller CPU request/limit are `200 × T m` / `max(1000, 500 × T) m`;
+dashboard CPU request/limit are `100 × T m` / `max(500, 250 × T) m`.
+Whole cores and whole GiB are rendered in Kubernetes-canonical units. Memory
+requests equal limits.
+
+These conservative capacity tiers are a provisioning heuristic for discovery
+and rendering peaks, not a measured guarantee for every workload mix. Verify
+memory, restarts and page latency after rollout. The recommender and OAuth
+proxy retain their fixed defaults. Any explicit controller/dashboard sizing
+setting overrides its corresponding automatic value; omitted or null settings
+use automatic sizing. The `goldilocks_sizing` output exposes both automatic
+and effective values for review.
 
 ## Prometheus metrics and Grafana
 

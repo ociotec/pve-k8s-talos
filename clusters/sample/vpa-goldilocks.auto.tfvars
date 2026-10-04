@@ -8,14 +8,17 @@ vpa_goldilocks = {
   # Defaults to true: analyze current and future namespaces automatically.
   # Set false to analyze only namespaces labeled goldilocks.fairwinds.com/enabled=true.
   all_namespaces = true
-  # Shared sizing defaults. Override only after reviewing measured usage.
+  # Recommender defaults are fixed. Goldilocks controller/dashboard CPU and RAM
+  # are sized automatically from total planned worker vCPU and RAM, even on an
+  # empty cluster. Omit their settings (or set null) to use automatic sizing.
+  # Explicit settings override the calculated value; use only for exceptions.
   # recommender_cpu_request = "100m"
   # recommender_cpu_limit   = "500m"
   # recommender_memory      = "512Mi"
-  # controller_cpu_request  = "50m"
-  # controller_cpu_limit    = "200m"
-  # controller_memory       = "256Mi"
-  # dashboard_cpu_request   = "50m"
-  # dashboard_cpu_limit     = "200m"
-  # dashboard_memory        = "256Mi"
+  # controller_cpu_request  = null
+  # controller_cpu_limit    = null
+  # controller_memory       = null
+  # dashboard_cpu_request   = null
+  # dashboard_cpu_limit     = null
+  # dashboard_memory        = null
 }

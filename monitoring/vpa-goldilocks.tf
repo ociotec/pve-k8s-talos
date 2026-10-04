@@ -14,12 +14,13 @@ variable "vpa_goldilocks" {
     recommender_cpu_request = optional(string, "100m")
     recommender_cpu_limit   = optional(string, "500m")
     recommender_memory      = optional(string, "512Mi")
-    controller_cpu_request  = optional(string, "50m")
-    controller_cpu_limit    = optional(string, "200m")
-    controller_memory       = optional(string, "256Mi")
-    dashboard_cpu_request   = optional(string, "50m")
-    dashboard_cpu_limit     = optional(string, "200m")
-    dashboard_memory        = optional(string, "256Mi")
+    # Null selects capacity-based sizing from declared worker CPU and RAM.
+    controller_cpu_request = optional(string)
+    controller_cpu_limit   = optional(string)
+    controller_memory      = optional(string)
+    dashboard_cpu_request  = optional(string)
+    dashboard_cpu_limit    = optional(string)
+    dashboard_memory       = optional(string)
   })
   default = {}
   validation {
@@ -27,7 +28,7 @@ variable "vpa_goldilocks" {
       var.vpa_goldilocks.recommender_cpu_request, var.vpa_goldilocks.recommender_cpu_limit,
       var.vpa_goldilocks.controller_cpu_request, var.vpa_goldilocks.controller_cpu_limit,
       var.vpa_goldilocks.dashboard_cpu_request, var.vpa_goldilocks.dashboard_cpu_limit,
-      ] : can(regex("^[1-9][0-9]*m?$", cpu)) && (
+      ] : cpu == null ? true : can(regex("^[1-9][0-9]*m?$", cpu)) && (
       !endswith(cpu, "m") || try(tonumber(trimsuffix(cpu, "m")) % 1000 != 0, false)
     )])
     error_message = "CPU sizing must use positive whole cores or fractional millicores; write 1 instead of 1000m."
@@ -35,7 +36,7 @@ variable "vpa_goldilocks" {
   validation {
     condition = alltrue([for memory in [
       var.vpa_goldilocks.recommender_memory, var.vpa_goldilocks.controller_memory, var.vpa_goldilocks.dashboard_memory,
-      ] : can(regex("^[1-9][0-9]*(Mi|Gi)$", memory)) && (
+      ] : memory == null ? true : can(regex("^[1-9][0-9]*(Mi|Gi)$", memory)) && (
       !endswith(memory, "Mi") || try(tonumber(trimsuffix(memory, "Mi")) % 1024 != 0, false)
     )])
     error_message = "Memory sizing must use positive Mi/Gi quantities; write 1Gi instead of 1024Mi."
@@ -43,6 +44,38 @@ variable "vpa_goldilocks" {
 }
 
 locals {
+  # Final planned capacity works before applications (or nodes) exist.
+  # Normalize unlike units independently; the limiting resource bounds workload
+  # capacity. Unlike Prometheus, worker count adds no separate sizing factor.
+  goldilocks_capacity_factor = max(1, min(
+    local.total_worker_vcpu / local.monitoring_baseline_worker_vcpu,
+    local.total_worker_memory_gib / local.monitoring_baseline_worker_memory_gib
+  ))
+  # Round up to capacity tiers for discovery/rendering peaks, rather than
+  # sizing exactly at steady-state usage. This is an initial provisioning
+  # heuristic, not a guarantee of a particular Kubernetes object count.
+  goldilocks_capacity_tier = pow(2, ceil(log(local.goldilocks_capacity_factor, 2)))
+  goldilocks_automatic_cpu_millicores = {
+    controller_cpu_request = 200 * local.goldilocks_capacity_tier
+    controller_cpu_limit   = max(1000, 500 * local.goldilocks_capacity_tier)
+    dashboard_cpu_request  = 100 * local.goldilocks_capacity_tier
+    dashboard_cpu_limit    = max(500, 250 * local.goldilocks_capacity_tier)
+  }
+  goldilocks_dashboard_memory_mib = 768 * local.goldilocks_capacity_tier
+  goldilocks_automatic_resources = merge({
+    controller_memory = format("%dGi", local.goldilocks_capacity_tier)
+    dashboard_memory = local.goldilocks_dashboard_memory_mib % 1024 == 0 ? format(
+      "%dGi", local.goldilocks_dashboard_memory_mib / 1024
+    ) : format("%dMi", local.goldilocks_dashboard_memory_mib)
+    }, {
+    for name, millicores in local.goldilocks_automatic_cpu_millicores :
+    name => millicores % 1000 == 0 ? format("%d", millicores / 1000) : format("%dm", millicores)
+  })
+  goldilocks_effective_resources = {
+    for name, automatic in local.goldilocks_automatic_resources :
+    name => coalesce(var.vpa_goldilocks[name], automatic)
+  }
+
   # KSM v2 no longer exposes VPA recommendations as built-in metrics.
   # Fixed, bounded labels preserve the target namespace instead of exporter identity.
   vpa_state_metrics_config = yamlencode({
@@ -135,9 +168,9 @@ locals {
       priority    = "infra-high"
       path        = "/healthz"
       args        = ["controller", "-v2", "--on-by-default=${var.vpa_goldilocks.all_namespaces}", "--metrics-port=8080"]
-      cpu_request = var.vpa_goldilocks.controller_cpu_request
-      cpu_limit   = var.vpa_goldilocks.controller_cpu_limit
-      memory      = var.vpa_goldilocks.controller_memory
+      cpu_request = local.goldilocks_effective_resources.controller_cpu_request
+      cpu_limit   = local.goldilocks_effective_resources.controller_cpu_limit
+      memory      = local.goldilocks_effective_resources.controller_memory
       verbs       = ["get", "list", "watch"]
       vpa_verbs   = ["get", "list", "create", "delete", "update"]
     }
@@ -146,9 +179,9 @@ locals {
       path     = "/health"
       # Disable the optional external cost integration, including its signup UI.
       args        = ["dashboard", "-v2", "--on-by-default=${var.vpa_goldilocks.all_namespaces}", "--enable-cost=false"]
-      cpu_request = var.vpa_goldilocks.dashboard_cpu_request
-      cpu_limit   = var.vpa_goldilocks.dashboard_cpu_limit
-      memory      = var.vpa_goldilocks.dashboard_memory
+      cpu_request = local.goldilocks_effective_resources.dashboard_cpu_request
+      cpu_limit   = local.goldilocks_effective_resources.dashboard_cpu_limit
+      memory      = local.goldilocks_effective_resources.dashboard_memory
       verbs       = ["get", "list"]
       vpa_verbs   = ["get", "list"]
     }
@@ -535,4 +568,15 @@ resource "kubernetes_ingress_v1" "goldilocks" {
 
 output "vpa_enabled" { value = local.enable_vpa_value }
 output "goldilocks_enabled" { value = local.enable_goldilocks_value }
+output "goldilocks_sizing" {
+  description = "Planned worker capacity, automatic resource sizing and effective per-cluster overrides."
+  value = {
+    worker_vcpu       = local.total_worker_vcpu
+    worker_memory_gib = local.total_worker_memory_gib
+    capacity_factor   = local.goldilocks_capacity_factor
+    capacity_tier     = local.goldilocks_capacity_tier
+    automatic         = local.goldilocks_automatic_resources
+    effective         = local.goldilocks_effective_resources
+  }
+}
 output "goldilocks_url" { value = local.enable_goldilocks_value ? "https://${local.goldilocks_hostname_value}" : "" }
