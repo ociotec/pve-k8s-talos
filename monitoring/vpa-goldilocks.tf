@@ -63,7 +63,8 @@ locals {
   }
   goldilocks_dashboard_memory_mib = 768 * local.goldilocks_capacity_tier
   goldilocks_automatic_resources = merge({
-    controller_memory = format("%dGi", local.goldilocks_capacity_tier)
+    # Global discovery can exceed 1Gi at baseline capacity during startup.
+    controller_memory = format("%dGi", max(2, local.goldilocks_capacity_tier))
     dashboard_memory = local.goldilocks_dashboard_memory_mib % 1024 == 0 ? format(
       "%dGi", local.goldilocks_dashboard_memory_mib / 1024
     ) : format("%dMi", local.goldilocks_dashboard_memory_mib)

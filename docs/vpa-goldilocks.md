@@ -100,7 +100,7 @@ existing annotation-based Prometheus discovery.
 | Container | CPU request / limit | Memory request = limit |
 | --- | --- | --- |
 | VPA recommender | 100m / 500m | 512Mi |
-| Goldilocks controller | Automatic: minimum 200m / 1 | Automatic: minimum 1Gi |
+| Goldilocks controller | Automatic: minimum 200m / 1 | Automatic: minimum 2Gi |
 | Goldilocks dashboard | Automatic: minimum 100m / 500m | Automatic: minimum 768Mi |
 | oauth2-proxy | 50m / 200m | 128Mi |
 
@@ -112,7 +112,9 @@ normalized separately and the limiting resource determines the workload
 capacity estimate. There is no independent worker-count factor.
 
 Round relative capacity up to the next power of two, giving tier `T` (1, 2,
-4, ...). Controller memory is `T GiB`; dashboard memory is `768 × T MiB`.
+4, ...). Controller memory is `max(2, T) GiB`; dashboard memory is `768 × T MiB`.
+The controller has a 2Gi minimum because initial global discovery can exceed
+1Gi at baseline capacity, including cached pod objects retained after restarts.
 Controller CPU request/limit are `200 × T m` / `max(1000, 500 × T) m`;
 dashboard CPU request/limit are `100 × T m` / `max(500, 250 × T) m`.
 Whole cores and whole GiB are rendered in Kubernetes-canonical units. Memory
