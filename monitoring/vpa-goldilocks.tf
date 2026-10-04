@@ -61,7 +61,8 @@ locals {
     dashboard_cpu_request  = 100 * local.goldilocks_capacity_tier
     dashboard_cpu_limit    = max(500, 250 * local.goldilocks_capacity_tier)
   }
-  goldilocks_dashboard_memory_mib = 768 * local.goldilocks_capacity_tier
+  # Rendering all workloads can exceed 768Mi even at baseline capacity.
+  goldilocks_dashboard_memory_mib = max(1536, 768 * local.goldilocks_capacity_tier)
   goldilocks_automatic_resources = merge({
     # Global discovery can exceed 1Gi at baseline capacity during startup.
     controller_memory = format("%dGi", max(2, local.goldilocks_capacity_tier))

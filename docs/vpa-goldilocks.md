@@ -101,7 +101,7 @@ existing annotation-based Prometheus discovery.
 | --- | --- | --- |
 | VPA recommender | 100m / 500m | 512Mi |
 | Goldilocks controller | Automatic: minimum 200m / 1 | Automatic: minimum 2Gi |
-| Goldilocks dashboard | Automatic: minimum 100m / 500m | Automatic: minimum 768Mi |
+| Goldilocks dashboard | Automatic: minimum 100m / 500m | Automatic: minimum 1536Mi |
 | oauth2-proxy | 50m / 200m | 128Mi |
 
 Goldilocks is sized from the final worker capacity declared in `vms` and
@@ -112,9 +112,12 @@ normalized separately and the limiting resource determines the workload
 capacity estimate. There is no independent worker-count factor.
 
 Round relative capacity up to the next power of two, giving tier `T` (1, 2,
-4, ...). Controller memory is `max(2, T) GiB`; dashboard memory is `768 × T MiB`.
+4, ...). Controller memory is `max(2, T) GiB`; dashboard memory is
+`max(1536, 768 × T) MiB`.
 The controller has a 2Gi minimum because initial global discovery can exceed
 1Gi at baseline capacity, including cached pod objects retained after restarts.
+The dashboard has a 1536Mi minimum because rendering the global workload index
+can exceed 768Mi at baseline capacity; validate page rendering as well as probes.
 Controller CPU request/limit are `200 × T m` / `max(1000, 500 × T) m`;
 dashboard CPU request/limit are `100 × T m` / `max(500, 250 × T) m`.
 Whole cores and whole GiB are rendered in Kubernetes-canonical units. Memory
