@@ -100,6 +100,7 @@ existing annotation-based Prometheus discovery.
 | Container | CPU request / limit | Memory request = limit |
 | --- | --- | --- |
 | VPA recommender | 100m / 500m | 512Mi |
+| kube-state-metrics | Automatic: minimum 100m / 1 | Automatic: minimum 512Mi |
 | Goldilocks controller | Automatic: minimum 200m / 1 | Automatic: minimum 2Gi |
 | Goldilocks dashboard | Automatic: minimum 100m / 500m | Automatic: minimum 1536Mi |
 | oauth2-proxy | 50m / 200m | 128Mi |
@@ -122,6 +123,23 @@ Controller CPU request/limit are `200 × T m` / `max(1000, 500 × T) m`;
 dashboard CPU request/limit are `100 × T m` / `max(500, 250 × T) m`.
 Whole cores and whole GiB are rendered in Kubernetes-canonical units. Memory
 requests equal limits.
+
+kube-state-metrics uses the same planned-capacity formula and power-of-two
+tiers, independently of current workload counts. Memory request and limit are
+`512 × T MiB`; CPU request is `100 × T m`, and CPU limit is
+`max(1000, 500 × T) m`. The larger CPU ceiling leaves burst capacity for inventory
+rebuilds: upstream notes that CPU throttling can grow internal queues and
+increase memory use ([resource recommendations](https://github.com/kubernetes/kube-state-metrics/blob/v2.19.1/README.md#resource-recommendation)).
+This is a provisioning heuristic, not a guarantee against OOM; validate startup
+and scrapes with the actual inventory after deployment.
+
+Existing literal `kube_state_metrics_cpu_request`, `kube_state_metrics_cpu_limit`,
+`kube_state_metrics_mem_request` and `kube_state_metrics_mem_limit` settings in
+`monitoring_constants.tf` remain explicit overrides. Omit them or set them to
+`null` to use automatic sizing. If memory is overridden, set both memory
+settings to the same value. The sample omits overrides by default. The output
+`kube_state_metrics_sizing` reports declared capacity, automatic resources and
+effective resources, making retained overrides visible during migration.
 
 These conservative capacity tiers are a provisioning heuristic for discovery
 and rendering peaks, not a measured guarantee for every workload mix. Verify

@@ -192,10 +192,12 @@ locals {
   otlp_public_collector_memory_limit_mib = 192
   otlp_public_collector_memory_spike_mib = 64
 
-  kube_state_metrics_cpu_request = "100m"
-  kube_state_metrics_cpu_limit   = "300m"
-  kube_state_metrics_mem_request = "256Mi"
-  kube_state_metrics_mem_limit   = "256Mi"
+  # kube-state-metrics CPU and RAM scale from planned worker capacity by default.
+  # Optional literal overrides; keep memory request equal to memory limit.
+  # kube_state_metrics_cpu_request = "200m"
+  # kube_state_metrics_cpu_limit   = "1"
+  # kube_state_metrics_mem_request = "1Gi"
+  # kube_state_metrics_mem_limit   = "1Gi"
   node_exporter_cpu_request      = "50m"
   node_exporter_cpu_limit        = "200m"
   node_exporter_mem_request      = "128Mi"

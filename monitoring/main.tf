@@ -336,6 +336,40 @@ locals {
   monitoring_baseline_worker_vcpu       = 328
   monitoring_baseline_worker_memory_gib = 420
 
+  # Planned capacity works before workloads exist. Round up to tiers to reserve
+  # headroom for inventory rebuilds and custom-resource metrics such as VPA.
+  kube_state_metrics_capacity_factor = max(1, min(
+    local.total_worker_vcpu / local.monitoring_baseline_worker_vcpu,
+    local.total_worker_memory_gib / local.monitoring_baseline_worker_memory_gib
+  ))
+  kube_state_metrics_capacity_tier        = pow(2, ceil(log(local.kube_state_metrics_capacity_factor, 2)))
+  kube_state_metrics_automatic_memory_mib = 512 * local.kube_state_metrics_capacity_tier
+  kube_state_metrics_automatic_resources = merge({
+    mem_request = local.kube_state_metrics_automatic_memory_mib % 1024 == 0 ? format(
+      "%dGi", local.kube_state_metrics_automatic_memory_mib / 1024
+    ) : format("%dMi", local.kube_state_metrics_automatic_memory_mib)
+    mem_limit = local.kube_state_metrics_automatic_memory_mib % 1024 == 0 ? format(
+      "%dGi", local.kube_state_metrics_automatic_memory_mib / 1024
+    ) : format("%dMi", local.kube_state_metrics_automatic_memory_mib)
+    }, {
+    for name, millicores in {
+      cpu_request = 100 * local.kube_state_metrics_capacity_tier
+      # Low CPU ceilings can grow informer queues and increase memory demand.
+      cpu_limit = max(1000, 500 * local.kube_state_metrics_capacity_tier)
+    } : name => millicores % 1000 == 0 ? format("%d", millicores / 1000) : format("%dm", millicores)
+  })
+  # Keep existing cluster-local literal overrides compatible. Missing settings
+  # (or null) select automatic sizing; no cluster names enter the shared model.
+  kube_state_metrics_resource_overrides = {
+    for name in ["cpu_request", "cpu_limit", "mem_request", "mem_limit"] : name => try(
+      regex("(?m)^\\s*kube_state_metrics_${name}\\s*=\\s*\"([^\"]+)\"\\s*(?:#.*)?$", local.monitoring_constants_source)[0], null
+    )
+  }
+  kube_state_metrics_effective_resources = {
+    for name, automatic in local.kube_state_metrics_automatic_resources :
+    name => coalesce(local.kube_state_metrics_resource_overrides[name], automatic)
+  }
+
   monitoring_node_factor = max(
     1,
     local.worker_count > 0 ? local.worker_count / local.monitoring_baseline_worker_count : 1
@@ -622,7 +656,7 @@ locals {
       ) && (
       basename(filename) != "kubernetes_events.json" ||
       local.kubernetes_events_enabled_value
-    ) && (
+      ) && (
       basename(filename) != "vpa_goldilocks.json" ||
       local.enable_vpa_value
     )
@@ -997,10 +1031,10 @@ locals {
   kube_state_metrics_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/kube-state-metrics.yaml", {
       kube_state_metrics_image_tag   = local.kube_state_metrics_image_tag
-      kube_state_metrics_cpu_request = local.kube_state_metrics_cpu_request
-      kube_state_metrics_cpu_limit   = local.kube_state_metrics_cpu_limit
-      kube_state_metrics_mem_request = local.kube_state_metrics_mem_request
-      kube_state_metrics_mem_limit   = local.kube_state_metrics_mem_limit
+      kube_state_metrics_cpu_request = local.kube_state_metrics_effective_resources.cpu_request
+      kube_state_metrics_cpu_limit   = local.kube_state_metrics_effective_resources.cpu_limit
+      kube_state_metrics_mem_request = local.kube_state_metrics_effective_resources.mem_request
+      kube_state_metrics_mem_limit   = local.kube_state_metrics_effective_resources.mem_limit
       vpa_metrics_enabled            = local.enable_vpa_value
       vpa_metrics_config_hash        = sha256(local.vpa_state_metrics_config)
     })) :
@@ -1246,7 +1280,7 @@ check "grafana_go_mem_limit_percent_valid" {
 
 check "prometheus_configured_memory_supported" {
   assert {
-    condition = alltrue([for quantity in local.prometheus_mem_configured_quantities : can(regex("^[0-9]+(Gi|Mi)$", quantity))])
+    condition     = alltrue([for quantity in local.prometheus_mem_configured_quantities : can(regex("^[0-9]+(Gi|Mi)$", quantity))])
     error_message = "Prometheus memory reservations must use whole-number Mi or Gi quantities."
   }
 }
@@ -1548,6 +1582,10 @@ resource "kubernetes_manifest" "monitoring_other" {
     "object.spec.template.metadata.annotations[\"kubectl.kubernetes.io/restartedAt\"]",
   ] : [])
   lifecycle {
+    precondition {
+      condition     = local.kube_state_metrics_effective_resources.mem_request == local.kube_state_metrics_effective_resources.mem_limit
+      error_message = "kube-state-metrics memory request must equal its memory limit; omit both settings for automatic capacity sizing."
+    }
     ignore_changes = [
       manifest.metadata.annotations,
       object.metadata.annotations,
@@ -2207,4 +2245,16 @@ output "grafana_admin_user" {
 output "grafana_admin_password" {
   value     = local.monitoring_grafana_admin_password
   sensitive = true
+}
+
+output "kube_state_metrics_sizing" {
+  description = "Planned worker capacity, automatic kube-state-metrics sizing and effective cluster overrides."
+  value = {
+    worker_vcpu       = local.total_worker_vcpu
+    worker_memory_gib = local.total_worker_memory_gib
+    capacity_factor   = local.kube_state_metrics_capacity_factor
+    capacity_tier     = local.kube_state_metrics_capacity_tier
+    automatic         = local.kube_state_metrics_automatic_resources
+    effective         = local.kube_state_metrics_effective_resources
+  }
 }
