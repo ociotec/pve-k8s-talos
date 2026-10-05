@@ -321,6 +321,8 @@ subjects:
 ---
 apiVersion: v1
 data:
+  large-client-header-buffers: "${ingress_nginx_header_buffer_count} ${ingress_nginx_header_buffer_size}"
+  enable-serial-reloads: "${ingress_nginx_serial_reloads}"
   enable-opentelemetry: "${ingress_nginx_tracing_enabled}"
   opentelemetry-trust-incoming-span: "true"
   opentelemetry-operation-name: "HTTP $request_method $service_name"
@@ -410,7 +412,7 @@ metadata:
   name: ingress-nginx-controller
   namespace: ingress-nginx
 spec:
-  replicas: 3 # Increased from 1 to 3 for high availability with MetalLB
+  replicas: ${ingress_nginx_min_replicas} # Omitted by OpenTofu while the HPA owns scaling.
   minReadySeconds: 0
   revisionHistoryLimit: 10
   selector:

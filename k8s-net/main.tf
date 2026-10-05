@@ -240,6 +240,22 @@ locals {
     })) : yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
   ]
+  # Optional cluster constants: defaults apply without copying them into every cluster.
+  # Decode each literal separately so booleans, numbers and buffer sizes retain their types.
+  ingress_nginx_options = {
+    for name, fallback in {
+      ingress_nginx_header_buffer_count                  = "4"
+      ingress_nginx_header_buffer_size                   = "\"64k\""
+      ingress_nginx_serial_reloads                       = "true"
+      ingress_nginx_hpa_enabled                          = "true"
+      ingress_nginx_min_replicas                         = "3"
+      ingress_nginx_max_replicas                         = "6"
+      ingress_nginx_hpa_cpu_target_percentage            = "70"
+      ingress_nginx_hpa_scale_down_stabilization_seconds = "300"
+      } : name => jsondecode(try(trimspace(regex(
+        format("(?m)^\\s*%s\\s*=\\s*([^#\\n]+)", name), local.constants_source
+    )[0]), fallback))
+  }
   ingress_nginx_tracing_enabled_value = can(regex("(?m)^\\s*ingress_nginx_tracing_enabled\\s*=\\s*(true|false)\\s*$", local.constants_source)[0]) ? (
     tobool(regex("(?m)^\\s*ingress_nginx_tracing_enabled\\s*=\\s*(true|false)\\s*$", local.constants_source)[0])
   ) : true
@@ -306,6 +322,10 @@ locals {
   ingress_nginx = [
     for doc in split("\n---\n", templatefile("${path.module}/ingress-nginx-controller.yaml", {
       ingress_lb_ip                           = local.ingress_lb_ip
+      ingress_nginx_header_buffer_count       = local.ingress_nginx_options.ingress_nginx_header_buffer_count
+      ingress_nginx_header_buffer_size        = local.ingress_nginx_options.ingress_nginx_header_buffer_size
+      ingress_nginx_serial_reloads            = local.ingress_nginx_options.ingress_nginx_serial_reloads
+      ingress_nginx_min_replicas              = local.ingress_nginx_options.ingress_nginx_min_replicas
       ingress_nginx_controller_cpu_request    = local.ingress_nginx_controller_cpu_request
       ingress_nginx_controller_cpu_limit      = local.ingress_nginx_controller_cpu_limit
       ingress_nginx_controller_mem_request    = local.ingress_nginx_controller_mem_request
@@ -876,14 +896,22 @@ resource "kubernetes_manifest" "metallb_pool" {
 
 resource "kubernetes_manifest" "ingress_nginx" {
   for_each = local.ingress_nginx_other
-  manifest = each.value
-  computed_fields = [
+  # Omit replicas under HPA ownership; retain the existing resource address.
+  manifest = merge(each.value, {
+    for field, spec in each.value : field => {
+      for name, value in spec : name => value
+      if name != "replicas" || !local.ingress_nginx_options.ingress_nginx_hpa_enabled
+    } if field == "spec" && each.value.kind == "Deployment"
+  })
+  computed_fields = concat([
     "metadata.labels",
     "spec.minReadySeconds",
     "spec.template.metadata.annotations",
     "spec.template.metadata.labels",
-  ]
+  ], each.value.kind == "Deployment" && local.ingress_nginx_options.ingress_nginx_hpa_enabled ? ["spec.replicas"] : [])
   depends_on = [
+    terraform_data.ingress_nginx_configuration,
+    kubernetes_horizontal_pod_autoscaler_v2.ingress_nginx,
     kubernetes_manifest.metallb_pool,
     kubernetes_manifest.ingress_nginx_namespace,
     kubernetes_manifest.infrastructure_priority_classes,
@@ -891,6 +919,89 @@ resource "kubernetes_manifest" "ingress_nginx" {
   field_manager {
     force_conflicts = true
   }
+}
+
+resource "terraform_data" "ingress_nginx_configuration" {
+  input = local.ingress_nginx_options
+  lifecycle {
+    precondition {
+      condition = (
+        local.ingress_nginx_options.ingress_nginx_header_buffer_count >= 1 &&
+        floor(local.ingress_nginx_options.ingress_nginx_header_buffer_count) == local.ingress_nginx_options.ingress_nginx_header_buffer_count &&
+        can(regex("^[1-9][0-9]*[kKmM]?$", local.ingress_nginx_options.ingress_nginx_header_buffer_size)) &&
+        contains([true, false], local.ingress_nginx_options.ingress_nginx_serial_reloads) &&
+        contains([true, false], local.ingress_nginx_options.ingress_nginx_hpa_enabled) &&
+        local.ingress_nginx_options.ingress_nginx_min_replicas >= 1 &&
+        floor(local.ingress_nginx_options.ingress_nginx_min_replicas) == local.ingress_nginx_options.ingress_nginx_min_replicas &&
+        local.ingress_nginx_options.ingress_nginx_max_replicas >= local.ingress_nginx_options.ingress_nginx_min_replicas &&
+        floor(local.ingress_nginx_options.ingress_nginx_max_replicas) == local.ingress_nginx_options.ingress_nginx_max_replicas &&
+        local.ingress_nginx_options.ingress_nginx_hpa_cpu_target_percentage >= 1 &&
+        floor(local.ingress_nginx_options.ingress_nginx_hpa_cpu_target_percentage) == local.ingress_nginx_options.ingress_nginx_hpa_cpu_target_percentage &&
+        local.ingress_nginx_options.ingress_nginx_hpa_scale_down_stabilization_seconds >= 0 &&
+        local.ingress_nginx_options.ingress_nginx_hpa_scale_down_stabilization_seconds <= 3600 &&
+        floor(local.ingress_nginx_options.ingress_nginx_hpa_scale_down_stabilization_seconds) == local.ingress_nginx_options.ingress_nginx_hpa_scale_down_stabilization_seconds
+      )
+      error_message = "Ingress requires a positive integer buffer count, a valid NGINX buffer size, boolean reload/HPA switches, integer replica bounds (1 <= min <= max), positive integer CPU target and integer scale-down stabilization between 0 and 3600 seconds."
+    }
+  }
+}
+
+resource "kubernetes_horizontal_pod_autoscaler_v2" "ingress_nginx" {
+  count = local.ingress_nginx_options.ingress_nginx_hpa_enabled ? 1 : 0
+  metadata {
+    name      = "ingress-nginx-controller"
+    namespace = "ingress-nginx"
+    labels = {
+      "app.kubernetes.io/name"       = "ingress-nginx"
+      "app.kubernetes.io/instance"   = "ingress-nginx"
+      "app.kubernetes.io/component"  = "controller"
+      "app.kubernetes.io/part-of"    = "ingress-nginx"
+      "app.kubernetes.io/managed-by" = "infrastructure"
+      "pve-k8s-talos/section"        = "k8s-net"
+    }
+  }
+  spec {
+    min_replicas = local.ingress_nginx_options.ingress_nginx_min_replicas
+    max_replicas = local.ingress_nginx_options.ingress_nginx_max_replicas
+    scale_target_ref {
+      api_version = "apps/v1"
+      kind        = "Deployment"
+      name        = "ingress-nginx-controller"
+    }
+    metric {
+      type = "Resource"
+      resource {
+        name = "cpu"
+        target {
+          type                = "Utilization"
+          average_utilization = local.ingress_nginx_options.ingress_nginx_hpa_cpu_target_percentage
+        }
+      }
+    }
+    behavior {
+      scale_up {
+        stabilization_window_seconds = 0
+        select_policy                = "Max"
+        policy {
+          type           = "Pods"
+          value          = 3
+          period_seconds = 60
+        }
+      }
+      scale_down {
+        stabilization_window_seconds = local.ingress_nginx_options.ingress_nginx_hpa_scale_down_stabilization_seconds
+        select_policy                = "Min"
+        policy {
+          type           = "Pods"
+          value          = 1
+          period_seconds = 60
+        }
+      }
+    }
+  }
+  # Establish HPA ownership before releasing replicas from an existing Deployment.
+  # A new target Deployment can be reconciled as soon as it is created.
+  depends_on = [kubernetes_manifest.ingress_nginx_namespace, terraform_data.ingress_nginx_configuration]
 }
 
 resource "kubernetes_manifest" "ingress_nginx_namespace" {

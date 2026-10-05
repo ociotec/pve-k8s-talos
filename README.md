@@ -97,6 +97,18 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
   - Use `clusters/sample/secrets/credentials.json` as the expected shape, but do not deploy the sample placeholder values.
 - `k8s_net_constants.tf`
   - Domain, TLS mode, root CA path, MetalLB range, and ingress fixed IP.
+  - Optional ingress settings default to header buffers `4 64k`, serial reloads,
+    and CPU-based HPA with 3–6 replicas at 70% of the CPU request. Configure
+    `ingress_nginx_header_buffer_count` and `ingress_nginx_header_buffer_size`
+    separately, `ingress_nginx_serial_reloads`, `ingress_nginx_hpa_enabled`,
+    `ingress_nginx_min_replicas`, `ingress_nginx_max_replicas`,
+    `ingress_nginx_hpa_cpu_target_percentage`, and
+    `ingress_nginx_hpa_scale_down_stabilization_seconds` in the cluster constants
+    only when overriding defaults. HPA uses metrics-server, waits 300 seconds
+    before scaling down and removes at most one replica per minute. Disabling
+    HPA restores a fixed `ingress_nginx_min_replicas` count. Resource requests
+    and limits are unchanged; horizontal scaling does not partition configuration
+    reloads. Example overrides are commented in `clusters/sample/k8s_net_constants.tf`.
   - Certificate catalog (`available_certificates`) and default certificate entry.
   - The `k8s-net` deployment also creates shared non-default `PriorityClass`
     objects for repository-managed infrastructure:

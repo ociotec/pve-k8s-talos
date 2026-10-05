@@ -33,6 +33,20 @@ locals {
   ingress_nginx_controller_cpu_limit   = "500m"
   ingress_nginx_controller_mem_request = "512Mi"
   ingress_nginx_controller_mem_limit   = "512Mi"
+  # Optional ingress settings below show platform defaults; override only as needed.
+  # Count and per-header buffer size are independent; large buffers are allocated on demand.
+  # ingress_nginx_header_buffer_count = 4
+  # ingress_nginx_header_buffer_size = "64k"
+  # Serialize reloads to avoid accumulating retiring NGINX workers during bulk installs.
+  # ingress_nginx_serial_reloads = true
+  # Disable HPA to keep a fixed ingress_nginx_min_replicas count.
+  # ingress_nginx_hpa_enabled = true
+  # ingress_nginx_min_replicas = 3
+  # ingress_nginx_max_replicas = 6
+  # CPU utilization is relative to the controller CPU request, not its limit.
+  # ingress_nginx_hpa_cpu_target_percentage = 70
+  # Wait five minutes before scaling down, then remove at most one replica per minute.
+  # ingress_nginx_hpa_scale_down_stabilization_seconds = 300
   # The OTLP collector is provided by the monitoring deployment.
   # Tracing is enabled by default. Uncomment to disable it.
   # ingress_nginx_tracing_enabled = false
