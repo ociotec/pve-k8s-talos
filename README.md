@@ -109,6 +109,21 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
     HPA restores a fixed `ingress_nginx_min_replicas` count. Resource requests
     and limits are unchanged; horizontal scaling does not partition configuration
     reloads. Example overrides are commented in `clusters/sample/k8s_net_constants.tf`.
+  - With ingress HPA enabled, a namespaced maintenance CronJob runs every five
+    minutes and removes only `Succeeded` pods owned by the ingress controller
+    Deployment after five minutes of retention, measured from the last container
+    finish time. This prevents historical completed pods without metrics from
+    blocking HPA scale-down. Missing finish timestamps and unverifiable ownership
+    are skipped; deletion rechecks pod state and uses UID/resource-version
+    preconditions. No cluster constants are needed for these defaults. Optional
+    overrides are `ingress_nginx_pod_cleanup_enabled`,
+    `ingress_nginx_pod_cleanup_schedule`, `ingress_nginx_pod_cleanup_retention_seconds`,
+    `ingress_nginx_pod_cleanup_image`, `ingress_nginx_pod_cleanup_cpu_request`,
+    `ingress_nginx_pod_cleanup_cpu_limit`, and `ingress_nginx_pod_cleanup_memory`.
+    Disabling the HPA or cleanup switch omits the CronJob and its dedicated RBAC
+    and script ConfigMap. The CronJob forbids overlapping runs and expires its own
+    finished Jobs after five minutes. Run the script with `--dry-run` to preview
+    eligible pods without deleting them.
   - Certificate catalog (`available_certificates`) and default certificate entry.
   - The `k8s-net` deployment also creates shared non-default `PriorityClass`
     objects for repository-managed infrastructure:

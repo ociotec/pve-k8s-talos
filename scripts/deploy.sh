@@ -2225,6 +2225,7 @@ prepare_k8s_net_workspace() {
   link_into_workspace "${repo_root}/k8s-net/main.tf" "${workspace}/main.tf"
   link_into_workspace "${repo_root}/k8s-net/cert-manager.yaml" "${workspace}/cert-manager.yaml"
   link_into_workspace "${repo_root}/k8s-net/ingress-nginx-controller.yaml" "${workspace}/ingress-nginx-controller.yaml"
+  link_into_workspace "${repo_root}/k8s-net/ingress-nginx-pod-cleanup.py" "${workspace}/ingress-nginx-pod-cleanup.py"
   link_into_workspace "${repo_root}/k8s-net/metallb-native.yaml" "${workspace}/metallb-native.yaml"
   link_into_workspace "${repo_root}/k8s-net/metallb-pool.yaml" "${workspace}/metallb-pool.yaml"
   link_into_workspace "${repo_root}/k8s-net/metrics-server.yaml" "${workspace}/metrics-server.yaml"

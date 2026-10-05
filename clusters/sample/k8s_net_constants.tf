@@ -47,6 +47,15 @@ locals {
   # ingress_nginx_hpa_cpu_target_percentage = 70
   # Wait five minutes before scaling down, then remove at most one replica per minute.
   # ingress_nginx_hpa_scale_down_stabilization_seconds = 300
+  # With HPA enabled, clean only Succeeded ingress Deployment pods after five minutes.
+  # Both the schedule and retention default to five minutes without cluster overrides.
+  # ingress_nginx_pod_cleanup_enabled = true
+  # ingress_nginx_pod_cleanup_schedule = "*/5 * * * *"
+  # ingress_nginx_pod_cleanup_retention_seconds = 300
+  # ingress_nginx_pod_cleanup_image = "python:3.13-alpine"
+  # ingress_nginx_pod_cleanup_cpu_request = "25m"
+  # ingress_nginx_pod_cleanup_cpu_limit = "100m"
+  # ingress_nginx_pod_cleanup_memory = "64Mi"
   # The OTLP collector is provided by the monitoring deployment.
   # Tracing is enabled by default. Uncomment to disable it.
   # ingress_nginx_tracing_enabled = false

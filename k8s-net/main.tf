@@ -252,9 +252,25 @@ locals {
       ingress_nginx_max_replicas                         = "6"
       ingress_nginx_hpa_cpu_target_percentage            = "70"
       ingress_nginx_hpa_scale_down_stabilization_seconds = "300"
+      ingress_nginx_pod_cleanup_enabled                  = "true"
+      ingress_nginx_pod_cleanup_schedule                 = "\"*/5 * * * *\""
+      ingress_nginx_pod_cleanup_retention_seconds        = "300"
+      ingress_nginx_pod_cleanup_image                    = "\"python:3.13-alpine\""
+      ingress_nginx_pod_cleanup_cpu_request              = "\"25m\""
+      ingress_nginx_pod_cleanup_cpu_limit                = "\"100m\""
+      ingress_nginx_pod_cleanup_memory                   = "\"64Mi\""
       } : name => jsondecode(try(trimspace(regex(
         format("(?m)^\\s*%s\\s*=\\s*([^#\\n]+)", name), local.constants_source
     )[0]), fallback))
+  }
+  ingress_nginx_pod_cleanup_enabled_value = local.ingress_nginx_options.ingress_nginx_hpa_enabled && local.ingress_nginx_options.ingress_nginx_pod_cleanup_enabled
+  ingress_nginx_pod_cleanup_labels = {
+    "app.kubernetes.io/name"       = "ingress-nginx-pod-cleanup"
+    "app.kubernetes.io/instance"   = "ingress-nginx"
+    "app.kubernetes.io/component"  = "maintenance"
+    "app.kubernetes.io/part-of"    = "ingress-nginx"
+    "app.kubernetes.io/managed-by" = "infrastructure"
+    "pve-k8s-talos/section"        = "k8s-net"
   }
   ingress_nginx_tracing_enabled_value = can(regex("(?m)^\\s*ingress_nginx_tracing_enabled\\s*=\\s*(true|false)\\s*$", local.constants_source)[0]) ? (
     tobool(regex("(?m)^\\s*ingress_nginx_tracing_enabled\\s*=\\s*(true|false)\\s*$", local.constants_source)[0])
@@ -939,9 +955,13 @@ resource "terraform_data" "ingress_nginx_configuration" {
         floor(local.ingress_nginx_options.ingress_nginx_hpa_cpu_target_percentage) == local.ingress_nginx_options.ingress_nginx_hpa_cpu_target_percentage &&
         local.ingress_nginx_options.ingress_nginx_hpa_scale_down_stabilization_seconds >= 0 &&
         local.ingress_nginx_options.ingress_nginx_hpa_scale_down_stabilization_seconds <= 3600 &&
-        floor(local.ingress_nginx_options.ingress_nginx_hpa_scale_down_stabilization_seconds) == local.ingress_nginx_options.ingress_nginx_hpa_scale_down_stabilization_seconds
+        floor(local.ingress_nginx_options.ingress_nginx_hpa_scale_down_stabilization_seconds) == local.ingress_nginx_options.ingress_nginx_hpa_scale_down_stabilization_seconds &&
+        contains([true, false], local.ingress_nginx_options.ingress_nginx_pod_cleanup_enabled) &&
+        can(regex("^\\S+ \\S+ \\S+ \\S+ \\S+$", local.ingress_nginx_options.ingress_nginx_pod_cleanup_schedule)) &&
+        local.ingress_nginx_options.ingress_nginx_pod_cleanup_retention_seconds >= 0 &&
+        floor(local.ingress_nginx_options.ingress_nginx_pod_cleanup_retention_seconds) == local.ingress_nginx_options.ingress_nginx_pod_cleanup_retention_seconds
       )
-      error_message = "Ingress requires a positive integer buffer count, a valid NGINX buffer size, boolean reload/HPA switches, integer replica bounds (1 <= min <= max), positive integer CPU target and integer scale-down stabilization between 0 and 3600 seconds."
+      error_message = "Ingress requires a positive integer buffer count, a valid NGINX buffer size, boolean reload/HPA/cleanup switches, integer replica bounds (1 <= min <= max), positive integer CPU target, integer scale-down stabilization between 0 and 3600 seconds, a five-field cleanup cron schedule and non-negative integer retention seconds."
     }
   }
 }
@@ -1002,6 +1022,141 @@ resource "kubernetes_horizontal_pod_autoscaler_v2" "ingress_nginx" {
   # Establish HPA ownership before releasing replicas from an existing Deployment.
   # A new target Deployment can be reconciled as soon as it is created.
   depends_on = [kubernetes_manifest.ingress_nginx_namespace, terraform_data.ingress_nginx_configuration]
+}
+
+resource "kubernetes_service_account_v1" "ingress_nginx_pod_cleanup" {
+  count = local.ingress_nginx_pod_cleanup_enabled_value ? 1 : 0
+  metadata {
+    name      = "ingress-nginx-pod-cleanup"
+    namespace = "ingress-nginx"
+    labels    = local.ingress_nginx_pod_cleanup_labels
+  }
+  automount_service_account_token = true
+  depends_on                      = [kubernetes_manifest.ingress_nginx_namespace, terraform_data.ingress_nginx_configuration]
+}
+
+resource "kubernetes_role_v1" "ingress_nginx_pod_cleanup" {
+  count = local.ingress_nginx_pod_cleanup_enabled_value ? 1 : 0
+  metadata {
+    name      = "ingress-nginx-pod-cleanup"
+    namespace = "ingress-nginx"
+    labels    = local.ingress_nginx_pod_cleanup_labels
+  }
+  rule {
+    api_groups = [""]
+    resources  = ["pods"]
+    verbs      = ["get", "list", "delete"]
+  }
+  rule {
+    api_groups = ["apps"]
+    resources  = ["replicasets"]
+    verbs      = ["get"]
+  }
+  rule {
+    api_groups     = ["apps"]
+    resources      = ["deployments"]
+    resource_names = ["ingress-nginx-controller"]
+    verbs          = ["get"]
+  }
+  depends_on = [kubernetes_manifest.ingress_nginx_namespace, terraform_data.ingress_nginx_configuration]
+}
+
+resource "kubernetes_role_binding_v1" "ingress_nginx_pod_cleanup" {
+  count = local.ingress_nginx_pod_cleanup_enabled_value ? 1 : 0
+  metadata {
+    name      = "ingress-nginx-pod-cleanup"
+    namespace = "ingress-nginx"
+    labels    = local.ingress_nginx_pod_cleanup_labels
+  }
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "Role"
+    name      = kubernetes_role_v1.ingress_nginx_pod_cleanup[0].metadata[0].name
+  }
+  subject {
+    kind      = "ServiceAccount"
+    name      = kubernetes_service_account_v1.ingress_nginx_pod_cleanup[0].metadata[0].name
+    namespace = "ingress-nginx"
+  }
+}
+
+resource "kubernetes_config_map_v1" "ingress_nginx_pod_cleanup" {
+  count = local.ingress_nginx_pod_cleanup_enabled_value ? 1 : 0
+  metadata {
+    name      = "ingress-nginx-pod-cleanup"
+    namespace = "ingress-nginx"
+    labels    = local.ingress_nginx_pod_cleanup_labels
+  }
+  data       = { "cleanup.py" = file("${path.module}/ingress-nginx-pod-cleanup.py") }
+  depends_on = [kubernetes_manifest.ingress_nginx_namespace, terraform_data.ingress_nginx_configuration]
+}
+
+resource "kubernetes_cron_job_v1" "ingress_nginx_pod_cleanup" {
+  count = local.ingress_nginx_pod_cleanup_enabled_value ? 1 : 0
+  metadata {
+    name      = "ingress-nginx-pod-cleanup"
+    namespace = "ingress-nginx"
+    labels    = local.ingress_nginx_pod_cleanup_labels
+  }
+  spec {
+    schedule                      = local.ingress_nginx_options.ingress_nginx_pod_cleanup_schedule
+    concurrency_policy            = "Forbid"
+    starting_deadline_seconds     = 120
+    successful_jobs_history_limit = 1
+    failed_jobs_history_limit     = 1
+    job_template {
+      metadata { labels = local.ingress_nginx_pod_cleanup_labels }
+      spec {
+        backoff_limit              = 1
+        active_deadline_seconds    = 180
+        ttl_seconds_after_finished = 300
+        template {
+          metadata { labels = local.ingress_nginx_pod_cleanup_labels }
+          spec {
+            service_account_name            = kubernetes_service_account_v1.ingress_nginx_pod_cleanup[0].metadata[0].name
+            automount_service_account_token = true
+            restart_policy                  = "Never"
+            priority_class_name             = "infra-observability"
+            container {
+              name    = "cleanup"
+              image   = local.ingress_nginx_options.ingress_nginx_pod_cleanup_image
+              command = ["python", "-B", "/scripts/cleanup.py"]
+              env {
+                name  = "NAMESPACE"
+                value = "ingress-nginx"
+              }
+              env {
+                name  = "RETENTION_SECONDS"
+                value = tostring(local.ingress_nginx_options.ingress_nginx_pod_cleanup_retention_seconds)
+              }
+              resources {
+                requests = { cpu = local.ingress_nginx_options.ingress_nginx_pod_cleanup_cpu_request, memory = local.ingress_nginx_options.ingress_nginx_pod_cleanup_memory }
+                limits   = { cpu = local.ingress_nginx_options.ingress_nginx_pod_cleanup_cpu_limit, memory = local.ingress_nginx_options.ingress_nginx_pod_cleanup_memory }
+              }
+              security_context {
+                run_as_non_root            = true
+                run_as_user                = 65532
+                allow_privilege_escalation = false
+                read_only_root_filesystem  = true
+                capabilities { drop = ["ALL"] }
+                seccomp_profile { type = "RuntimeDefault" }
+              }
+              volume_mount {
+                name       = "script"
+                mount_path = "/scripts"
+                read_only  = true
+              }
+            }
+            volume {
+              name = "script"
+              config_map { name = kubernetes_config_map_v1.ingress_nginx_pod_cleanup[0].metadata[0].name }
+            }
+          }
+        }
+      }
+    }
+  }
+  depends_on = [kubernetes_role_binding_v1.ingress_nginx_pod_cleanup, kubernetes_manifest.infrastructure_priority_classes]
 }
 
 resource "kubernetes_manifest" "ingress_nginx_namespace" {
