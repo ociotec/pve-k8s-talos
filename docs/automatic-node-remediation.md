@@ -137,6 +137,17 @@ and must be protected accordingly. Prometheus has no control role: it only
 scrapes the controller's `/metrics` endpoint; decisions are based directly on
 Kubernetes node and Lease state.
 
+When remediation is enabled, `deploy.sh --skip-ceph` verifies the existing Rook
+RBD fencing dependencies before updating `k8s-net`. CSI-Addons must be enabled
+in both the desired Ceph constants and the deployed operator configuration.
+The NetworkFence v1alpha1 CRD must be established, the CSI-Addons controller and
+RBD provisioner must be available, and the RBD node plugins must be ready with
+their CSI-Addons sidecars. The fencing Secret and RBD CSI driver must exist.
+Missing dependencies, disabled CSI-Addons, or Kubernetes API failures block the
+deployment; bootstrap or fencing repairs require including the Ceph section.
+This read-only preflight does not reconcile skipped Ceph resources or perform
+an active fencing operation.
+
 ### Dedicated PVE Credential
 
 The deployment credential must remain outside Kubernetes. OpenTofu will use it

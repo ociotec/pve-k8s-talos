@@ -1120,6 +1120,63 @@ proxmox_api_request() {
   curl "${curl_args[@]}" "${base}${path}"
 }
 
+validate_existing_node_remediation_fencing() {
+  local object_json
+  local resource
+  local namespace
+  local -a kube_args=(--kubeconfig "${cluster_kubeconfig_path}" --request-timeout=30s)
+
+  # Match the Rook RBD fencing backend in k8s-net/main.tf. This checks the
+  # installed dependency, without applying or initializing skipped Ceph modules.
+  if [[ "$(tf_bool_value "${cluster_ceph_constants_path}" ceph_csi_addons_enabled)" != "true" ]]; then
+    error "Skipping Ceph with automatic node remediation requires ceph_csi_addons_enabled = true. Include the Ceph section to reconcile fencing." >&2
+    return 1
+  fi
+  if ! object_json="$(kubectl "${kube_args[@]}" get crd networkfences.csiaddons.openshift.io -o json)" ||
+    ! jq -e '.spec.scope == "Cluster" and
+      any(.spec.versions[]; .name == "v1alpha1" and .served == true) and
+      any(.status.conditions[]?; .type == "Established" and .status == "True")' <<<"${object_json}" >/dev/null; then
+    error "CSI-Addons NetworkFence v1alpha1 is unavailable. Include the Ceph section to reconcile fencing." >&2
+    return 1
+  fi
+  if ! object_json="$(kubectl "${kube_args[@]}" -n rook-ceph get configmap rook-ceph-operator-config -o json)" ||
+    ! jq -e '.data.CSI_ENABLE_CSIADDONS == "true"' <<<"${object_json}" >/dev/null; then
+    error "The deployed Rook operator has CSI-Addons disabled. Include the Ceph section to reconcile fencing." >&2
+    return 1
+  fi
+  for resource in csi-addons-controller-manager csi-rbdplugin-provisioner; do
+    namespace=rook-ceph
+    [[ "${resource}" != "csi-addons-controller-manager" ]] || namespace=csi-addons-system
+    if ! object_json="$(kubectl "${kube_args[@]}" -n "${namespace}" get deployment "${resource}" -o json)" ||
+      ! jq -e --arg name "${resource}" '
+        (.spec.replicas // 1) > 0 and
+        (.status.observedGeneration // 0) >= .metadata.generation and
+        (.status.updatedReplicas // 0) == (.spec.replicas // 1) and
+        (.status.availableReplicas // 0) >= (.spec.replicas // 1) and
+        ($name != "csi-rbdplugin-provisioner" or
+          any(.spec.template.spec.containers[]; .name == "csi-addons"))
+      ' <<<"${object_json}" >/dev/null; then
+      error "Cannot verify ready fencing dependency ${resource} and its CSI-Addons sidecar. Check API connectivity and fencing readiness before skipping Ceph." >&2
+      return 1
+    fi
+  done
+  if ! object_json="$(kubectl "${kube_args[@]}" -n rook-ceph get daemonset csi-rbdplugin -o json)" ||
+    ! jq -e '.status.desiredNumberScheduled > 0 and
+      (.status.observedGeneration // 0) >= .metadata.generation and
+      .status.updatedNumberScheduled == .status.desiredNumberScheduled and
+      .status.numberReady == .status.desiredNumberScheduled and
+      any(.spec.template.spec.containers[]; .name == "csi-addons")' <<<"${object_json}" >/dev/null; then
+    error "RBD node fencing sidecars are missing or not ready. Reconcile Ceph before skipping it." >&2
+    return 1
+  fi
+  # Only query Secret metadata; never read or print credential values.
+  if ! kubectl "${kube_args[@]}" -n rook-ceph get secret rook-csi-rbd-provisioner -o name >/dev/null ||
+    ! kubectl "${kube_args[@]}" get csidriver rook-ceph.rbd.csi.ceph.com -o name >/dev/null; then
+    error "The RBD fencing Secret or CSI driver is missing. Include the Ceph section to reconcile fencing." >&2
+    return 1
+  fi
+}
+
 validate_node_remediation_proxmox_access() {
   local enabled
   local worker_name
@@ -1133,8 +1190,8 @@ validate_node_remediation_proxmox_access() {
     return 0
   fi
   if [[ "${skip_ceph}" == "true" ]]; then
-    error "Automatic node remediation requires the Ceph section so CSI network fencing can be reconciled." >&2
-    exit 1
+    message "Checking existing CSI network-fencing dependencies before skipping Ceph..."
+    validate_existing_node_remediation_fencing || exit 1
   fi
 
   message "Checking Proxmox privileges required to provision the dedicated remediation token..."
