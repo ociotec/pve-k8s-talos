@@ -48,20 +48,26 @@ provider "kubernetes" {
 }
 
 locals {
-  cluster_credentials                    = try(jsondecode(file("${path.module}/credentials.json")), {})
-  platform_credentials                   = try(local.cluster_credentials.platform, {})
-  platform_portainer_admin_password      = try(local.platform_credentials.portainer_admin_password, "")
-  platform_rancher_bootstrap_password    = try(local.platform_credentials.rancher_bootstrap_password, "")
-  rancher_enabled                        = trimspace(local.rancher_hostname) != ""
-  rancher_hostname_value                 = local.rancher_hostname
-  rancher_tls_secret_name_value          = local.rancher_tls_secret_name
-  rancher_replicas_value                 = local.rancher_replicas
-  rancher_version_value                  = try(local.rancher_version, "2.14.1")
-  rancher_debug_value                    = try(local.rancher_debug, false)
-  rancher_cpu_request_value              = try(local.rancher_cpu_request, "200m")
-  rancher_cpu_limit_value                = try(local.rancher_cpu_limit, "1")
-  rancher_mem_request_value              = try(local.rancher_mem_request, "2560Mi")
-  rancher_mem_limit_value                = try(local.rancher_mem_limit, "2560Mi")
+  cluster_credentials                 = try(jsondecode(file("${path.module}/credentials.json")), {})
+  platform_credentials                = try(local.cluster_credentials.platform, {})
+  platform_portainer_admin_password   = try(local.platform_credentials.portainer_admin_password, "")
+  platform_rancher_bootstrap_password = try(local.platform_credentials.rancher_bootstrap_password, "")
+  rancher_enabled                     = trimspace(local.rancher_hostname) != ""
+  rancher_hostname_value              = local.rancher_hostname
+  rancher_tls_secret_name_value       = local.rancher_tls_secret_name
+  rancher_replicas_value              = local.rancher_replicas
+  rancher_version_value               = try(local.rancher_version, "2.14.1")
+  rancher_debug_value                 = try(local.rancher_debug, false)
+  rancher_cpu_request_value           = try(local.rancher_cpu_request, "200m")
+  rancher_cpu_limit_value             = try(local.rancher_cpu_limit, "1")
+  rancher_mem_request_value           = try(local.rancher_mem_request, "2560Mi")
+  rancher_mem_limit_value             = try(local.rancher_mem_limit, "2560Mi")
+  rancher_mem_limit_mib = can(regex("^[0-9]+Gi$", local.rancher_mem_limit_value)) ? tonumber(trimsuffix(local.rancher_mem_limit_value, "Gi")) * 1024 : (
+    can(regex("^[0-9]+Mi$", local.rancher_mem_limit_value)) ? tonumber(trimsuffix(local.rancher_mem_limit_value, "Mi")) : null
+  )
+  # Leave 20% of the container limit for memory not managed by the Go runtime.
+  rancher_go_mem_limit_mib               = local.rancher_mem_limit_mib == null ? null : floor(local.rancher_mem_limit_mib * 80 / 100)
+  rancher_go_mem_limit                   = local.rancher_go_mem_limit_mib == null ? "" : format("%dMiB", local.rancher_go_mem_limit_mib)
   rancher_private_ca_value               = local.rancher_private_ca
   rancher_bootstrap_length_value         = local.rancher_bootstrap_password_length
   rancher_auth_keycloak_realm_value      = trimspace(try(local.rancher_auth_keycloak_realm, ""))
@@ -214,6 +220,7 @@ locals {
       rancher_cpu_limit              = local.rancher_cpu_limit_value
       rancher_mem_request            = local.rancher_mem_request_value
       rancher_mem_limit              = local.rancher_mem_limit_value
+      rancher_go_mem_limit           = local.rancher_go_mem_limit
       rancher_imperative_api_enabled = local.rancher_version_is_v214plus
     })) :
     merge(
@@ -784,6 +791,13 @@ check "rancher_ca_file" {
   assert {
     condition     = !local.rancher_enabled || !local.rancher_private_ca_value || trimspace(local.rancher_ca_content) != ""
     error_message = "rancher_private_ca=true requires a readable, non-empty root_ca_crt file."
+  }
+}
+
+check "rancher_go_memory_limit_supported" {
+  assert {
+    condition     = local.rancher_mem_limit_mib != null
+    error_message = format("rancher_mem_limit must use a supported whole-number memory unit for GOMEMLIMIT derivation: Mi or Gi. Got %q.", local.rancher_mem_limit_value)
   }
 }
 

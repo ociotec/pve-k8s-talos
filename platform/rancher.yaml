@@ -191,6 +191,8 @@ spec:
               key: "bootstrapPassword"
         - name: CATTLE_DEBUG
           value: "${rancher_debug}"
+        - name: GOMEMLIMIT
+          value: "${rancher_go_mem_limit}"
 %{ if rancher_imperative_api_enabled ~}
         - name: IMPERATIVE_API_DIRECT
           value: "true"
