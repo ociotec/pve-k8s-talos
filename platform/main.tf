@@ -57,11 +57,21 @@ locals {
   rancher_tls_secret_name_value       = local.rancher_tls_secret_name
   rancher_replicas_value              = local.rancher_replicas
   rancher_version_value               = try(local.rancher_version, "2.14.1")
-  rancher_debug_value                 = try(local.rancher_debug, false)
-  rancher_cpu_request_value           = try(local.rancher_cpu_request, "200m")
-  rancher_cpu_limit_value             = try(local.rancher_cpu_limit, "1")
-  rancher_mem_request_value           = try(local.rancher_mem_request, "2560Mi")
-  rancher_mem_limit_value             = try(local.rancher_mem_limit, "2560Mi")
+  # Read the optional override without referencing an undeclared local.
+  rancher_debug_value = try(tobool(regex(
+    "(?m)^\\s*rancher_debug\\s*=\\s*(true|false)\\s*(?:#.*)?$",
+    file("${path.module}/constants.tf")
+  )[0]), false)
+  rancher_cpu_request_value = try(local.rancher_cpu_request, "200m")
+  rancher_cpu_limit_value   = try(local.rancher_cpu_limit, "1")
+  # Go requires an integer: round fractional Kubernetes CPU limits up to a core.
+  rancher_cpu_limit_cores = try(
+    tonumber(trimsuffix(local.rancher_cpu_limit_value, "m")) / (endswith(local.rancher_cpu_limit_value, "m") ? 1000 : 1),
+    0
+  )
+  rancher_go_max_procs      = tostring(max(1, ceil(local.rancher_cpu_limit_cores)))
+  rancher_mem_request_value = try(local.rancher_mem_request, "2560Mi")
+  rancher_mem_limit_value   = try(local.rancher_mem_limit, "2560Mi")
   rancher_mem_limit_mib = can(regex("^[0-9]+Gi$", local.rancher_mem_limit_value)) ? tonumber(trimsuffix(local.rancher_mem_limit_value, "Gi")) * 1024 : (
     can(regex("^[0-9]+Mi$", local.rancher_mem_limit_value)) ? tonumber(trimsuffix(local.rancher_mem_limit_value, "Mi")) : null
   )
@@ -221,6 +231,7 @@ locals {
       rancher_mem_request            = local.rancher_mem_request_value
       rancher_mem_limit              = local.rancher_mem_limit_value
       rancher_go_mem_limit           = local.rancher_go_mem_limit
+      rancher_go_max_procs           = local.rancher_go_max_procs
       rancher_imperative_api_enabled = local.rancher_version_is_v214plus
     })) :
     merge(
@@ -791,6 +802,13 @@ check "rancher_ca_file" {
   assert {
     condition     = !local.rancher_enabled || !local.rancher_private_ca_value || trimspace(local.rancher_ca_content) != ""
     error_message = "rancher_private_ca=true requires a readable, non-empty root_ca_crt file."
+  }
+}
+
+check "rancher_go_cpu_limit_supported" {
+  assert {
+    condition     = can(regex("^[0-9]+([.][0-9]+)?m?$", local.rancher_cpu_limit_value)) && local.rancher_cpu_limit_cores > 0
+    error_message = "rancher_cpu_limit must be a positive CPU quantity in cores or millicores to derive GOMAXPROCS."
   }
 }
 

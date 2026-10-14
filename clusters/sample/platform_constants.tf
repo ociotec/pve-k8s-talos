@@ -30,7 +30,6 @@ locals {
   rancher_tls_secret_name           = "tls-rancher-ingress"
   rancher_replicas                  = 1
   rancher_version                   = "2.12.2"
-  rancher_debug                     = true
   rancher_private_ca                = true
   rancher_bootstrap_password_length = 24
   rancher_auth_keycloak_realm       = "company"

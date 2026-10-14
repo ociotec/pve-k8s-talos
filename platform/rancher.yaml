@@ -193,6 +193,8 @@ spec:
           value: "${rancher_debug}"
         - name: GOMEMLIMIT
           value: "${rancher_go_mem_limit}"
+        - name: GOMAXPROCS
+          value: "${rancher_go_max_procs}"
 %{ if rancher_imperative_api_enabled ~}
         - name: IMPERATIVE_API_DIRECT
           value: "true"
