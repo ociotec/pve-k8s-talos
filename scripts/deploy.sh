@@ -1351,32 +1351,147 @@ talos_boot_id() {
     tr -d '\r\n'
 }
 
-node_has_persistent_machineconfig() {
+node_has_staged_machineconfig() {
   local node_ip="$1"
-  timeout --kill-after=5s 15s \
+  local configs
+  local result=0
+
+  # A no-reboot apply can persist the same configuration that is already active.
+  # Only a different persistent configuration needs activation through a reboot.
+  if ! configs="$(timeout --kill-after=5s 15s \
     talosctl --talosconfig "${cluster_talosconfig_path}" \
       -n "${node_ip}" \
-      get machineconfig persistent 1>/dev/null 2>&1
+      get machineconfig -o json)"; then
+    error "Failed to read active and persistent Talos configurations on ${node_ip}." >&2
+    return 2
+  fi
+  printf '%s\n' "${configs}" | jq -e -s '
+    map(select(.metadata.id == "v1alpha1")) as $active |
+    map(select(.metadata.id == "persistent")) as $persistent |
+    if ($active | length) != 1 or ($active[0].spec | type) != "string" then
+      error("Missing active machine configuration")
+    elif ($persistent | length) == 0 then false
+    elif ($persistent | length) != 1 or ($persistent[0].spec | type) != "string" then
+      error("Invalid persistent machine configuration")
+    else $persistent[0].spec != $active[0].spec end
+  ' >/dev/null || result=$?
+  if [[ "${result}" -gt 1 ]]; then
+    error "Failed to compare active and persistent Talos configurations on ${node_ip}." >&2
+    return 2
+  fi
+  return "${result}"
 }
 
 node_has_secondary_ip_active() {
   local node_ip="$1"
   local ip2="$2"
+  local addresses
 
-  talosctl --talosconfig "${cluster_talosconfig_path}" -n "${node_ip}" get addresses -o yaml 2>/dev/null \
-    | grep -F "${ip2}/" >/dev/null
+  if ! addresses="$(timeout --kill-after=5s 15s talosctl --talosconfig "${cluster_talosconfig_path}" -n "${node_ip}" get addresses -o yaml)"; then
+    error "Failed to read Talos addresses on ${node_ip}." >&2
+    return 2
+  fi
+  printf '%s\n' "${addresses}" | grep -F "${ip2}/" >/dev/null
 }
 
 node_primary_default_route_ok() {
   local node_ip="$1"
+  local routes
 
-  talosctl --talosconfig "${cluster_talosconfig_path}" -n "${node_ip}" get routespecs -o yaml 2>/dev/null \
-    | grep -F 'outLinkName: eth0' >/dev/null
+  if ! routes="$(timeout --kill-after=5s 15s talosctl --talosconfig "${cluster_talosconfig_path}" -n "${node_ip}" get routespecs -o yaml)"; then
+    error "Failed to read Talos routes on ${node_ip}." >&2
+    return 2
+  fi
+  printf '%s\n' "${routes}" | grep -F 'outLinkName: eth0' >/dev/null
 }
 
 secondary_network_machineconfig_path() {
   local worker_name="$1"
   printf '%s/machineconfig-%s.yaml' "${cluster_root_workspace}" "${worker_name}"
+}
+
+# Normalize with Talos itself so YAML formatting does not look like a network
+# change. Preserve additional documents conservatively (they can define links).
+machineconfig_network_signature() {
+  talosctl machineconfig patch "$1" | awk '
+    /^---/ { extra_documents = 1 }
+    extra_documents { print; next }
+    /^machine:/ { in_machine = 1; next }
+    in_machine && /^[^[:space:]#]/ { in_machine = 0 }
+    in_machine && /^[[:space:]]+network:/ {
+      match($0, /[^[:space:]]/)
+      network_indent = RSTART
+      in_network = 1
+      found = 1
+    }
+    in_network {
+      if ($0 !~ /^[[:space:]]*(#|$)/) {
+        match($0, /[^[:space:]]/)
+        if (RSTART < network_indent || (RSTART == network_indent && $0 !~ /^[[:space:]]+network:/)) {
+          in_network = 0
+        }
+      }
+      if (in_network) print
+    }
+    END { if (!found) exit 1 }
+  '
+}
+
+# Return 1 only for a confirmed difference; lookup/parse errors must stop the
+# deployment rather than silently selecting a reboot path.
+node_machineconfig_network_matches_file() {
+  local node_ip="$1"
+  local machineconfig_path="$2"
+  local current_config
+  local current_network
+  local desired_network
+
+  current_config="$(mktemp "${TMPDIR:-/tmp}/pve-k8s-talos-network.XXXXXX")"
+  if ! timeout --kill-after=5s 15s \
+    talosctl --talosconfig "${cluster_talosconfig_path}" -n "${node_ip}" \
+      get machineconfig v1alpha1 -o json | jq -er '.spec' >"${current_config}"; then
+    rm -f "${current_config}"
+    error "Failed to read the active Talos network configuration on ${node_ip}." >&2
+    return 2
+  fi
+  if ! current_network="$(machineconfig_network_signature "${current_config}")" \
+    || ! desired_network="$(machineconfig_network_signature "${machineconfig_path}")"; then
+    rm -f "${current_config}"
+    error "Failed to compare the active and desired Talos network configuration on ${node_ip}." >&2
+    return 2
+  fi
+  rm -f "${current_config}"
+  [[ "${current_network}" == "${desired_network}" ]]
+}
+
+# Only explicit, successful Talos dry-run decisions may select a staged apply.
+# Keep output private: the configuration diff can contain registry credentials.
+node_machineconfig_apply_mode() {
+  local node_ip="$1"
+  local machineconfig_path="$2"
+  local dry_run_output
+  local result=0
+  local mode
+
+  dry_run_output="$(mktemp "${TMPDIR:-/tmp}/pve-k8s-talos-apply-mode.XXXXXX")"
+  timeout --kill-after=5s 30s \
+    talosctl --talosconfig "${cluster_talosconfig_path}" -n "${node_ip}" \
+      apply-config --mode auto --dry-run --file "${machineconfig_path}" \
+      >"${dry_run_output}" 2>&1 || result=$?
+  if [[ "${result}" != "0" ]]; then
+    error "Talos dry-run failed on ${node_ip} (exit ${result}); private details: ${dry_run_output}." >&2
+    return 1
+  fi
+  if grep -Fxq 'Applied configuration without a reboot (skipped in dry-run).' "${dry_run_output}"; then
+    mode="no-reboot"
+  elif grep -Fxq 'Applied configuration with a reboot (skipped in dry-run).' "${dry_run_output}"; then
+    mode="staged"
+  else
+    error "Unrecognized Talos dry-run decision on ${node_ip}; private details: ${dry_run_output}." >&2
+    return 1
+  fi
+  rm -f "${dry_run_output}"
+  printf '%s\n' "${mode}"
 }
 
 node_machineconfig_matches_file() {
@@ -1448,6 +1563,11 @@ stage_secondary_network_worker_configs() {
   local worker_ip2
   local machineconfig_path
   local start
+  local network_result
+  local apply_mode
+  local secondary_ip_result
+  local primary_route_result
+  local staged_result
 
   if ! secondary_network_enabled; then
     return 0
@@ -1460,8 +1580,9 @@ stage_secondary_network_worker_configs() {
 
   require_cmd talosctl
   require_cmd timeout
+  require_cmd jq
 
-  message "Staging secondary-network Talos config on workers..."
+  message "Reconciling secondary-network Talos config on workers..."
   for line in "${worker_lines[@]}"; do
     IFS='|' read -r worker_name pve_node_name vm_id worker_ip worker_ip2 <<<"${line}"
 
@@ -1471,17 +1592,56 @@ stage_secondary_network_worker_configs() {
       exit 1
     fi
 
-    if ! node_has_persistent_machineconfig "${worker_ip}"; then
-      if node_has_secondary_ip_active "${worker_ip}" "${worker_ip2}" && node_primary_default_route_ok "${worker_ip}"; then
+    staged_result=0
+    node_has_staged_machineconfig "${worker_ip}" || staged_result=$?
+    if [[ "${staged_result}" -gt 1 ]]; then
+      return 1
+    fi
+    if [[ "${staged_result}" == "1" ]]; then
+      secondary_ip_result=0
+      primary_route_result=0
+      node_has_secondary_ip_active "${worker_ip}" "${worker_ip2}" || secondary_ip_result=$?
+      node_primary_default_route_ok "${worker_ip}" || primary_route_result=$?
+      if [[ "${secondary_ip_result}" -gt 1 || "${primary_route_result}" -gt 1 ]]; then
+        return 1
+      fi
+      if [[ "${secondary_ip_result}" == "0" && "${primary_route_result}" == "0" ]]; then
         if node_machineconfig_matches_file "${worker_ip}" "${machineconfig_path}"; then
           message "${worker_name} already has the current Talos config and secondary IP active; skipping config stage."
           continue
         fi
-        message "${worker_name} has the secondary IP active but its Talos config differs; staging the current rendered config."
+        network_result=0
+        node_machineconfig_network_matches_file "${worker_ip}" "${machineconfig_path}" || network_result=$?
+        if [[ "${network_result}" -gt 1 ]]; then
+          return 1
+        fi
+        if [[ "${network_result}" == "0" ]]; then
+          if ! apply_mode="$(node_machineconfig_apply_mode "${worker_ip}" "${machineconfig_path}")"; then
+            return 1
+          fi
+          if [[ "${apply_mode}" == "no-reboot" ]]; then
+            message "Applying Talos config on ${worker_name} without a reboot..."
+            if ! talosctl --talosconfig "${cluster_talosconfig_path}" \
+              -n "${worker_ip}" apply-config --mode no-reboot \
+              --file "${machineconfig_path}" 1>/dev/null; then
+              error "Failed to apply Talos config on ${worker_name} without a reboot; refusing to stage it automatically." >&2
+              return 1
+            fi
+            wait_for_machineconfig_match "${worker_name}" "${worker_ip}" "${machineconfig_path}" 180 || return 1
+            wait_for_node_ready "${worker_name}" 600
+            if ! node_has_secondary_ip_active "${worker_ip}" "${worker_ip2}" \
+              || ! node_primary_default_route_ok "${worker_ip}"; then
+              error "${worker_name} lost its secondary IP or primary default route after applying Talos config." >&2
+              return 1
+            fi
+            continue
+          fi
+        fi
+        message "${worker_name} requires a staged Talos configuration; keeping sequential reboot reconciliation."
       fi
     fi
 
-    if node_has_persistent_machineconfig "${worker_ip}"; then
+    if [[ "${staged_result}" == "0" ]]; then
       message "${worker_name} already has staged Talos config; replacing it with the current rendered config."
     fi
 
@@ -1492,7 +1652,8 @@ stage_secondary_network_worker_configs() {
       --file "${machineconfig_path}" 1>/dev/null
 
     start="$(date +%s)"
-    until node_has_persistent_machineconfig "${worker_ip}"; do
+    until node_has_staged_machineconfig "${worker_ip}" \
+      || node_machineconfig_matches_file "${worker_ip}" "${machineconfig_path}"; do
       if (( $(date +%s) - start >= 120 )); then
         error "Timed out waiting for ${worker_name} to accept the staged secondary-network machineconfig." >&2
         exit 1
@@ -1513,6 +1674,7 @@ reconcile_secondary_network_workers() {
   local boot_id_before
   local boot_id_after
   local start
+  local staged_result
 
   if ! secondary_network_enabled; then
     return 0
@@ -1533,7 +1695,12 @@ reconcile_secondary_network_workers() {
   for line in "${worker_lines[@]}"; do
     IFS='|' read -r worker_name pve_node_name vm_id worker_ip worker_ip2 <<<"${line}"
 
-    if ! node_has_persistent_machineconfig "${worker_ip}"; then
+    staged_result=0
+    node_has_staged_machineconfig "${worker_ip}" || staged_result=$?
+    if [[ "${staged_result}" -gt 1 ]]; then
+      return 1
+    fi
+    if [[ "${staged_result}" == "1" ]]; then
       if node_has_secondary_ip_active "${worker_ip}" "${worker_ip2}" && node_primary_default_route_ok "${worker_ip}"; then
         message "${worker_name} already has the secondary IP active; skipping."
         continue
@@ -1558,7 +1725,7 @@ reconcile_secondary_network_workers() {
       if [[ -n "${boot_id_after}" && "${boot_id_after}" != "${boot_id_before}" ]]; then
         break
       fi
-      if ! node_has_persistent_machineconfig "${worker_ip}" \
+      if ! node_has_staged_machineconfig "${worker_ip}" \
         && node_has_secondary_ip_active "${worker_ip}" "${worker_ip2}" \
         && node_primary_default_route_ok "${worker_ip}"; then
         break
@@ -1571,7 +1738,7 @@ reconcile_secondary_network_workers() {
     done
 
     start="$(date +%s)"
-    while node_has_persistent_machineconfig "${worker_ip}"; do
+    while node_has_staged_machineconfig "${worker_ip}"; do
       if (( $(date +%s) - start >= 600 )); then
         error "Timed out waiting for ${worker_name} to promote staged machineconfig." >&2
         exit 1
@@ -3151,6 +3318,7 @@ reconcile_staged_talos_nodes() {
   local machineconfig_path
   local start
   local activation_timeout_seconds=900
+  local staged_result
 
   if [[ ! -f "${cluster_out_dir}/.talos-bootstrap-complete" ]]; then
     return 0
@@ -3202,7 +3370,12 @@ reconcile_staged_talos_nodes() {
   message "Reconciling staged Talos configs sequentially..."
   for line in "${node_lines[@]}"; do
     IFS='|' read -r priority node_name node_ip node_role <<<"${line}"
-    if ! node_has_persistent_machineconfig "${node_ip}"; then
+    staged_result=0
+    node_has_staged_machineconfig "${node_ip}" || staged_result=$?
+    if [[ "${staged_result}" -gt 1 ]]; then
+      return 1
+    fi
+    if [[ "${staged_result}" == "1" ]]; then
       continue
     fi
 
@@ -3222,7 +3395,7 @@ reconcile_staged_talos_nodes() {
 
     start="$(date +%s)"
     while true; do
-      if ! node_has_persistent_machineconfig "${node_ip}" \
+      if ! node_has_staged_machineconfig "${node_ip}" \
         && node_machineconfig_matches_file "${node_ip}" "${machineconfig_path}"; then
         break
       fi

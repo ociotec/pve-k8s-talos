@@ -290,6 +290,8 @@ When `discovery_service_bootstrap_only` is omitted, it defaults to `"true"` if `
 
 When the public discovery service is disabled, the generated root workspace applies an early `system:talos-nodes` RBAC patch that grants Talos node identities `get`, `list`, and `watch` on Kubernetes `Node` resources. This keeps Talos' Kubernetes-backed discovery usable on modern Kubernetes releases where `system:node:*` identities are otherwise restricted from listing all nodes. The patch is applied immediately after the root workspace obtains `kubeconfig`, before the Talos cluster health gate.
 
+Workers with an active secondary network apply compatible Talos configuration changes without a reboot when their network configuration is unchanged. Network changes, existing staged configurations, and changes Talos identifies as requiring a reboot retain sequential reboot reconciliation. Failed or unrecognized compatibility checks stop deployment.
+
 To configure container registry mirrors for Talos, define `talos.registry` in `constants.auto.tfvars`. The generator renders `machine.registries.mirrors` from the `mirrors` map, applies the same `skipFallback`/`overridePath` values to every mirror, renders optional `username`/`password` auth for each unique mirror host, and renders `machine.registries.config.*.tls.insecureSkipVerify` from the global TLS flag.
 
 This repository currently pulls images from these upstream registries:
