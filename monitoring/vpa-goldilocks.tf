@@ -6,21 +6,21 @@ variable "vpa_goldilocks" {
     vpa_enabled        = optional(bool, true)
     goldilocks_enabled = optional(bool, true)
     # Global discovery includes future namespaces; false uses namespace opt-in labels.
-    all_namespaces          = optional(bool, true)
-    hostname                = optional(string, "")
-    tls_secret_name         = optional(string, "goldilocks-tls")
-    keycloak_realm          = optional(string, "")
-    allowed_groups          = optional(list(string), ["k8s-admins", "monitoring-view"])
-    recommender_cpu_request = optional(string, "100m")
-    recommender_cpu_limit   = optional(string, "500m")
-    recommender_memory      = optional(string, "512Mi")
+    all_namespaces  = optional(bool, true)
+    hostname        = optional(string, "")
+    tls_secret_name = optional(string, "goldilocks-tls")
+    keycloak_realm  = optional(string, "")
+    allowed_groups  = optional(list(string), ["k8s-admins", "monitoring-view"])
     # Null selects capacity-based sizing from declared worker CPU and RAM.
-    controller_cpu_request = optional(string)
-    controller_cpu_limit   = optional(string)
-    controller_memory      = optional(string)
-    dashboard_cpu_request  = optional(string)
-    dashboard_cpu_limit    = optional(string)
-    dashboard_memory       = optional(string)
+    recommender_cpu_request = optional(string)
+    recommender_cpu_limit   = optional(string)
+    recommender_memory      = optional(string)
+    controller_cpu_request  = optional(string)
+    controller_cpu_limit    = optional(string)
+    controller_memory       = optional(string)
+    dashboard_cpu_request   = optional(string)
+    dashboard_cpu_limit     = optional(string)
+    dashboard_memory        = optional(string)
     # Go's soft memory budget leaves headroom below the effective container limit.
     go_mem_limit_percent = optional(number, 80)
   })
@@ -61,6 +61,39 @@ locals {
   # sizing exactly at steady-state usage. This is an initial provisioning
   # heuristic, not a guarantee of a particular Kubernetes object count.
   goldilocks_capacity_tier = pow(2, ceil(log(local.goldilocks_capacity_factor, 2)))
+  # Provision from planned capacity, including small or empty clusters. Runtime
+  # object counts validate this heuristic but are not provisioning inputs.
+  vpa_recommender_capacity_factor = max(0, min(
+    local.total_worker_vcpu / local.monitoring_baseline_worker_vcpu,
+    local.total_worker_memory_gib / local.monitoring_baseline_worker_memory_gib
+  ))
+  # Keep the existing CPU reservation for up to two baseline capacities, then
+  # add one CPU tier per two capacities. Retain burst capacity during discovery.
+  vpa_recommender_cpu_tier = max(1, ceil(local.vpa_recommender_capacity_factor / 2))
+  vpa_recommender_automatic_cpu_millicores = {
+    cpu_request = 100 * local.vpa_recommender_cpu_tier
+    cpu_limit   = 500 * local.vpa_recommender_cpu_tier
+  }
+  # Fixed discovery overhead plus capacity-dependent history, with 20% headroom.
+  # Normalize sub-byte precision so repeating capacity ratios cannot turn an
+  # exact boundary into an unnecessary extra 64Mi allocation.
+  vpa_recommender_estimated_memory_mib = tonumber(format("%.6f",
+    (64 + 280 * local.vpa_recommender_capacity_factor) * 1.2
+  ))
+  # Round up to 64Mi and keep a small-cluster floor of 128Mi.
+  vpa_recommender_automatic_memory_mib = max(128, ceil(local.vpa_recommender_estimated_memory_mib / 64) * 64)
+  vpa_recommender_automatic_resources = merge({
+    memory = local.vpa_recommender_automatic_memory_mib % 1024 == 0 ? format(
+      "%dGi", local.vpa_recommender_automatic_memory_mib / 1024
+    ) : format("%dMi", local.vpa_recommender_automatic_memory_mib)
+    }, {
+    for name, millicores in local.vpa_recommender_automatic_cpu_millicores :
+    name => millicores % 1000 == 0 ? format("%d", millicores / 1000) : format("%dm", millicores)
+  })
+  vpa_recommender_effective_resources = {
+    for name, automatic in local.vpa_recommender_automatic_resources :
+    name => coalesce(var.vpa_goldilocks["recommender_${name}"], automatic)
+  }
   goldilocks_automatic_cpu_millicores = {
     controller_cpu_request = 200 * local.goldilocks_capacity_tier
     controller_cpu_limit   = max(1000, 500 * local.goldilocks_capacity_tier)
@@ -313,8 +346,8 @@ resource "helm_release" "vpa" {
         "prometheus.io/path"   = "/metrics"
       }
       resources = {
-        requests = { cpu = var.vpa_goldilocks.recommender_cpu_request, memory = var.vpa_goldilocks.recommender_memory }
-        limits   = { cpu = var.vpa_goldilocks.recommender_cpu_limit, memory = var.vpa_goldilocks.recommender_memory }
+        requests = { cpu = local.vpa_recommender_effective_resources.cpu_request, memory = local.vpa_recommender_effective_resources.memory }
+        limits   = { cpu = local.vpa_recommender_effective_resources.cpu_limit, memory = local.vpa_recommender_effective_resources.memory }
       }
     }
   })]
@@ -599,6 +632,17 @@ resource "kubernetes_ingress_v1" "goldilocks" {
 
 output "vpa_enabled" { value = local.enable_vpa_value }
 output "goldilocks_enabled" { value = local.enable_goldilocks_value }
+output "vpa_recommender_sizing" {
+  description = "Planned worker capacity, automatic VPA recommender sizing and effective per-cluster overrides."
+  value = {
+    worker_vcpu       = local.total_worker_vcpu
+    worker_memory_gib = local.total_worker_memory_gib
+    capacity_factor   = local.vpa_recommender_capacity_factor
+    cpu_capacity_tier = local.vpa_recommender_cpu_tier
+    automatic         = local.vpa_recommender_automatic_resources
+    effective         = local.vpa_recommender_effective_resources
+  }
+}
 output "goldilocks_sizing" {
   description = "Planned worker capacity, automatic resource sizing and effective per-cluster overrides."
   value = {

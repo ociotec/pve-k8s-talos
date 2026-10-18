@@ -99,22 +99,38 @@ existing annotation-based Prometheus discovery.
 
 | Container | CPU request / limit | Memory request = limit |
 | --- | --- | --- |
-| VPA recommender | 100m / 500m | 512Mi |
+| VPA recommender | Automatic: minimum 100m / 500m | Automatic: minimum 128Mi |
 | kube-state-metrics | Automatic: minimum 100m / 1 | Automatic: minimum 512Mi |
 | Goldilocks controller | Automatic: minimum 200m / 1 | Automatic: minimum 2Gi |
 | Goldilocks dashboard | Automatic: minimum 100m / 500m | Automatic: minimum 1536Mi |
 | oauth2-proxy | 50m / 200m | 128Mi |
 
-Goldilocks is sized from the final worker capacity declared in `vms` and
-`resources`, before nodes or applications exist. Sum vCPU and RAM across worker
-VMs only. The relative capacity is
-`max(1, min(total_vcpu / 328, total_memory_gib / 420))`; CPU and RAM are
-normalized separately and the limiting resource determines the workload
-capacity estimate. There is no independent worker-count factor.
+VPA recommender and Goldilocks are sized from the final worker capacity declared
+in `vms` and `resources`, before nodes or applications exist. Sum vCPU and RAM
+across worker VMs only. Let `C = min(total_vcpu / 328, total_memory_gib / 420)`;
+CPU and RAM are normalized separately and the limiting resource determines the
+workload capacity estimate. There is no independent worker-count factor.
 
-Round relative capacity up to the next power of two, giving tier `T` (1, 2,
-4, ...). Controller memory is `max(2, T) GiB`; dashboard memory is
-`max(1536, 768 × T) MiB`.
+The VPA recommender uses continuous capacity, without rounding it to powers of
+two. Memory request and limit are `max(128, ceil((64 + 280 × C) × 1.20 / 64) × 64)`
+MiB: 64Mi of fixed discovery overhead plus 280Mi per baseline capacity, 20%
+headroom, rounded up to 64Mi. This gives 128Mi for an empty cluster, 448Mi at
+baseline capacity, and 1088Mi at three times baseline capacity. CPU uses tier
+`U = max(1, ceil(C / 2))`, with request `100 × U m` and limit `500 × U m`.
+Thus CPU reservations stay at 100m / 500m up to twice baseline capacity.
+
+This is an initial provisioning heuristic, not a measured guarantee of 20%
+free memory. Actual demand depends on VPA and target-container counts, history
+and workload churn; validate startup and recommendation production against the
+calculated resources. For an OOM-killed instance, sampled memory peaks are capped
+by its existing limit and sampled CPU may miss short-lived startup bursts.
+Those measurements cannot establish the resources needed to complete startup.
+Explicit per-component overrides take precedence over automatic sizing.
+
+Goldilocks retains its independent power-of-two capacity tier:
+`T = 2 ^ ceil(log2(max(1, C)))`. Controller memory is `max(2, T) GiB`;
+dashboard memory is `max(1536, 768 × T) MiB`.
+
 The controller has a 2Gi minimum because initial global discovery can exceed
 1Gi at baseline capacity, including cached pod objects retained after restarts.
 The dashboard has a 1536Mi minimum because rendering the global workload index
@@ -154,11 +170,12 @@ effective resources, making retained overrides visible during migration.
 
 These conservative capacity tiers are a provisioning heuristic for discovery
 and rendering peaks, not a measured guarantee for every workload mix. Verify
-memory, restarts and page latency after rollout. The recommender and OAuth
-proxy retain their fixed defaults. Any explicit controller/dashboard sizing
+memory, restarts and page latency after rollout. The OAuth proxy retains its
+fixed defaults. Any explicit recommender/controller/dashboard sizing
 setting overrides its corresponding automatic value; omitted or null settings
 use automatic sizing. The `goldilocks_sizing` output exposes both automatic
-and effective values for review.
+and effective Goldilocks values for review; `vpa_recommender_sizing` exposes
+the VPA recommender capacity, tier, automatic resources and effective overrides.
 
 ## Prometheus metrics and Grafana
 
