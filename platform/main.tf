@@ -225,6 +225,7 @@ locals {
       rancher_hostname               = local.rancher_hostname_value
       rancher_replicas               = tostring(local.rancher_replicas_value)
       rancher_version                = tostring(local.rancher_version_value)
+      rancher_https_target_port      = local.rancher_version_is_v214plus ? 443 : 444
       rancher_debug                  = local.rancher_debug_value
       rancher_cpu_request            = local.rancher_cpu_request_value
       rancher_cpu_limit              = local.rancher_cpu_limit_value

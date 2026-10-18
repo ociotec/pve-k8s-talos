@@ -76,7 +76,8 @@ spec:
     protocol: TCP
     name: http
   - port: 443
-    targetPort: 443
+    # Before 2.14, Fleet reaches the internal TLS listener through this Service.
+    targetPort: ${rancher_https_target_port}
     protocol: TCP
     name: https
   selector:
