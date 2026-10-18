@@ -334,6 +334,26 @@ If your registry manager exposes a single group endpoint that aggregates all req
 
 That example renders Talos YAML using `skipFallback: true`, `overridePath: true`, registry auth, and `insecureSkipVerify: false`. Then regenerate Talos assets.
 
+On existing clusters, `deploy.sh --talos-only` verifies registry authentication
+with a temporary kubelet pod (`imagePullPolicy: Always`, no pull secrets).
+Static CRI credentials need a node reboot when newer than the running process;
+without explicit `--reboot-for-registry-auth`, deployment stops before draining.
+
+With that option, the script protects nodes awaiting activation with a temporary
+cordon and NoSchedule taint. At least one Ready, schedulable worker must already
+have working credentials to receive displaced workloads. Workers are drained
+and rebooted first, then control-plane nodes one at a time, with readiness and
+etcd checks. Draining respects PDBs, refuses unmanaged pods, and deletes temporary
+emptyDir data; PVCs are preserved. Singleton services can be interrupted.
+After each reboot, a real kubelet pull must succeed before scheduling resumes,
+and all managed workload controllers must recover before the next node.
+
+Any failure stops the rollout; unfinished nodes retain maintenance protection.
+Resolve the failure and repeat the same command to resume without rebooting
+nodes that already loaded the credentials. Successful validation is recorded in
+`pve-k8s-talos/registry-auth-validated`. Initial bootstrap uses its freshly
+started runtime; dedicated pull checks begin on subsequent deployments.
+
 ### Create the infrastructre
 
 The easiest way is to use the provided deployment script:

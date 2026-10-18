@@ -40,6 +40,8 @@ Options:
   -t, --talos-only          Deploy and reconcile only Talos/Kubernetes, then exit before
                             all Kubernetes service sections. Skip flags only shape the
                             generated Talos no_proxy configuration in this mode.
+      --reboot-for-registry-auth
+                            Allow drained, rolling node reboots for static registry auth.
       --services-only       Skip Talos VM/root apply and deploy Kubernetes services only.
                             Requires existing out/kubeconfig and out/talosconfig.
       --development         Allow uncommitted platform and cluster source changes.
@@ -71,6 +73,7 @@ skip_platform=false
 skip_kafka=false
 skip_monitoring=false
 skip_benchmark=false
+reboot_for_registry_auth=false
 talos_only=false
 services_only=false
 development_mode=false
@@ -136,6 +139,10 @@ while [[ $# -gt 0 ]]; do
       talos_only=true
       shift
       ;;
+    --reboot-for-registry-auth)
+      reboot_for_registry_auth=true
+      shift
+      ;;
     --services-only)
       services_only=true
       shift
@@ -196,6 +203,11 @@ if [[ "${talos_only}" == "true" \
   exit 1
 fi
 
+if [[ "${reboot_for_registry_auth}" == "true" && ("${services_only}" == "true" || "${destroy_first}" == "true") ]]; then
+  error "--reboot-for-registry-auth cannot be combined with service-only or destroy operations." >&2
+  exit 1
+fi
+
 if [[ "${development_mode}" == "true" && "${consolidate_development}" == "true" ]]; then
   error "--development and --consolidate-development are mutually exclusive." >&2
   exit 1
@@ -219,6 +231,9 @@ fi
 setup_cluster_context "${script_dir}" ""
 require_cmd git
 require_cmd jq
+if [[ "${services_only}" != "true" && "${destroy_only}" != "true" ]]; then
+  require_cmd python3
+fi
 if [[ "${development_mode}" == "true" ]]; then
   require_cmd sha256sum
 fi
@@ -3306,6 +3321,70 @@ wait_for_machineconfig_match() {
   done
 }
 
+reconcile_talos_registry_auth() {
+  local node_name node_ip node_role machineconfig_path primary_ip line
+  local workers=() controlplanes=() primary=() registry_args=() prepare_args=()
+
+  # On first bootstrap CRI starts with the generated credentials and kubelet
+  # pulls the control-plane images. The diagnostic PriorityClass is installed
+  # later by k8s-net; validate with a dedicated pod on steady-state deployments.
+  if [[ "${talos_bootstrap_marker_was_present}" != "true" ]]; then
+    return 0
+  fi
+
+  primary_ip="$(first_controlplane_ip)"
+  while IFS='|' read -r node_name node_ip; do
+    machineconfig_path="${cluster_root_workspace}/machineconfig-${node_name}.yaml"
+    if [[ ! -f "${machineconfig_path}" ]]; then
+      error "Missing rendered machineconfig for registry reconciliation on ${node_name}." >&2
+      return 1
+    fi
+    node_role="$(awk '$1 == "type:" && ($2 == "worker" || $2 == "controlplane") { print $2; exit }' "${machineconfig_path}")"
+    if [[ "${node_role}" == "worker" ]]; then
+      workers+=("${node_name}|${node_ip}|${node_role}")
+    elif [[ "${node_role}" == "controlplane" && "${node_ip}" == "${primary_ip}" ]]; then
+      primary+=("${node_name}|${node_ip}|${node_role}")
+    elif [[ "${node_role}" == "controlplane" ]]; then
+      controlplanes+=("${node_name}|${node_ip}|${node_role}")
+    else
+      error "Could not determine the Talos node role on ${node_name}." >&2
+      return 1
+    fi
+  done < <(cluster_node_name_ip_pairs)
+
+  if (( ${#workers[@]} + ${#controlplanes[@]} + ${#primary[@]} == 0 )); then
+    error "No Talos nodes were found for registry authentication reconciliation." >&2
+    return 1
+  fi
+  for line in "${controlplanes[@]}" "${primary[@]}"; do
+    IFS='|' read -r node_name node_ip node_role <<<"${line}"
+    wait_for_controlplane_etcd_ready "${node_name}" "${node_ip}" 600 || return 1
+  done
+  if [[ "${reboot_for_registry_auth}" == "true" ]]; then
+    registry_args+=(--allow-node-reboot)
+  fi
+  for line in "${workers[@]}" "${controlplanes[@]}" "${primary[@]}"; do
+    prepare_args+=(--prepare-node "${line}")
+  done
+  python3 "${script_dir}/reconcile-registry-auth.py" \
+    --talosconfig "${cluster_talosconfig_path}" --kubeconfig "${cluster_kubeconfig_path}" \
+    "${registry_args[@]}" "${prepare_args[@]}" || return 1
+  # This must cover every node, independently of secondary-network handling.
+  # Stop at the first failed health/pull check instead of touching another node.
+  for line in "${workers[@]}" "${controlplanes[@]}" "${primary[@]}"; do
+    IFS='|' read -r node_name node_ip node_role <<<"${line}"
+    wait_for_all_kubernetes_nodes_ready 600 || return 1
+    python3 "${script_dir}/reconcile-registry-auth.py" \
+      --talosconfig "${cluster_talosconfig_path}" \
+      --kubeconfig "${cluster_kubeconfig_path}" \
+      --node-name "${node_name}" --node-address "${node_ip}" "${registry_args[@]}" || return 1
+    if [[ "${node_role}" == "controlplane" ]]; then
+      wait_for_controlplane_etcd_ready "${node_name}" "${node_ip}" 600 || return 1
+    fi
+    wait_for_all_kubernetes_nodes_ready 600 || return 1
+  done
+}
+
 reconcile_staged_talos_nodes() {
   local node_lines=()
   local unsorted_node_lines=()
@@ -3951,6 +4030,7 @@ else
   reconcile_talos_discovery_service_steady_state
   wait_for_kubernetes_version_convergence "${cluster_constants_path}"
   reboot_nodes_with_pending_kubelet_max_pods "${cluster_constants_path}"
+  reconcile_talos_registry_auth
   message "k8s cluster is up and running. Current nodes:"
   "${script_dir}/render-k8s-nodes.sh" --kubeconfig "${active_kubeconfig_path}"
   record_deployment_status "k8s"
