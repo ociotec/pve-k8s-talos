@@ -747,10 +747,10 @@ spec:
           resources:
             requests:
               cpu: 200m
-              memory: 256Mi
+              memory: ${operator_memory}
             limits:
               cpu: 500m
-              memory: 256Mi
+              memory: ${operator_memory}
 
           #  Uncomment it to run lib bucket provisioner in multithreaded mode
           #- name: LIB_BUCKET_PROVISIONER_THREADS

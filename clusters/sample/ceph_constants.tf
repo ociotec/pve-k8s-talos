@@ -9,6 +9,9 @@ locals {
   # Deploy CSI-Addons and enable the RBD network-fencing sidecar.
   ceph_csi_addons_enabled = false
 
+  # Optional Rook operator memory override; request = limit, default 256Mi.
+  # ceph_operator_memory = "256Mi"
+
   ceph_block_replicated = {
     enabled  = true
     size     = 3

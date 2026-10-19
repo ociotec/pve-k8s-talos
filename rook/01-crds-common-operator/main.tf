@@ -13,6 +13,11 @@ provider "kubernetes" {
 
 locals {
   constants_source = file("${path.module}/ceph_constants.tf")
+  # One cluster override sets both the reservation and OOM ceiling.
+  operator_memory = try(
+    regex("(?m)^\\s*ceph_operator_memory\\s*=\\s*\"([^\"]+)\"\\s*(?:#.*)?$", local.constants_source)[0],
+    "256Mi"
+  )
   csi_addons_enabled = can(regex("(?m)^\\s*ceph_csi_addons_enabled\\s*=\\s*(true|false)\\s*$", local.constants_source)[0]) ? (
     tobool(regex("(?m)^\\s*ceph_csi_addons_enabled\\s*=\\s*(true|false)\\s*$", local.constants_source)[0])
   ) : false
@@ -125,6 +130,7 @@ locals {
   rook_operator = [
     for doc in split("\n---\n", templatefile("${path.module}/../manifests/operator.yaml", {
       csi_addons_enabled = tostring(local.csi_addons_enabled)
+      operator_memory   = local.operator_memory
     })) :
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
