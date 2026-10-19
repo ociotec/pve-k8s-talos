@@ -1,0 +1,3503 @@
+{
+  "editable": true,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 2,
+      "panels": [],
+      "title": "Control-plane VMs · CPU, memory and guest OS pressure",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Includes iowait. Containers may be throttled even when the VM has spare CPU.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "100*(1-avg by(instance)(rate(node_cpu_seconds_total{job=\"node-exporter\",instance=~\"${node:regex}\",mode=\"idle\"}[$__rate_interval])))",
+          "legendFormat": "{{instance}} {{mode}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "CPU utilization by CP",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Total memory minus MemAvailable; differs from container working set.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 1
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "100*(1-node_memory_MemAvailable_bytes{job=\"node-exporter\",instance=~\"${node:regex}\"}/node_memory_MemTotal_bytes{job=\"node-exporter\",instance=~\"${node:regex}\"})",
+          "legendFormat": "{{instance}} {{mode}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Memory utilization by CP",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Linux guest MemAvailable.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "node_memory_MemAvailable_bytes{job=\"node-exporter\",instance=~\"${node:regex}\"}",
+          "legendFormat": "{{instance}} {{mode}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Available memory by CP",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Time with at least one task waiting for CPU.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 9
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "100*rate(node_pressure_cpu_waiting_seconds_total{job=\"node-exporter\",instance=~\"${node:regex}\"}[$__rate_interval])",
+          "legendFormat": "{{instance}} {{mode}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "CPU pressure (PSI waiting)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Hypervisor contention and I/O wait.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 9
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "100*avg by(instance,mode)(rate(node_cpu_seconds_total{job=\"node-exporter\",instance=~\"${node:regex}\",mode=~\"steal|iowait\"}[$__rate_interval]))",
+          "legendFormat": "{{instance}} {{mode}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "CPU steal / iowait",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Time with tasks waiting for memory reclaim.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 9
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "100*rate(node_pressure_memory_waiting_seconds_total{job=\"node-exporter\",instance=~\"${node:regex}\"}[$__rate_interval])",
+          "legendFormat": "{{instance}} {{mode}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Memory pressure (PSI waiting)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Memory visible inside Talos is lower than the RAM configured in Proxmox due to system reservations.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          },
+          "decimals": 2,
+          "noValue": "—",
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "vCPU"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Visible memory"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Available memory"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "CP"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 440
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "id": 9,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(series)(label_replace((count by(instance)(node_cpu_seconds_total{job=\"node-exporter\",instance=~\"${node:regex}\",mode=\"idle\"})),\"series\",\"$1\",\"instance\",\"(.*)\"))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "vCPU",
+          "range": false,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(series)(label_replace((node_memory_MemTotal_bytes{job=\"node-exporter\",instance=~\"${node:regex}\"}),\"series\",\"$1\",\"instance\",\"(.*)\"))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "Visible memory",
+          "range": false,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(series)(label_replace((node_memory_MemAvailable_bytes{job=\"node-exporter\",instance=~\"${node:regex}\"}),\"series\",\"$1\",\"instance\",\"(.*)\"))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "Available memory",
+          "range": false,
+          "refId": "C"
+        }
+      ],
+      "title": "VM capacity · guest view",
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "series",
+            "mode": "outerTabular"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true
+            },
+            "renameByName": {
+              "Value #A": "vCPU",
+              "Value #B": "Visible memory",
+              "Value #C": "Available memory",
+              "series": "CP"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "desc": false,
+                "field": "CP"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "id": 10,
+      "panels": [],
+      "title": "Health and leadership",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 24
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node)(kube_node_status_condition{node=~\"${node:regex}\",condition=\"Ready\",status=\"true\"})",
+          "legendFormat": "{{node}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Ready (1 = ready)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 24
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,condition)(kube_node_status_condition{node=~\"${node:regex}\",condition=~\"MemoryPressure|DiskPressure|PIDPressure\",status=\"true\"})",
+          "legendFormat": "{{node}} {{condition}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Node pressure (0 = no pressure)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 24
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by(node,container)(increase(kube_pod_container_status_restarts_total{namespace=\"kube-system\"}[$__range]) * on(namespace,pod) group_left(node) max by(namespace,pod,node)(kube_pod_info{node=~\"${node:regex}\"}))",
+          "legendFormat": "{{node}} {{container}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "CP service restarts · selected range",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Controller-manager and scheduler each have one active replica. Remediation has two replicas and one leader; it does not need a replica on every CP. This cluster-wide inventory is independent of the CP filter.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 14,
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "kube_lease_owner{lease=~\"kube-controller-manager|kube-scheduler|pve-node-remediation\"}",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{lease}} → {{lease_holder}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Current leaders (Lease)",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "includeByName": {
+              "lease": true,
+              "lease_holder": true
+            },
+            "renameByName": {
+              "lease": "Service",
+              "lease_holder": "Current leader"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 37
+      },
+      "id": 15,
+      "panels": [],
+      "title": "Container summary · selected range and current configuration",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "P95 and maximum use 1-minute samples over the selected range. The current VPA target is workload-wide and shared across replicas, not specific to a CP or this time window. VPA does not provide independent limit recommendations. Static Pods have no VPA.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          },
+          "decimals": 3,
+          "noValue": "—",
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Current usage"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "cores"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Range p95"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "cores"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Range maximum"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "cores"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Current request"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "cores"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Current limit"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "cores"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "VPA request target"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "cores"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "CP / container"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 440
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
+      "id": 16,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(series)(label_join((max by(node,pod,container)(label_replace(rate(container_cpu_usage_seconds_total{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\"}[$__rate_interval]),\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\"))),\"series\",\" / \",\"node\",\"container\"))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "Current usage",
+          "range": false,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(series)(label_join((quantile_over_time(0.95,(max by(node,pod,container)(label_replace(rate(container_cpu_usage_seconds_total{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\"}[$__rate_interval]),\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\")))[$__range:1m])),\"series\",\" / \",\"node\",\"container\"))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "Range p95",
+          "range": false,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(series)(label_join((max_over_time((max by(node,pod,container)(label_replace(rate(container_cpu_usage_seconds_total{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\"}[$__rate_interval]),\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\")))[$__range:1m])),\"series\",\" / \",\"node\",\"container\"))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "Range maximum",
+          "range": false,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(series)(label_join((max by(node,pod,container)(kube_pod_container_resource_requests{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",resource=\"cpu\"})),\"series\",\" / \",\"node\",\"container\"))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "Current request",
+          "range": false,
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(series)(label_join((max by(node,pod,container)(kube_pod_container_resource_limits{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",resource=\"cpu\"})),\"series\",\" / \",\"node\",\"container\"))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "Current limit",
+          "range": false,
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(series)(label_join((max by(container)(kube_verticalpodautoscaler_recommendation{namespace=\"kube-system\",target_name=~\"kube-proxy|kube-flannel|node-remediation-controller\",bound=\"target\",resource=\"cpu\"}) * on(container) group_right() (max by(node,pod,container)(kube_pod_container_resource_requests{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",resource=\"cpu\"}) > bool 0)),\"series\",\" / \",\"node\",\"container\"))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "VPA request target",
+          "range": false,
+          "refId": "F"
+        }
+      ],
+      "title": "CPU · usage / requests / limits / VPA",
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "series",
+            "mode": "outerTabular"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true,
+              "Time 4": true,
+              "Time 5": true,
+              "Time 6": true
+            },
+            "renameByName": {
+              "Value #A": "Current usage",
+              "Value #B": "Range p95",
+              "Value #C": "Range maximum",
+              "Value #D": "Current request",
+              "Value #E": "Current limit",
+              "Value #F": "VPA request target",
+              "series": "CP / container"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "desc": false,
+                "field": "CP / container"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "P95 and maximum use 1-minute samples over the selected range. The current VPA target is workload-wide and shared across replicas, not specific to a CP or this time window. VPA does not provide independent limit recommendations. Static Pods have no VPA.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": true
+          },
+          "decimals": 2,
+          "noValue": "—",
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Current usage"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Range p95"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Range maximum"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Current request"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Current limit"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "VPA request target"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "CP / container"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 440
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 49
+      },
+      "id": 17,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(series)(label_join((max by(node,pod,container)(label_replace(container_memory_working_set_bytes{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\"},\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\"))),\"series\",\" / \",\"node\",\"container\"))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "Current usage",
+          "range": false,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(series)(label_join((quantile_over_time(0.95,(max by(node,pod,container)(label_replace(container_memory_working_set_bytes{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\"},\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\")))[$__range:1m])),\"series\",\" / \",\"node\",\"container\"))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "Range p95",
+          "range": false,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(series)(label_join((max_over_time((max by(node,pod,container)(label_replace(container_memory_working_set_bytes{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\"},\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\")))[$__range:1m])),\"series\",\" / \",\"node\",\"container\"))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "Range maximum",
+          "range": false,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(series)(label_join((max by(node,pod,container)(kube_pod_container_resource_requests{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",resource=\"memory\"})),\"series\",\" / \",\"node\",\"container\"))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "Current request",
+          "range": false,
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(series)(label_join((max by(node,pod,container)(kube_pod_container_resource_limits{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",resource=\"memory\"})),\"series\",\" / \",\"node\",\"container\"))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "Current limit",
+          "range": false,
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(series)(label_join((max by(container)(kube_verticalpodautoscaler_recommendation{namespace=\"kube-system\",target_name=~\"kube-proxy|kube-flannel|node-remediation-controller\",bound=\"target\",resource=\"memory\"}) * on(container) group_right() (max by(node,pod,container)(kube_pod_container_resource_requests{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",resource=\"cpu\"}) > bool 0)),\"series\",\" / \",\"node\",\"container\"))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "VPA request target",
+          "range": false,
+          "refId": "F"
+        }
+      ],
+      "title": "Memory · usage / requests / limits / VPA",
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": {
+            "byField": "series",
+            "mode": "outerTabular"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Time 1": true,
+              "Time 2": true,
+              "Time 3": true,
+              "Time 4": true,
+              "Time 5": true,
+              "Time 6": true
+            },
+            "renameByName": {
+              "Value #A": "Current usage",
+              "Value #B": "Range p95",
+              "Value #C": "Range maximum",
+              "Value #D": "Current request",
+              "Value #E": "Current limit",
+              "Value #F": "VPA request target",
+              "series": "CP / container"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "desc": false,
+                "field": "CP / container"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 60
+      },
+      "id": 18,
+      "panels": [],
+      "title": "Service comparison · usage vs requests and limits",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "CPU uses rate over $__rate_interval. Memory uses working set. Controller-manager and scheduler each have a single leader; all API servers handle traffic concurrently.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "cores"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* (request|limit)$"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    5,
+                    5
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 61
+      },
+      "id": 19,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(label_replace(rate(container_cpu_usage_seconds_total{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"kube-apiserver\"}[$__rate_interval]),\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\"))",
+          "legendFormat": "{{node}} usage",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_requests{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"kube-apiserver\",resource=\"cpu\"})",
+          "legendFormat": "{{node}} request",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_limits{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"kube-apiserver\",resource=\"cpu\"})",
+          "legendFormat": "{{node}} limit",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "kube-apiserver · CPU",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "CPU uses rate over $__rate_interval. Memory uses working set. Controller-manager and scheduler each have a single leader; all API servers handle traffic concurrently.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "bytes"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* (request|limit)$"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    5,
+                    5
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 61
+      },
+      "id": 20,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(label_replace(container_memory_working_set_bytes{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"kube-apiserver\"},\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\"))",
+          "legendFormat": "{{node}} usage",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_requests{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"kube-apiserver\",resource=\"memory\"})",
+          "legendFormat": "{{node}} request",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_limits{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"kube-apiserver\",resource=\"memory\"})",
+          "legendFormat": "{{node}} limit",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "kube-apiserver · Memory",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Percentage of CFS periods that exhausted their quota. This is not the percentage of CPU time lost; compare with usage/limit and PSI.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 61
+      },
+      "id": 21,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "100 * max by(node,pod,container)(label_replace((rate(container_cpu_cfs_throttled_periods_total{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"kube-apiserver\"}[$__rate_interval]) / rate(container_cpu_cfs_periods_total{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"kube-apiserver\"}[$__rate_interval])),\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\"))",
+          "legendFormat": "{{node}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "kube-apiserver · CPU periods throttled",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "CPU uses rate over $__rate_interval. Memory uses working set. Controller-manager and scheduler each have a single leader; all API servers handle traffic concurrently.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "cores"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* (request|limit)$"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    5,
+                    5
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 69
+      },
+      "id": 22,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(label_replace(rate(container_cpu_usage_seconds_total{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"kube-controller-manager\"}[$__rate_interval]),\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\"))",
+          "legendFormat": "{{node}} usage",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_requests{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"kube-controller-manager\",resource=\"cpu\"})",
+          "legendFormat": "{{node}} request",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_limits{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"kube-controller-manager\",resource=\"cpu\"})",
+          "legendFormat": "{{node}} limit",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "kube-controller-manager · CPU",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "CPU uses rate over $__rate_interval. Memory uses working set. Controller-manager and scheduler each have a single leader; all API servers handle traffic concurrently.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "bytes"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* (request|limit)$"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    5,
+                    5
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 69
+      },
+      "id": 23,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(label_replace(container_memory_working_set_bytes{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"kube-controller-manager\"},\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\"))",
+          "legendFormat": "{{node}} usage",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_requests{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"kube-controller-manager\",resource=\"memory\"})",
+          "legendFormat": "{{node}} request",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_limits{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"kube-controller-manager\",resource=\"memory\"})",
+          "legendFormat": "{{node}} limit",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "kube-controller-manager · Memory",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Percentage of CFS periods that exhausted their quota. This is not the percentage of CPU time lost; compare with usage/limit and PSI.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 69
+      },
+      "id": 24,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "100 * max by(node,pod,container)(label_replace((rate(container_cpu_cfs_throttled_periods_total{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"kube-controller-manager\"}[$__rate_interval]) / rate(container_cpu_cfs_periods_total{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"kube-controller-manager\"}[$__rate_interval])),\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\"))",
+          "legendFormat": "{{node}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "kube-controller-manager · CPU periods throttled",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "CPU uses rate over $__rate_interval. Memory uses working set. Controller-manager and scheduler each have a single leader; all API servers handle traffic concurrently.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "cores"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* (request|limit)$"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    5,
+                    5
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 77
+      },
+      "id": 25,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(label_replace(rate(container_cpu_usage_seconds_total{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"kube-scheduler\"}[$__rate_interval]),\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\"))",
+          "legendFormat": "{{node}} usage",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_requests{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"kube-scheduler\",resource=\"cpu\"})",
+          "legendFormat": "{{node}} request",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_limits{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"kube-scheduler\",resource=\"cpu\"})",
+          "legendFormat": "{{node}} limit",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "kube-scheduler · CPU",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "CPU uses rate over $__rate_interval. Memory uses working set. Controller-manager and scheduler each have a single leader; all API servers handle traffic concurrently.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "bytes"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* (request|limit)$"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    5,
+                    5
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 77
+      },
+      "id": 26,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(label_replace(container_memory_working_set_bytes{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"kube-scheduler\"},\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\"))",
+          "legendFormat": "{{node}} usage",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_requests{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"kube-scheduler\",resource=\"memory\"})",
+          "legendFormat": "{{node}} request",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_limits{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"kube-scheduler\",resource=\"memory\"})",
+          "legendFormat": "{{node}} limit",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "kube-scheduler · Memory",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Percentage of CFS periods that exhausted their quota. This is not the percentage of CPU time lost; compare with usage/limit and PSI.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 77
+      },
+      "id": 27,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "100 * max by(node,pod,container)(label_replace((rate(container_cpu_cfs_throttled_periods_total{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"kube-scheduler\"}[$__rate_interval]) / rate(container_cpu_cfs_periods_total{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"kube-scheduler\"}[$__rate_interval])),\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\"))",
+          "legendFormat": "{{node}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "kube-scheduler · CPU periods throttled",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "CPU uses rate over $__rate_interval. Memory uses working set. Controller-manager and scheduler each have a single leader; all API servers handle traffic concurrently.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "cores"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* (request|limit)$"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    5,
+                    5
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 85
+      },
+      "id": 28,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(label_replace(rate(container_cpu_usage_seconds_total{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"kube-proxy\"}[$__rate_interval]),\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\"))",
+          "legendFormat": "{{node}} usage",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_requests{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"kube-proxy\",resource=\"cpu\"})",
+          "legendFormat": "{{node}} request",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_limits{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"kube-proxy\",resource=\"cpu\"})",
+          "legendFormat": "{{node}} limit",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "kube-proxy · CPU",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "CPU uses rate over $__rate_interval. Memory uses working set. Controller-manager and scheduler each have a single leader; all API servers handle traffic concurrently.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "bytes"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* (request|limit)$"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    5,
+                    5
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 85
+      },
+      "id": 29,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(label_replace(container_memory_working_set_bytes{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"kube-proxy\"},\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\"))",
+          "legendFormat": "{{node}} usage",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_requests{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"kube-proxy\",resource=\"memory\"})",
+          "legendFormat": "{{node}} request",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_limits{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"kube-proxy\",resource=\"memory\"})",
+          "legendFormat": "{{node}} limit",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "kube-proxy · Memory",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Percentage of CFS periods that exhausted their quota. This is not the percentage of CPU time lost; compare with usage/limit and PSI.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 85
+      },
+      "id": 30,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "100 * max by(node,pod,container)(label_replace((rate(container_cpu_cfs_throttled_periods_total{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"kube-proxy\"}[$__rate_interval]) / rate(container_cpu_cfs_periods_total{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"kube-proxy\"}[$__rate_interval])),\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\"))",
+          "legendFormat": "{{node}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "kube-proxy · CPU periods throttled",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "CPU uses rate over $__rate_interval. Memory uses working set. Controller-manager and scheduler each have a single leader; all API servers handle traffic concurrently.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "cores"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* (request|limit)$"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    5,
+                    5
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 93
+      },
+      "id": 31,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(label_replace(rate(container_cpu_usage_seconds_total{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"kube-flannel\"}[$__rate_interval]),\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\"))",
+          "legendFormat": "{{node}} usage",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_requests{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"kube-flannel\",resource=\"cpu\"})",
+          "legendFormat": "{{node}} request",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_limits{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"kube-flannel\",resource=\"cpu\"})",
+          "legendFormat": "{{node}} limit",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "kube-flannel · CPU",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "CPU uses rate over $__rate_interval. Memory uses working set. Controller-manager and scheduler each have a single leader; all API servers handle traffic concurrently.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "bytes"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* (request|limit)$"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    5,
+                    5
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 93
+      },
+      "id": 32,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(label_replace(container_memory_working_set_bytes{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"kube-flannel\"},\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\"))",
+          "legendFormat": "{{node}} usage",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_requests{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"kube-flannel\",resource=\"memory\"})",
+          "legendFormat": "{{node}} request",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_limits{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"kube-flannel\",resource=\"memory\"})",
+          "legendFormat": "{{node}} limit",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "kube-flannel · Memory",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Percentage of CFS periods that exhausted their quota. This is not the percentage of CPU time lost; compare with usage/limit and PSI.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 93
+      },
+      "id": 33,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "100 * max by(node,pod,container)(label_replace((rate(container_cpu_cfs_throttled_periods_total{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"kube-flannel\"}[$__rate_interval]) / rate(container_cpu_cfs_periods_total{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"kube-flannel\"}[$__rate_interval])),\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\"))",
+          "legendFormat": "{{node}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "kube-flannel · CPU periods throttled",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "CPU uses rate over $__rate_interval. Memory uses working set. Controller-manager and scheduler each have a single leader; all API servers handle traffic concurrently.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "cores"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* (request|limit)$"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    5,
+                    5
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 101
+      },
+      "id": 34,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(label_replace(rate(container_cpu_usage_seconds_total{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"controller\"}[$__rate_interval]),\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\"))",
+          "legendFormat": "{{node}} usage",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_requests{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"controller\",resource=\"cpu\"})",
+          "legendFormat": "{{node}} request",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_limits{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"controller\",resource=\"cpu\"})",
+          "legendFormat": "{{node}} limit",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "node-remediation-controller · CPU",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "CPU uses rate over $__rate_interval. Memory uses working set. Controller-manager and scheduler each have a single leader; all API servers handle traffic concurrently.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "bytes"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* (request|limit)$"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    5,
+                    5
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 101
+      },
+      "id": 35,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(label_replace(container_memory_working_set_bytes{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"controller\"},\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\"))",
+          "legendFormat": "{{node}} usage",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_requests{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"controller\",resource=\"memory\"})",
+          "legendFormat": "{{node}} request",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(node,pod,container)(kube_pod_container_resource_limits{namespace=\"kube-system\",node=~\"${node:regex}\",container=~\"${component:regex}\",container=\"controller\",resource=\"memory\"})",
+          "legendFormat": "{{node}} limit",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "node-remediation-controller · Memory",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Percentage of CFS periods that exhausted their quota. This is not the percentage of CPU time lost; compare with usage/limit and PSI.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 101
+      },
+      "id": 36,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "100 * max by(node,pod,container)(label_replace((rate(container_cpu_cfs_throttled_periods_total{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"controller\"}[$__rate_interval]) / rate(container_cpu_cfs_periods_total{job=\"kubelet-cadvisor\",namespace=\"kube-system\",kubernetes_io_hostname=~\"${node:regex}\",container!=\"\",container!=\"POD\",container=~\"${component:regex}\",container=\"controller\"}[$__rate_interval])),\"node\",\"$1\",\"kubernetes_io_hostname\",\"(.*)\"))",
+          "legendFormat": "{{node}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "node-remediation-controller · CPU periods throttled",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 109
+      },
+      "id": 37,
+      "panels": [],
+      "title": "Kubernetes API · load, latency and errors by CP",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Measures metrics scrape availability; does not replace /readyz or etcd health checks.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 110
+      },
+      "id": 38,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "(up{job=\"kubernetes-apiservers\"}) * on(instance) group_left(node) max by(instance,node)(label_replace(kube_node_info{node=~\"${node:regex}\"},\"instance\",\"$1:6443\",\"internal_ip\",\"(.*)\"))",
+          "legendFormat": "{{node}} {{code}} {{request_kind}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "API scrape availability (1 = up)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Includes all operations and highlights traffic imbalance between API servers.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 110
+      },
+      "id": 39,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "(sum by(instance)(rate(apiserver_request_total{job=\"kubernetes-apiservers\"}[$__rate_interval]))) * on(instance) group_left(node) max by(instance,node)(label_replace(kube_node_info{node=~\"${node:regex}\"},\"instance\",\"$1:6443\",\"internal_ip\",\"(.*)\"))",
+          "legendFormat": "{{node}} {{code}} {{request_kind}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Requests per second",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Request-weighted global p99; not the average of endpoint p99 values.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 110
+      },
+      "id": 40,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "(histogram_quantile(0.99,sum by(instance,le)(rate(apiserver_request_duration_seconds_bucket{job=\"kubernetes-apiservers\",verb!~\"WATCH|CONNECT\"}[$__rate_interval])))) * on(instance) group_left(node) max by(instance,node)(label_replace(kube_node_info{node=~\"${node:regex}\"},\"instance\",\"$1:6443\",\"internal_ip\",\"(.*)\"))",
+          "legendFormat": "{{node}} {{code}} {{request_kind}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "API latency p99 (excluding WATCH / CONNECT)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "No series means this combination has not been observed. Missing data is not replaced with artificial zeros.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 118
+      },
+      "id": 41,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "(sum by(instance,code)(rate(apiserver_request_total{job=\"kubernetes-apiservers\",code=~\"5..|429\"}[$__rate_interval]))) * on(instance) group_left(node) max by(instance,node)(label_replace(kube_node_info{node=~\"${node:regex}\"},\"instance\",\"$1:6443\",\"internal_ip\",\"(.*)\"))",
+          "legendFormat": "{{node}} {{code}} {{request_kind}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "API 5xx errors and 429 responses",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Mutating and readOnly requests.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 118
+      },
+      "id": 42,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "(apiserver_current_inflight_requests{job=\"kubernetes-apiservers\"}) * on(instance) group_left(node) max by(instance,node)(label_replace(kube_node_info{node=~\"${node:regex}\"},\"instance\",\"$1:6443\",\"internal_ip\",\"(.*)\"))",
+          "legendFormat": "{{node}} {{code}} {{request_kind}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "In-flight requests",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Measured from apiserver; does not directly measure etcd CPU, memory, quorum or disk health.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 118
+      },
+      "id": 43,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "(histogram_quantile(0.99,sum by(instance,le)(rate(etcd_request_duration_seconds_bucket{job=\"kubernetes-apiservers\"}[$__rate_interval])))) * on(instance) group_left(node) max by(instance,node)(label_replace(kube_node_info{node=~\"${node:regex}\"},\"instance\",\"$1:6443\",\"internal_ip\",\"(.*)\"))",
+          "legendFormat": "{{node}} {{code}} {{request_kind}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "API → etcd client latency p99",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 126
+      },
+      "id": 44,
+      "panels": [],
+      "title": "Talos native services · available metrics and coverage",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "cores"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 127
+      },
+      "id": 45,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(kubernetes_io_hostname,id)(rate(container_cpu_usage_seconds_total{job=\"kubelet-cadvisor\",kubernetes_io_hostname=~\"${node:regex}\",id=~\"/podruntime/kubelet|/system/apid|/system/runtime|/system/trustd\"}[$__rate_interval]))",
+          "legendFormat": "{{kubernetes_io_hostname}} {{id}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Exported native service CPU",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 1,
+            "spanNulls": false
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 127
+      },
+      "id": 46,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "max by(kubernetes_io_hostname,id)(container_memory_working_set_bytes{job=\"kubelet-cadvisor\",kubernetes_io_hostname=~\"${node:regex}\",id=~\"/podruntime/kubelet|/system/apid|/system/runtime|/system/trustd\"})",
+          "legendFormat": "{{kubernetes_io_hostname}} {{id}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Exported native service memory",
+      "type": "timeseries"
+    },
+    {
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 135
+      },
+      "id": 47,
+      "options": {
+        "content": "- **Included:** apiserver, controller-manager, scheduler, kube-proxy, flannel and node-remediation; kubelet and native services exported by cAdvisor.\n- **Etcd and pod containerd:** historical CPU/memory metrics are not currently exported. Client latency to etcd does not establish quorum health or replace etcd metrics. `/system/runtime` is the system containerd, not `/podruntime/runtime`.\n- **VPA:** recommendation-only; workload-wide request targets. `upperBound` is not a recommended limit either. Control-plane static Pods have no VPA.\n- **Leaders:** controller-manager and scheduler each concentrate work on one CP; apiserver runs actively on all three.",
+        "mode": "markdown"
+      },
+      "title": "Coverage and interpretation limits",
+      "type": "text"
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": [
+    "kubernetes",
+    "control-plane",
+    "capacity"
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "text": "Prometheus",
+          "value": "Prometheus"
+        },
+        "options": [],
+        "refresh": 1
+      },
+      {
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kube_node_role{role=~\"control-plane|master\"}, node)",
+        "includeAll": true,
+        "label": "Control plane",
+        "multi": true,
+        "name": "node",
+        "options": [],
+        "query": {
+          "query": "label_values(kube_node_role{role=~\"control-plane|master\"}, node)",
+          "refId": "node"
+        },
+        "refresh": 1,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "includeAll": true,
+        "label": "Container (tables and detail)",
+        "multi": true,
+        "name": "component",
+        "options": [],
+        "query": {
+          "query": "label_values(kube_pod_container_resource_requests{namespace=\"kube-system\",node=~\"${node:regex}\",resource=\"cpu\"}, container)",
+          "refId": "component"
+        },
+        "refresh": 1,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "K8s: control plane capacity and health",
+  "uid": "k8s-control-plane-capacity",
+  "version": 1,
+  "description": "Control-plane VM capacity, Kubernetes component usage versus requests and limits, CPU throttling, VPA request recommendations, leadership and API health."
+}

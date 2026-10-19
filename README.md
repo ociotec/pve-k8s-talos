@@ -739,6 +739,8 @@ Configure an external Grafana Prometheus datasource with URL `prometheus_api_url
 
 Grafana dashboards are provisioned from `monitoring/grafana/dashboards/*.json`. After adding or editing a dashboard, re-run the monitoring apply; the deployment script runs the dashboard sync job without restarting Grafana unless datasource or provisioning configuration changes require it.
 
+The **K8s: control plane capacity and health** dashboard groups control-plane VM capacity and pressure, component CPU/memory usage versus requests and limits, throttling, VPA request targets, leader leases, and API health. It defaults to the last six hours and identifies control-plane nodes by Kubernetes role. Missing etcd resource metrics and VPA recommendations for static Pods are documented in the dashboard.
+
 ```bash
 cd clusters/<cluster>
 ../../scripts/deploy.sh --services-only --skip-ceph --skip-k8s-net --skip-identity --skip-s3-storage --skip-platform --skip-kafka --skip-benchmark
