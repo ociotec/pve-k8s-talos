@@ -210,6 +210,23 @@ direnv exec . ../../scripts/deploy-infra-vm.sh
 The infra VM flow expects a Debian cloud image, not an interactive Debian installer ISO. If the discovery service uses an internal CA, add that CA to each dependent cluster through `constants["network"]["cert_files"]` before generating Talos assets.
 Clusters configured with `talos.discovery_service_bootstrap_only = "true"` no longer depend on the Discovery Service after a successful initial root deployment, so the infra VM may be stopped once no other cluster is bootstrapping against it.
 
+### Resize existing control planes
+
+Use `scripts/deploy.sh` when increasing control-plane VM CPU or RAM. For an
+existing cluster with at least three control planes, it drains and gracefully
+shuts down one member, applies that VM's hardware through OpenTofu, and waits
+for its new boot, guest capacity, component resources, API readiness and all
+etcd members to remain healthy for 30 seconds before continuing. Followers are
+processed before the current etcd leader. Component resource values are staged
+before shutdown so they activate during the same boot.
+
+The Proxmox provider cannot automatically reboot control-plane VMs during a
+bulk apply. Shrinking, replacement and unrelated VM changes mixed with a resize
+are rejected. Other changes requiring an offline control plane need a separate
+maintenance procedure. A failure stops the sequence and leaves the current
+node protected; rerun the same deployment from the same PC to resume using
+`out/root/.control-plane-resize.json`. Keep that journal until recovery finishes.
+
 ### Generate Talos assets
 
 Whenever you change `vms.auto.tfvars`, `constants.auto.tfvars`, or `patches/machine.template.yaml`, regenerate the Talos inputs from inside `clusters/<cluster>`:

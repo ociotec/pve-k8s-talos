@@ -3959,6 +3959,12 @@ else
   run_tofu_init "${cluster_root_workspace}"
   migrate_legacy_talos_bootstrap_marker_state "${cluster_root_workspace}"
   mapfile -t root_apply_extra_args < <(root_apply_args)
+  if [[ "${talos_bootstrap_marker_was_present}" == "true" ]]; then
+    python3 "${script_dir}/resize-control-planes.py" \
+      --workspace "${cluster_root_workspace}" \
+      --kubeconfig "${cluster_kubeconfig_path}" \
+      --talosconfig "${cluster_talosconfig_path}"
+  fi
   run tofu -chdir="${cluster_root_workspace}" apply -auto-approve "${root_apply_extra_args[@]}"
   restore_existing_talos_bootstrap_marker "${talos_bootstrap_marker_was_present}"
 

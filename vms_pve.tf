@@ -15,6 +15,9 @@ resource "proxmox_virtual_environment_vm" "create_pve_vms" {
   vm_id           = each.value.vm_id
   stop_on_destroy = true # Stop VM before destroying if QEMU is not deployed
   started         = true # Do or do not start VM after creation
+  # deploy.sh shuts down and resizes existing CPs one at a time. Never let the
+  # provider reboot several CPs during a bulk root apply, including network edits.
+  reboot_after_update = var.resources[each.value.type].k8s_node != "controlplane"
   pool_id         = var.constants["vm"]["pool"] != "" ? var.constants["vm"]["pool"] : null
   agent {
     enabled = true
