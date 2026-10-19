@@ -406,15 +406,34 @@ parse_talos_registry_settings() {
         }
 
         if (in_mirrors) {
-          if (match(line, /"[^"]+"[[:space:]]*=[[:space:]]*"[^"]*"/)) {
+          # A mirror accepts a legacy URL or an ordered list of URLs.
+          if (!in_endpoint_list && match(line, /"[^"]+"[[:space:]]*=/)) {
             pair = substr(line, RSTART, RLENGTH)
-            key = pair
-            sub(/^[[:space:]]*"/, "", key)
-            sub(/".*/, "", key)
-            sub(/^[^=]*=[[:space:]]*"/, "", pair)
-            value = pair
-            sub(/".*/, "", value)
-            print "mirror|" key "|" value
+            mirror_key = pair
+            sub(/^"/, "", mirror_key)
+            sub(/".*/, "", mirror_key)
+            value = substr(line, RSTART + RLENGTH)
+            sub(/^[[:space:]]*/, "", value)
+            in_endpoint_list = (value ~ /^\[/)
+            mirror_count = 0
+          } else if (in_endpoint_list) {
+            value = line
+          } else {
+            value = ""
+          }
+          sub(/[[:space:]]*#.*/, "", value)
+          while (match(value, /"[^"]*"/)) {
+            endpoint = substr(value, RSTART + 1, RLENGTH - 2)
+            print "mirror|" mirror_key "|" endpoint
+            mirror_count++
+            value = substr(value, RSTART + RLENGTH)
+          }
+          if (!in_endpoint_list || value ~ /\]/) {
+            if (mirror_key != "" && mirror_count == 0) {
+              print "mirror|" mirror_key "|"
+            }
+            in_endpoint_list = 0
+            mirror_key = ""
           }
 
           mirrors_depth += delta
@@ -769,7 +788,11 @@ while IFS='|' read -r kind key value; do
       esac
       ;;
     mirror)
-      registry_mirror_urls["${key}"]="${value}"
+      if [[ -v "registry_mirror_urls[${key}]" ]]; then
+        registry_mirror_urls["${key}"]+=$'\n'"${value}"
+      else
+        registry_mirror_urls["${key}"]="${value}"
+      fi
       ;;
   esac
 done < <(parse_talos_registry_settings)
@@ -1045,27 +1068,33 @@ if [[ ${#registry_mirror_urls[@]} -gt 0 ]]; then
   machine_registries_section=$'\n  registries:'
   machine_registries_section+=$'\n    mirrors:'
   while IFS= read -r registry_name; do
-    registry_url="${registry_mirror_urls[${registry_name}]}"
-    if [[ -z "$(trim "${registry_url}")" ]]; then
-      echo "Error: talos.registry.mirrors[${registry_name}] is empty." >&2
-      echo "Fix: set talos.registry.mirrors entries to non-empty registry endpoint URLs." >&2
-      exit 1
-    fi
-    if [[ ! "${registry_url}" =~ ^https?:// ]]; then
-      echo "Error: talos.registry.mirrors[${registry_name}] must start with http:// or https:// (got ${registry_url})." >&2
-      echo "Fix: use a full mirror URL such as https://registry.example.com." >&2
-      exit 1
-    fi
     machine_registries_has_content=true
     machine_registries_section+=$'\n      "'"$(yaml_escape "${registry_name}")"$'":'
     machine_registries_section+=$'\n        endpoints:'
-    machine_registries_section+=$'\n          - "'"$(yaml_escape "${registry_url}")"$'"'
+    declare -A registry_seen_endpoints=()
+    while IFS= read -r registry_url; do
+      if [[ -z "$(trim "${registry_url}")" ]]; then
+        echo "Error: talos.registry.mirrors[${registry_name}] contains an empty endpoint or list." >&2
+        exit 1
+      fi
+      if [[ ! "${registry_url}" =~ ^https?://[^/[:space:]]+ ]]; then
+        echo "Error: talos.registry.mirrors[${registry_name}] endpoints must be full http:// or https:// URLs." >&2
+        exit 1
+      fi
+      if [[ -v "registry_seen_endpoints[${registry_url}]" ]]; then
+        echo "Error: talos.registry.mirrors[${registry_name}] contains duplicate endpoints." >&2
+        exit 1
+      fi
+      registry_seen_endpoints["${registry_url}"]=1
+      machine_registries_section+=$'\n          - "'"$(yaml_escape "${registry_url}")"$'"'
+      registry_config_host="$(registry_host_from_url "${registry_url}")"
+      if [[ -n "${registry_config_host}" ]]; then
+        registry_config_hosts["${registry_config_host}"]=1
+      fi
+    done <<< "${registry_mirror_urls[${registry_name}]}"
+    unset registry_seen_endpoints
     machine_registries_section+=$'\n        skipFallback: '"${registry_skip_fallback}"
     machine_registries_section+=$'\n        overridePath: '"${registry_override_path}"
-    registry_config_host="$(registry_host_from_url "${registry_url}")"
-    if [[ -n "${registry_config_host}" ]]; then
-      registry_config_hosts["${registry_config_host}"]=1
-    fi
   done < <(printf "%s\n" "${!registry_mirror_urls[@]}" | sort)
 
   machine_registries_section+=$'\n    config:'

@@ -75,7 +75,12 @@ constants = {
     # Example:
     # "registry" = {
     #   "mirrors" = {
-    #     "docker.io"            = "https://registry.example.com/repository/docker-public/v2"
+    #     # A single URL or an ordered list; the first matching image wins.
+    #     "docker.io" = [
+    #       "https://registry.example.com/v2/project-a",
+    #       "https://registry.example.com/v2/project-b",
+    #       "https://registry.example.com/v2/upstream-cache",
+    #     ]
     #     "docker.redpanda.com"  = "https://registry.example.com/repository/docker-public/v2"
     #     "registry-1.docker.io" = "https://registry.example.com/repository/docker-public/v2"
     #     "gcr.io"               = "https://registry.example.com/repository/docker-public/v2"

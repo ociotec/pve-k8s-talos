@@ -294,6 +294,25 @@ Workers with an active secondary network apply compatible Talos configuration ch
 
 To configure container registry mirrors for Talos, define `talos.registry` in `constants.auto.tfvars`. The generator renders `machine.registries.mirrors` from the `mirrors` map, applies the same `skipFallback`/`overridePath` values to every mirror, renders optional `username`/`password` auth for each unique mirror host, and renders `machine.registries.config.*.tls.insecureSkipVerify` from the global TLS flag.
 
+Each mirror value accepts either one URL or an ordered list of URLs. For example,
+short Docker Hub references can search private projects before a proxy cache:
+
+```hcl
+"docker.io" = [
+  "https://registry.example.com/v2/project-a",
+  "https://registry.example.com/v2/project-b",
+  "https://registry.example.com/v2/upstream-cache",
+]
+```
+
+Use `override_path = "true"` for these full API paths. With
+`skip_fallback = "true"`, the last endpoint is the final fallback; containerd
+will not contact the original upstream registry. The first endpoint that resolves
+the requested tag wins. Ensure the pull identity can read every project. A Pod
+using `IfNotPresent` may reuse a cached image without consulting the endpoints;
+use `Always` when each container start must resolve the reference again. Fully
+qualified references to another registry retain that registry's own configuration.
+
 This repository currently pulls images from these upstream registries:
 
 - `docker.io` / `registry-1.docker.io`
