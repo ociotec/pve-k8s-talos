@@ -3324,6 +3324,7 @@ wait_for_machineconfig_match() {
 reconcile_talos_registry_auth() {
   local node_name node_ip node_role machineconfig_path primary_ip line
   local workers=() controlplanes=() primary=() registry_args=() prepare_args=()
+  local workload_baseline
 
   # On first bootstrap CRI starts with the generated credentials and kubelet
   # pulls the control-plane images. The diagnostic PriorityClass is installed
@@ -3366,6 +3367,8 @@ reconcile_talos_registry_auth() {
   for line in "${workers[@]}" "${controlplanes[@]}" "${primary[@]}"; do
     prepare_args+=(--prepare-node "${line}")
   done
+  workload_baseline="$(mktemp "${cluster_root_workspace}/.registry-workloads.XXXXXX")"
+  registry_args+=(--workload-baseline "${workload_baseline}")
   python3 "${script_dir}/reconcile-registry-auth.py" \
     --talosconfig "${cluster_talosconfig_path}" --kubeconfig "${cluster_kubeconfig_path}" \
     "${registry_args[@]}" "${prepare_args[@]}" || return 1
@@ -3383,6 +3386,7 @@ reconcile_talos_registry_auth() {
     fi
     wait_for_all_kubernetes_nodes_ready 600 || return 1
   done
+  rm -f "${workload_baseline}"
 }
 
 reconcile_staged_talos_nodes() {

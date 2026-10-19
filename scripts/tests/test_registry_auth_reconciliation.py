@@ -344,6 +344,46 @@ class ReconcileTest(unittest.TestCase):
             self.r.wait_workloads(wait=False)
         self.sleep.assert_not_called()
 
+    def test_application_baseline_allows_existing_failure_but_not_new_degradation(self):
+        objects = [{"kind": "Deployment", "metadata": {"name": "app", "namespace": "apps",
+                    "uid": "app-uid", "generation": 1}, "spec": {"replicas": 3},
+                    "status": {"readyReplicas": 2, "observedGeneration": 1}}]
+        original = self.r.command
+        def command(args, *a, **kw):
+            if "deployments,statefulsets,daemonsets" in args:
+                return {"items": copy.deepcopy(objects)}
+            return original(args, *a, **kw)
+        self.r.command = command
+        with tempfile.TemporaryDirectory() as directory:
+            self.r.args.workload_baseline = str(Path(directory, "health.json"))
+            self.r.capture_workload_baseline()
+            self.r.wait_workloads(wait=False)
+            objects[0]["status"]["readyReplicas"] = 1
+            with self.assertRaisesRegex(MODULE.ReconcileError, "apps/app"):
+                self.r.wait_workloads(wait=False)
+            objects[0]["status"]["readyReplicas"] = 3
+            self.r.wait_workloads(wait=False)
+            objects[0]["status"]["readyReplicas"] = 2
+            with self.assertRaisesRegex(MODULE.ReconcileError, "apps/app"):
+                self.r.wait_workloads(wait=False)
+
+    def test_infrastructure_failures_are_never_accepted_as_application_baseline(self):
+        for namespace, labels in [("kube-system", {}), ("cattle-system", {}),
+                                  ("apps", {"app.kubernetes.io/managed-by": "infrastructure"})]:
+            objects = [{"kind": "Deployment", "metadata": {"name": "app", "namespace": namespace,
+                        "labels": labels}, "spec": {"replicas": 1}, "status": {"readyReplicas": 0}}]
+            original = FakeReconciler.command
+            def command(args, *a, **kw):
+                if "deployments,statefulsets,daemonsets" in args:
+                    return {"items": copy.deepcopy(objects)}
+                return original(self.r, args, *a, **kw)
+            self.r.command = command
+            with tempfile.TemporaryDirectory() as directory:
+                self.r.args.workload_baseline = str(Path(directory, "health.json"))
+                self.r.capture_workload_baseline()
+                with self.assertRaisesRegex(MODULE.ReconcileError, namespace + "/app"):
+                    self.r.wait_workloads(wait=False)
+
     def test_prepare_checks_seed_pull_before_protecting_any_target(self):
         seed = FakeReconciler()
         seed.fail_pull = True

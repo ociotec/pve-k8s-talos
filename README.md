@@ -365,7 +365,12 @@ and rebooted first, then control-plane nodes one at a time, with readiness and
 etcd checks. Draining respects PDBs, refuses unmanaged pods, and deletes temporary
 emptyDir data; PVCs are preserved. Singleton services can be interrupted.
 After each reboot, a real kubelet pull must succeed before scheduling resumes,
-and all managed workload controllers must recover before the next node.
+and infrastructure controllers must recover before the next node. Existing
+application degradation is recorded before registry maintenance and does not
+block an otherwise healthy rollout. New or worsening controller degradation
+stops the rollout; recovered applications must remain healthy on later steps.
+Infrastructure is identified by repository ownership labels or infrastructure
+namespaces, and its degradation is never exempted by the baseline.
 
 Any failure stops the rollout; unfinished nodes retain maintenance protection.
 Resolve the failure and repeat the same command to resume without rebooting

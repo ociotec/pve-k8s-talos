@@ -5,6 +5,7 @@ import argparse
 import datetime
 import hashlib
 import json
+from pathlib import Path
 import re
 import subprocess
 import sys
@@ -142,19 +143,63 @@ class Reconciler:
             time.sleep(5)
         raise ReconcileError("Node did not reboot Ready with the current registry authentication.")
 
+    @staticmethod
+    def infrastructure(obj):
+        meta = obj["metadata"]
+        namespace = meta.get("namespace", "")
+        return (meta.get("labels", {}).get("app.kubernetes.io/managed-by") == "infrastructure"
+                or namespace in {"kube-system", "monitoring", "cert-manager", "metallb-system",
+                                 "kyverno", "ingress-nginx", "longhorn-system"}
+                or namespace.startswith(("cattle-", "fleet-", "rook-")))
+
+    @staticmethod
+    def workload_health(obj):
+        status = obj.get("status", {})
+        desired = (status.get("desiredNumberScheduled", 0) if obj["kind"] == "DaemonSet"
+                   else obj["spec"].get("replicas", 1))
+        ready = status.get("numberReady", 0) if obj["kind"] == "DaemonSet" else status.get("readyReplicas", 0)
+        return {"uid": obj["metadata"].get("uid"),
+                "generation": obj["metadata"].get("generation", 0),
+                "deficit": max(0, desired - ready),
+                "unobserved": status.get("observedGeneration", 0) < obj["metadata"].get("generation", 0)}
+
+    def capture_workload_baseline(self, report=True):
+        path = getattr(self.args, "workload_baseline", None)
+        if not path:
+            return
+        baseline = {}
+        objects = self.command(self.kube + ["get", "deployments,statefulsets,daemonsets", "-A", "-o", "json"])["items"]
+        for obj in objects:
+            health = self.workload_health(obj)
+            if not self.infrastructure(obj) and (health["deficit"] or health["unobserved"]):
+                key = obj["kind"] + "/" + obj["metadata"].get("namespace", "") + "/" + obj["metadata"]["name"]
+                baseline[key] = health
+        Path(path).write_text(json.dumps(baseline))
+        if baseline and report:
+            print("Pre-existing application degradation recorded: " + ", ".join(sorted(baseline)), flush=True)
+
     def wait_workloads(self, wait=True):
         deadline = time.monotonic() + self.args.timeout
         while True:
             objects = self.command(self.kube + ["get", "deployments,statefulsets,daemonsets", "-A", "-o", "json"])["items"]
+            path = getattr(self.args, "workload_baseline", None)
+            baseline = json.loads(Path(path).read_text()) if path else {}
             unready = []
             for obj in objects:
-                status = obj.get("status", {})
-                desired = (status.get("desiredNumberScheduled", 0) if obj["kind"] == "DaemonSet"
-                           else obj["spec"].get("replicas", 1))
-                ready = status.get("numberReady", 0) if obj["kind"] == "DaemonSet" else status.get("readyReplicas", 0)
-                if ready < desired or status.get("observedGeneration", 0) < obj["metadata"].get("generation", 0):
-                    unready.append(obj["metadata"].get("namespace", "") + "/" + obj["metadata"]["name"])
+                health = self.workload_health(obj)
+                if not health["deficit"] and not health["unobserved"]:
+                    continue
+                name = obj["metadata"].get("namespace", "") + "/" + obj["metadata"]["name"]
+                previous = baseline.get(obj["kind"] + "/" + name)
+                if (not self.infrastructure(obj) and previous
+                        and health["uid"] == previous["uid"]
+                        and health["generation"] == previous["generation"]
+                        and health["deficit"] <= previous["deficit"]
+                        and health["unobserved"] <= previous["unobserved"]):
+                    continue
+                unready.append(name)
             if not unready:
+                self.capture_workload_baseline(report=False)
                 return
             if not wait:
                 raise ReconcileError("Pre-existing unhealthy workloads; stopping before any drain: " + ", ".join(unready))
@@ -162,6 +207,9 @@ class Reconciler:
             for pod in pods:
                 if (pod["metadata"].get("deletionTimestamp")
                         or pod.get("status", {}).get("phase") in {"Failed", "Succeeded"}):
+                    continue
+                pod_name = pod["metadata"].get("namespace", "") + "/" + pod["metadata"]["name"]
+                if not any(pod_name.startswith(name + "-") for name in unready):
                     continue
                 for container in pod.get("status", {}).get("containerStatuses", []):
                     if container.get("ready"):
@@ -293,6 +341,9 @@ def prepare_cluster(args):
         if not reconciler.ready(node):
             raise ReconcileError("All nodes must be Ready before registry maintenance.")
         entries.append((reconciler, runtime, node, role))
+    if entries:
+        entries[0][0].capture_workload_baseline()
+        entries[0][0].wait_workloads(wait=False)
     pending = [entry for entry in entries if entry[1]["pending"]]
     if pending and not args.allow_node_reboot:
         raise ReconcileError("Pending static registry credentials require explicit --reboot-for-registry-auth; no nodes were cordoned.")
@@ -310,9 +361,6 @@ def prepare_cluster(args):
             if (node.get("spec", {}).get("unschedulable")
                     and node["metadata"].get("annotations", {}).get(MAINTENANCE) != "true"):
                 raise ReconcileError("A target node is already cordoned by another operator.")
-        if not any(node["metadata"].get("annotations", {}).get(MAINTENANCE) == "true"
-                   for r, runtime, node, role in entries):
-            entries[0][0].wait_workloads(wait=False)
         for r, runtime, node, role in pending:
             r.protect()
         print(f"Protected {len(pending)} nodes with pending registry authentication; validated scheduling capacity remains available.", flush=True)
@@ -326,6 +374,7 @@ def main():
     parser.add_argument("--timeout", type=int, default=900)
     parser.add_argument("--allow-node-reboot", action="store_true")
     parser.add_argument("--prepare-node", action="append", default=[])
+    parser.add_argument("--workload-baseline", help="Application health snapshot shared by this deployment's node checks")
     args = parser.parse_args()
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
