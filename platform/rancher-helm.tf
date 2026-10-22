@@ -120,6 +120,14 @@ locals {
       },
     ]
     debug = local.rancher_debug_value
+    # Supported nested-chart values, applied before its first installation.
+    # With two replicas the default RollingUpdate 25% rounds maxUnavailable to 0.
+    webhook = {
+      replicaCount        = 2
+      priorityClassName   = "infra-high"
+      podDisruptionBudget = { enabled = true, minAvailable = 1 }
+      resources           = jsondecode(local.rancher_managed_resource_patches["cattle-system/rancher-webhook"].patch).spec.template.spec.containers[0].resources
+    }
     # Never let an uninstall/failed atomic install clean Rancher namespaces.
     postDelete = { enabled = false }
   }
@@ -128,10 +136,45 @@ locals {
 resource "null_resource" "rancher_local_admin" {
   count = local.rancher_helm_enabled ? 1 : 0
   triggers = {
-    script_sha = filesha256("${path.module}/ensure-rancher-admin.py")
+    script_sha    = filesha256("${path.module}/ensure-rancher-admin.py")
+    readiness_sha = filesha256("${path.module}/rancher_readiness.py")
   }
   provisioner "local-exec" {
     command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} python3 ${path.module}/ensure-rancher-admin.py"
   }
   depends_on = [null_resource.rancher_ready, helm_release.rancher]
+}
+
+locals {
+  rancher_readiness_checks = {
+    # A previous healthy one-replica release must not satisfy the HA gate.
+    replicas = { "cattle-system/rancher-webhook" = 2 }
+    deployments = concat(["cattle-system/rancher"], [
+      for patch in values(local.rancher_managed_resource_patches) :
+      "${patch.namespace}/${patch.name}" if patch.resource == "deployment"
+    ])
+    releases = ["cattle-system/rancher", "cattle-system/rancher-webhook",
+      "cattle-fleet-system/fleet", "cattle-fleet-system/fleet-crd",
+    "cattle-fleet-local-system/fleet-agent-local", "cattle-turtles-system/rancher-turtles"]
+  }
+}
+
+resource "local_file" "rancher_readiness_checks" {
+  count    = local.rancher_helm_enabled ? 1 : 0
+  filename        = "${path.module}/.generated-rancher-readiness.json"
+  content         = jsonencode(local.rancher_readiness_checks)
+  file_permission = "0644"
+}
+
+resource "null_resource" "rancher_system_ready" {
+  count = local.rancher_helm_enabled ? 1 : 0
+  triggers = {
+    script_sha = filesha256("${path.module}/rancher_readiness.py")
+    values_sha = sha256(yamlencode(local.rancher_helm_values))
+    checks_sha = sha256(local_file.rancher_readiness_checks[0].content)
+  }
+  provisioner "local-exec" {
+    command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} python3 ${path.module}/rancher_readiness.py systems --timeout 1800 --checks-file ${local_file.rancher_readiness_checks[0].filename}"
+  }
+  depends_on = [null_resource.rancher_ready, null_resource.rancher_local_admin]
 }

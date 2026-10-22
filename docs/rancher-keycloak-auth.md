@@ -161,6 +161,37 @@ bootstrap Secret. Recovery output is never printed; an interrupted handshake
 keeps a private journal in the cluster Git directory for retry. Its temporary
 API sessions have a two-minute TTL and are deleted after verification.
 
+Helm bootstrap waits for `authconfigs/local` to be enabled before creating a
+missing admin. Transient authentication HTTP/transport failures are retried for
+up to three minutes; 401/403 responses are not retried. Port-forward startup and
+Kubernetes queries also have finite timeouts. Existing admins are retained.
+
+Before applying platform, deployment waits up to five minutes for Kubernetes
+OpenAPI. Applies are not automatically replayed. After Rancher starts, a
+readiness gate waits up to thirty
+minutes for all three built-in catalogs to report `Downloaded`, all six Rancher
+Helm releases to report `deployed`, and all expected Deployments to finish their
+current rollouts. Only then can the resource patches run. The same check runs
+after every Helm platform apply, including applies without provisioner changes,
+before deployment provenance is advanced. Failure reports pending object names
+and release statuses without dumping values, Secrets, or operation tokens.
+Failed/pending Helm operations are never automatically rolled back or deleted.
+
+The official Rancher chart's `webhook` values configure two webhook replicas,
+resources, `infra-high` priority, and a PodDisruptionBudget with `minAvailable: 1`
+from its first installation. With two replicas Kubernetes' default rolling
+strategy permits zero unavailable replicas. The subsequent platform patch makes
+that strategy explicit (`maxUnavailable: 0`, `maxSurge: 1`), adds a readiness
+probe at the official HTTPS `/healthz` endpoint, and requires ten seconds of
+readiness before retiring an old pod. Keeping a serving webhook prevents its
+Secret validation from blocking Helm's own release-state writes during a
+rollout. This does not guarantee availability after simultaneous pod/node
+failures or eliminate failures unrelated to bootstrap.
+
+Sources: [Rancher config template](https://github.com/rancher/rancher/blob/v2.15.2/chart/templates/configMap.yaml),
+[webhook chart values](https://github.com/rancher/charts/blob/release-v2.15/charts/rancher-webhook/110.0.3%2Bup0.11.3/values.yaml),
+[webhook Deployment and health endpoints](https://github.com/rancher/charts/blob/release-v2.15/charts/rancher-webhook/110.0.3%2Bup0.11.3/templates/deployment.yaml).
+
 The post-renderer uses Python 3/PyYAML, adds ownership labels, and removes the
 chart's private PriorityClass in favor of the shared `infra-observability`
 class. CPU/memory values, Go runtime limits, hostname, TLS secret and private CA

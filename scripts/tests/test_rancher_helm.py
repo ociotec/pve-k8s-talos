@@ -6,9 +6,11 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
+import urllib.error
 from unittest.mock import patch
 
 import yaml
@@ -27,6 +29,8 @@ def load(name, path):
 PREPARE = load("prepare_rancher", "scripts/prepare-rancher-chart.py")
 POSTRENDER = load("postrender_rancher", "platform/rancher-postrender.py")
 REINSTALL = load("reinstall_rancher", "scripts/reinstall-rancher-for-helm.py")
+READY = load("rancher_readiness", "platform/rancher_readiness.py")
+sys.modules["rancher_readiness"] = READY
 ADMIN = load("ensure_rancher_admin", "platform/ensure-rancher-admin.py")
 
 
@@ -156,8 +160,118 @@ class RancherLocalAdminTest(unittest.TestCase):
             self.assertEqual(command.call_count, 2)
 
 
+class RancherReadinessTest(unittest.TestCase):
+    def test_auth_config_must_exist_and_be_enabled(self):
+        with patch.object(READY, "kubectl", side_effect=[None, {"enabled": True}]):
+            self.assertIsNotNone(READY.auth_pending())
+            self.assertIsNone(READY.auth_pending())
+        with patch.object(READY, "kubectl", return_value={"enabled": False}), self.assertRaises(RuntimeError):
+            READY.auth_pending()
+
+    def test_cached_missing_local_provider_is_retried_but_invalid_password_is_not(self):
+        unavailable = urllib.error.HTTPError("example", 500, "not initialized", {}, None)
+        unauthorized = urllib.error.HTTPError("example", 401, "invalid credentials", {}, None)
+        with patch.object(READY.time, "sleep") as sleep:
+            from unittest.mock import Mock
+            request = Mock(side_effect=[unavailable, unauthorized])
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                READY.retry_http(request)
+            self.assertEqual(error.exception.code, 401)
+            self.assertEqual(request.call_count, 2)
+            sleep.assert_called_once()
+
+    def test_http_transport_recovers_and_permissions_fail_immediately(self):
+        from unittest.mock import Mock
+        with patch.object(READY.time, "sleep"):
+            request = Mock(side_effect=[urllib.error.URLError("not ready"), {"ok": True}])
+            self.assertEqual(READY.retry_http(request), {"ok": True})
+            request = Mock(side_effect=urllib.error.HTTPError("example", 403, "forbidden", {}, None))
+            with self.assertRaises(urllib.error.HTTPError):
+                READY.retry_http(request)
+            self.assertEqual(request.call_count, 1)
+
+    def test_http_failure_and_pending_systems_have_deadlines(self):
+        from unittest.mock import Mock
+        with patch.object(READY.time, "monotonic", side_effect=[0, 10]):
+            request = Mock(side_effect=urllib.error.URLError("private response must not be printed"))
+            with self.assertRaisesRegex(RuntimeError, "did not become available"):
+                READY.retry_http(request, timeout=5)
+        with patch.object(READY.time, "monotonic", side_effect=[0, 10]):
+            with self.assertRaisesRegex(RuntimeError, "Helm: example=pending-install"):
+                READY.wait(lambda: "Helm: example=pending-install", "systems", timeout=5)
+
+    def inventory(self, release_status="deployed", generation=2, observed=2, replicas=2, updated=2, available=2):
+        repos = {"items": [{"metadata": {"name": n}, "status": {"conditions": [
+            {"type": "Downloaded", "status": "True"}]}} for n in
+            ["rancher-charts", "rancher-partner-charts", "rancher-rke2-charts"]]}
+        workloads = {"items": [{"metadata": {"name": "webhook", "namespace": "system", "generation": generation},
+            "spec": {"replicas": 2}, "status": {"observedGeneration": observed,
+                "replicas": replicas, "updatedReplicas": updated, "availableReplicas": available}}]}
+        helm = subprocess.CompletedProcess([], 0, json.dumps([
+            {"name": "webhook", "namespace": "system", "status": release_status}]), "")
+        return repos, workloads, helm
+
+    def pending(self, **kwargs):
+        repos, workloads, helm = self.inventory(**kwargs)
+        with patch.object(READY, "kubectl", side_effect=[repos, workloads]), patch.object(READY.subprocess, "run", return_value=helm):
+            return READY.systems_pending(["system/webhook"], ["system/webhook"])
+
+    def test_ready_pods_do_not_hide_a_pending_helm_release(self):
+        self.assertIn("pending-install", self.pending(release_status="pending-install"))
+        self.assertIsNone(self.pending())
+
+    def test_rollout_must_include_every_updated_replica_and_observed_generation(self):
+        for changes in [{"observed": 1}, {"replicas": 3}, {"updated": 1}, {"available": 1}]:
+            with self.subTest(changes=changes):
+                self.assertIn("Deployments", self.pending(**changes))
+
+    def test_catalogs_must_be_downloaded_before_querying_releases(self):
+        with patch.object(READY, "kubectl", return_value={"items": []}), patch.object(READY.subprocess, "run") as helm:
+            self.assertIn("catalogs", READY.systems_pending([], []))
+            helm.assert_not_called()
+
+    def test_initial_catalog_with_null_conditions_is_pending(self):
+        repos = {"items": [{"metadata": {"name": "rancher-charts"}, "status": {"conditions": None}}]}
+        with patch.object(READY, "kubectl", return_value=repos):
+            self.assertIn("catalogs", READY.systems_pending([], []))
+
+    def test_previous_healthy_single_replica_does_not_satisfy_ha_gate(self):
+        repos, workloads, helm = self.inventory(replicas=1, updated=1, available=1)
+        workloads["items"][0]["spec"]["replicas"] = 1
+        with patch.object(READY, "kubectl", side_effect=[repos, workloads]), patch.object(READY.subprocess, "run", return_value=helm):
+            self.assertIn("Deployments", READY.systems_pending(["system/webhook"], ["system/webhook"], {"system/webhook": 2}))
+
+    def test_gate_requires_consecutive_successes_after_a_transient_failure(self):
+        from unittest.mock import Mock
+        check = Mock(side_effect=[None, "Helm pending", None, None])
+        with patch.object(READY.time, "sleep"):
+            READY.wait(check, "systems", stable=2)
+        self.assertEqual(check.call_count, 4)
+
+
 @unittest.skipUnless(os.environ.get("RANCHER_TEST_WORKSPACE"), "Set RANCHER_TEST_WORKSPACE to a 2.15 Helm workspace")
 class RancherVersionIntegrationTest(unittest.TestCase):
+    def test_opentofu_graph_gates_patches_on_nested_helm_readiness(self):
+        result = subprocess.run(["tofu", "-chdir=" + os.environ["RANCHER_TEST_WORKSPACE"], "graph", "-type=plan"],
+                                text=True, capture_output=True, check=True)
+        self.assertIn('"[root] null_resource.rancher_managed_resource_patches (expand)" -> "[root] null_resource.rancher_system_ready (expand)"', result.stdout)
+
+    def test_webhook_chart_settings_match_the_final_patch(self):
+        result = subprocess.run(["tofu", "-chdir=" + os.environ["RANCHER_TEST_WORKSPACE"], "console", "-no-color"],
+            input='jsonencode({values=local.rancher_helm_values.webhook, patch=jsondecode(local.rancher_managed_resource_patches["cattle-system/rancher-webhook"].patch)})\n',
+            text=True, capture_output=True, check=True)
+        config = json.loads(json.loads(result.stdout.strip()))
+        values, spec = config["values"], config["patch"]["spec"]
+        self.assertEqual(values["replicaCount"], 2)
+        self.assertEqual(values["podDisruptionBudget"], {"enabled": True, "minAvailable": 1})
+        self.assertEqual(spec["replicas"], 2)
+        self.assertEqual(spec["strategy"]["rollingUpdate"], {"maxUnavailable": 0, "maxSurge": 1})
+        container = spec["template"]["spec"]["containers"][0]
+        self.assertEqual(container["resources"], values["resources"])
+        self.assertEqual(values["priorityClassName"], spec["template"]["spec"]["priorityClassName"])
+        self.assertEqual(container["readinessProbe"]["httpGet"],
+                         {"path": "/healthz", "port": "https", "scheme": "HTTPS"})
+
     def test_actual_module_selects_turtles_without_retired_controllers(self):
         result = subprocess.run(["tofu", "-chdir=" + os.environ["RANCHER_TEST_WORKSPACE"], "console", "-no-color"],
             input="jsonencode(keys(local.rancher_managed_resource_patches))\n",
@@ -191,6 +305,12 @@ class RenderedChartTest(unittest.TestCase):
             "--namespace", "cattle-system", "--kube-version", "1.36.2", "-f", "-"],
             input=yaml.safe_dump(values), capture_output=True, text=True, check=True)
         documents = [d for d in yaml.safe_load_all(result.stdout) if d]
+        if os.environ.get("RANCHER_TEST_WORKSPACE"):
+            config = next(d for d in documents if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "rancher-config")
+            webhook = yaml.safe_load(config["data"]["rancher-webhook"])
+            self.assertEqual(webhook["replicaCount"], 2)
+            self.assertTrue(webhook["podDisruptionBudget"]["enabled"])
+            self.assertEqual(webhook["resources"]["requests"]["memory"], webhook["resources"]["limits"]["memory"])
         # Helm bypasses post-rendering for hooks: test them without transforming.
         hooks = [d for d in documents if "helm.sh/hook" in (d["metadata"].get("annotations") or {})]
         regular = [d for d in documents if d not in hooks]

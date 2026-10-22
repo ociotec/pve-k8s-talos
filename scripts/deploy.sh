@@ -2522,6 +2522,7 @@ prepare_platform_workspace() {
   link_into_workspace "${repo_root}/platform/rancher-helm.tf" "${workspace}/rancher-helm.tf"
   link_into_workspace "${repo_root}/platform/rancher-postrender.py" "${workspace}/rancher-postrender.py"
   link_into_workspace "${repo_root}/platform/ensure-rancher-admin.py" "${workspace}/ensure-rancher-admin.py"
+  link_into_workspace "${repo_root}/platform/rancher_readiness.py" "${workspace}/rancher_readiness.py"
   link_into_workspace "${cluster_platform_constants_path}" "${workspace}/constants.tf"
   link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/k8s_net_constants.tf"
   link_into_workspace "${cluster_ceph_constants_path}" "${workspace}/ceph_constants.tf"
@@ -4427,7 +4428,14 @@ else
     --state "${cluster_platform_workspace}/terraform.tfstate" \
     --output "${cluster_platform_workspace}/.generated-rancher-chart.tgz"
   migrate_platform_rancher_deployment_state "${cluster_platform_workspace}"
+  KUBECONFIG="${cluster_kubeconfig_path}" python3 "${cluster_platform_workspace}/rancher_readiness.py" openapi --timeout 300
   run tofu -chdir="${cluster_platform_workspace}" apply -auto-approve
+  # Resource patches can roll pods after nested Helm has settled. Verify again
+  # before recording success, including runs where provisioners did not change.
+  if [[ "$(tf_string_value "${cluster_platform_constants_path}" rancher_deployment_mode)" == "helm" ]]; then
+    KUBECONFIG="${cluster_kubeconfig_path}" python3 "${cluster_platform_workspace}/rancher_readiness.py" systems --timeout 1800 \
+      --checks-file "${cluster_platform_workspace}/.generated-rancher-readiness.json"
+  fi
   message "Waiting for Portainer PVC, workload, and endpoints to become ready..."
   wait_for_pvcs_bound "portainer" "600" "portainer"
   wait_for_deployments_ready "portainer" "600s" "portainer"

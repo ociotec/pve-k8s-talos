@@ -783,6 +783,37 @@ locals {
       ], key)
     },
     {
+      "cattle-system/rancher-webhook" = merge(local.rancher_managed_resource_patches_base["cattle-system/rancher-webhook"], {
+        patch = jsonencode(merge(jsondecode(local.rancher_managed_resource_patches_base["cattle-system/rancher-webhook"].patch), {
+          metadata = {
+            labels = { "app.kubernetes.io/part-of" = "rancher" }
+            annotations = {
+              "policy.pve-k8s-talos.io/allow-missing-probes" = null
+              "policy.pve-k8s-talos.io/exception-reason"     = null
+            }
+          }
+          spec = {
+            replicas        = 2
+            minReadySeconds = 10
+            strategy        = { type = "RollingUpdate", rollingUpdate = { maxUnavailable = 0, maxSurge = 1 } }
+            template = {
+              metadata = { labels = { "app.kubernetes.io/part-of" = "rancher" } }
+              spec = {
+                priorityClassName = "infra-high"
+                containers = [merge(
+                  jsondecode(local.rancher_managed_resource_patches_base["cattle-system/rancher-webhook"].patch).spec.template.spec.containers[0],
+                  {
+                    # Same verified endpoint as the official startup/liveness probes.
+                    readinessProbe = {
+                      httpGet = { path = "/healthz", port = "https", scheme = "HTTPS" }
+                      periodSeconds = 5, timeoutSeconds = 1, successThreshold = 1, failureThreshold = 3
+                    }
+                })]
+              }
+            }
+          }
+        }))
+      })
       "cattle-fleet-local-system/fleet-agent" = {
         namespace = "cattle-fleet-local-system"
         resource  = "deployment"
@@ -1343,6 +1374,7 @@ resource "null_resource" "rancher_managed_resource_patches" {
     }, local.rancher_helm_enabled ? {
     deployment_mode = local.rancher_deployment_mode_value
     version         = local.rancher_version_value
+    readiness_id    = null_resource.rancher_system_ready[0].id
   } : {})
 
   provisioner "local-exec" {
@@ -1352,6 +1384,7 @@ resource "null_resource" "rancher_managed_resource_patches" {
   depends_on = [
     null_resource.rancher_ready,
     null_resource.rancher_keycloakoidc_authconfig,
+    null_resource.rancher_system_ready,
   ]
 }
 

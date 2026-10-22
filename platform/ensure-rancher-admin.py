@@ -6,14 +6,17 @@ import json
 import os
 from pathlib import Path
 import re
+import selectors
 import subprocess
 import sys
 import urllib.error
 import urllib.request
 
+from rancher_readiness import auth_pending, retry_http, wait
+
 
 def command(*args):
-    result = subprocess.run(args, capture_output=True, text=True)
+    result = subprocess.run(args, capture_output=True, text=True, timeout=60)
     if result.returncode:
         # The recovery helper can print a password: never forward its output.
         raise RuntimeError("Rancher administrative initialization command failed")
@@ -30,18 +33,19 @@ def main():
         if any(user.get("username") == "admin" for user in users) and not recovery_file.exists():
             print("Existing Rancher local admin retained; its password was not changed.")
             return 0
+        wait(auth_pending, "Rancher local authentication", timeout=600)
         secret = json.loads(command("kubectl", "-n", "cattle-system", "get", "secret", "bootstrap-secret", "-o", "json"))
         password = base64.b64decode(secret["data"]["bootstrapPassword"]).decode()
         # Use an ephemeral local port and capture the generated port only.
         forward = subprocess.Popen(["kubectl", "-n", "cattle-system", "port-forward", "svc/rancher", ":80"],
                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         port = None
-        for _ in range(4):
-            line = forward.stdout.readline()
-            match = re.search(r"127\.0\.0\.1:(\d+)", line)
-            if match:
-                port = match[1]
-                break
+        with selectors.DefaultSelector() as selector:
+            selector.register(forward.stdout, selectors.EVENT_READ)
+            if selector.select(timeout=30):
+                match = re.search(r"127\.0\.0\.1:(\d+)", forward.stdout.readline())
+                if match:
+                    port = match[1]
         if port is None:
             raise RuntimeError("Could not open Rancher administrative verification connection")
         base = "http://127.0.0.1:" + port
@@ -53,9 +57,13 @@ def main():
                 headers["Authorization"] = "Bearer " + token
             payload = json.dumps(data).encode() if data is not None else None
             req = urllib.request.Request(base + path, data=payload, headers=headers, method=method)
-            with opener.open(req, timeout=30) as response:
-                output = response.read()
-                return json.loads(output) if output else {}
+            def send():
+                with opener.open(req, timeout=15) as response:
+                    output = response.read()
+                    return json.loads(output) if output else {}
+            # Cleanup is best effort: an already-expired token must not add
+            # another retry window to successful initialization.
+            return send() if method == "DELETE" else retry_http(send)
 
         # Official recovery creates a password only when the account is absent.
         # Capture it in memory, replace it immediately with our existing secret,
@@ -109,7 +117,11 @@ def main():
                 except Exception:
                     pass  # Temporary sessions have a two-minute TTL.
             forward.terminate()
-            forward.wait()
+            try:
+                forward.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                forward.kill()
+                forward.wait(timeout=10)
 
 
 if __name__ == "__main__":
