@@ -30,6 +30,11 @@ locals {
   rancher_tls_secret_name           = "tls-rancher-ingress"
   rancher_replicas                  = 1
   rancher_version                   = "2.12.2"
+  # Existing clusters default to legacy. Helm requires a separately reviewed migration.
+  rancher_deployment_mode = "legacy"
+  rancher_chart_version   = "2.15.2"
+  # Destructive one-time reset of legacy Rancher data; applications/PVCs are retained.
+  rancher_helm_reinstall_legacy = false
   rancher_private_ca                = true
   rancher_bootstrap_password_length = 24
   rancher_auth_keycloak_realm       = "company"

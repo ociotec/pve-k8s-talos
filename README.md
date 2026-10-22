@@ -684,6 +684,18 @@ Define your constants in `clusters/<cluster>/monitoring_constants.tf`: monitorin
 
 Define Portainer/Rancher constants in `clusters/<cluster>/platform_constants.tf`.
 Rancher is enabled when `rancher_hostname` is non-empty and uses one replica by default in the sample constants.
+Existing clusters keep the manifest-based deployment unless
+`rancher_deployment_mode = "helm"` is explicitly selected. Helm uses the
+digest-pinned official chart selected by `rancher_chart_version` (currently
+`2.15.2`); `rancher_version` remains the legacy image version. Switching modes
+requires a reviewed migration and is blocked while old resources or ownership
+remain. For a disposable, local-cluster-only installation, explicitly enabling
+`rancher_helm_reinstall_legacy` runs a guarded automatic replacement during the
+platform deployment. This deletes old Rancher management data and sessions;
+application objects, PVCs, TLS and credentials are retained. Return the flag to
+`false` after replacement. Helm mode requires Python 3 with PyYAML on the deployment machine.
+See [Rancher deployment modes](docs/rancher-keycloak-auth.md#rancher-deployment-modes)
+for ownership, chart preparation, and migration boundaries.
 This stack also includes Tempo in monolithic mode with a PVC backend and an internal OpenTelemetry Collector gateway. The collector accepts OTLP/gRPC on `otel-collector.monitoring.svc.cluster.local:4317` and OTLP/HTTP on port `4318`; Tempo is only reachable through the cluster and Grafana. Tempo generates TraceQL metrics for Grafana Traces Drilldown plus span and service-graph metrics remote-written to Prometheus. A separate browser-facing OTLP/HTTP collector can be enabled with `otlp_public_enabled`: it exposes only `/v1/traces`, validates Keycloak JWT signatures, issuer and expiry, and applies the cluster CORS policy in `otlp_public_cors_allowed_origins`. The sample policy accepts HTTPS subdomains of the cluster domain and `http://localhost:8080` for local development. It is disabled by default because it creates an Internet-facing ingest endpoint. Configure `tempo_storage_size`, `tempo_retention`, and the Tempo/Collector resource and image settings in the monitoring constants before enabling application tracing.
 
 The stack also includes kube-state-metrics (requests/limits), kubelet cAdvisor scrape for pod/container CPU/RAM usage, and node-exporter for host/VM CPU, memory, filesystem, disk, and network metrics. Grafana provisions a Node Exporter dashboard from the Grafana Labs quickstart dashboard, adapted to the local `job="node-exporter"` scrape.

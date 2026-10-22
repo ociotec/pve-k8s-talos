@@ -2519,6 +2519,9 @@ prepare_platform_workspace() {
     link_into_workspace "${repo_root}/platform/.terraform" "${workspace}/.terraform"
   fi
   link_into_workspace "${repo_root}/platform/main.tf" "${workspace}/main.tf"
+  link_into_workspace "${repo_root}/platform/rancher-helm.tf" "${workspace}/rancher-helm.tf"
+  link_into_workspace "${repo_root}/platform/rancher-postrender.py" "${workspace}/rancher-postrender.py"
+  link_into_workspace "${repo_root}/platform/ensure-rancher-admin.py" "${workspace}/ensure-rancher-admin.py"
   link_into_workspace "${cluster_platform_constants_path}" "${workspace}/constants.tf"
   link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/k8s_net_constants.tf"
   link_into_workspace "${cluster_ceph_constants_path}" "${workspace}/ceph_constants.tf"
@@ -2530,6 +2533,9 @@ prepare_platform_workspace() {
   if [[ -r "${repo_root}/platform/.terraform.lock.hcl" ]]; then
     link_into_workspace "${repo_root}/platform/.terraform.lock.hcl" "${workspace}/.terraform.lock.hcl"
   fi
+  python3 "${script_dir}/prepare-rancher-chart.py" \
+    --constants "${cluster_platform_constants_path}" \
+    --output "${workspace}/.generated-rancher-chart.tgz"
 }
 
 prepare_s3_storage_workspace() {
@@ -4412,6 +4418,14 @@ else
   prepare_platform_workspace
   message "Deploying platform services..."
   run_tofu_init "${cluster_platform_workspace}"
+  run tofu -chdir="${cluster_platform_workspace}" validate
+  python3 "${script_dir}/reinstall-rancher-for-helm.py" \
+    --constants "${cluster_platform_constants_path}" \
+    --workspace "${cluster_platform_workspace}" --cluster-dir "${cluster_dir}" --execute
+  python3 "${script_dir}/prepare-rancher-chart.py" \
+    --constants "${cluster_platform_constants_path}" \
+    --state "${cluster_platform_workspace}/terraform.tfstate" \
+    --output "${cluster_platform_workspace}/.generated-rancher-chart.tgz"
   migrate_platform_rancher_deployment_state "${cluster_platform_workspace}"
   run tofu -chdir="${cluster_platform_workspace}" apply -auto-approve
   message "Waiting for Portainer PVC, workload, and endpoints to become ready..."

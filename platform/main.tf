@@ -12,6 +12,10 @@ terraform {
       source  = "hashicorp/null"
       version = ">= 3.2.4"
     }
+    helm = {
+      source  = "hashicorp/helm"
+      version = ">= 3.0.0"
+    }
   }
 }
 
@@ -47,6 +51,12 @@ provider "kubernetes" {
   ]
 }
 
+provider "helm" {
+  kubernetes = {
+    config_path = abspath("${path.module}/${var.kubeconfig_path}")
+  }
+}
+
 locals {
   cluster_credentials                 = try(jsondecode(file("${path.module}/credentials.json")), {})
   platform_credentials                = try(local.cluster_credentials.platform, {})
@@ -56,7 +66,22 @@ locals {
   rancher_hostname_value              = local.rancher_hostname
   rancher_tls_secret_name_value       = local.rancher_tls_secret_name
   rancher_replicas_value              = local.rancher_replicas
-  rancher_version_value               = try(local.rancher_version, "2.14.1")
+  # Parse optional settings so existing clusters need no new local declarations.
+  rancher_deployment_mode_value = try(regex(
+    "(?m)^\\s*rancher_deployment_mode\\s*=\\s*\"([^\"]+)\"\\s*(?:#.*)?$",
+    file("${path.module}/constants.tf")
+  )[0], "legacy")
+  rancher_chart_version_value = try(regex(
+    "(?m)^\\s*rancher_chart_version\\s*=\\s*\"([^\"]+)\"\\s*(?:#.*)?$",
+    file("${path.module}/constants.tf")
+  )[0], "2.15.2")
+  # Helm-only clusters need not declare the unused legacy image version.
+  rancher_legacy_version_value = try(regex(
+    "(?m)^\\s*rancher_version\\s*=\\s*\"([^\"]+)\"\\s*(?:#.*)?$",
+    file("${path.module}/constants.tf")
+  )[0], "2.14.1")
+  rancher_helm_enabled  = local.rancher_enabled && !var.skip_platform && local.rancher_deployment_mode_value == "helm"
+  rancher_version_value = local.rancher_deployment_mode_value == "helm" ? local.rancher_chart_version_value : local.rancher_legacy_version_value
   # Read the optional override without referencing an undeclared local.
   rancher_debug_value = try(tobool(regex(
     "(?m)^\\s*rancher_debug\\s*=\\s*(true|false)\\s*(?:#.*)?$",
@@ -269,7 +294,7 @@ locals {
     ],
     [
       for m in local.rancher_manifests : m
-      if !var.skip_platform
+      if !var.skip_platform && local.rancher_deployment_mode_value == "legacy"
     ],
     [
       for m in local.rancher_certificate_manifests : m
@@ -373,11 +398,7 @@ locals {
     }
   } : {}
   # Rancher version for patch compatibility (extract major.minor)
-  rancher_version_major_minor = replace(
-    substr(local.rancher_version_value, 0, regex("(\\d+\\.\\d+)", local.rancher_version_value) != null ? length(regex("(\\d+\\.\\d+)", local.rancher_version_value)) : 0),
-    "/^v/",
-    ""
-  )
+  rancher_version_major_minor = regex("^v?([0-9]+\\.[0-9]+)(?:\\.|$)", local.rancher_version_value)[0]
 
   # Check if Rancher version is 2.14 or later (for imperative API features)
   rancher_version_is_v214plus = (
@@ -746,13 +767,95 @@ locals {
   )
 
   # Select patch set based on Rancher version
-  rancher_managed_resource_patches = (
+  rancher_managed_resource_patches_base = (
     contains(["2.12", "2.13"], local.rancher_version_major_minor)
     ? local.rancher_managed_resource_patches_v212
     : local.rancher_managed_resource_patches_v214plus
   )
 
-  rancher_managed_probe_exceptions = {
+  # 2.15 replaces the legacy provisioning controller with Turtles and no
+  # longer installs the separate imperative API extension Deployment locally.
+  rancher_managed_resource_patches = local.rancher_version_major_minor == "2.15" ? merge(
+    { for key, patch in local.rancher_managed_resource_patches_base : key => patch
+      if !contains([
+        "cattle-provisioning-capi-system/capi-controller-manager",
+        "cattle-system/api-extension",
+      ], key)
+    },
+    {
+      "cattle-fleet-local-system/fleet-agent" = {
+        namespace = "cattle-fleet-local-system"
+        resource  = "deployment"
+        name      = "fleet-agent"
+        patch = jsonencode({
+          metadata = { labels = { "app.kubernetes.io/part-of" = "rancher" } }
+          spec = {
+            template = {
+              metadata = { labels = { "app.kubernetes.io/part-of" = "rancher" } }
+              spec = {
+                priorityClassName = "infra-high"
+                containers = [{
+                  name = "fleet-agent"
+                  resources = {
+                    requests = { cpu = "100m", memory = "256Mi" }
+                    limits   = { cpu = "500m", memory = "256Mi" }
+                  }
+                }]
+              }
+            }
+          }
+        })
+      }
+      "cattle-capi-system/capi-controller-manager" = {
+        namespace = "cattle-capi-system"
+        resource  = "deployment"
+        name      = "capi-controller-manager"
+        patch = jsonencode({
+          metadata = { labels = { "app.kubernetes.io/part-of" = "rancher" } }
+          spec = {
+            template = {
+              metadata = { labels = { "app.kubernetes.io/part-of" = "rancher" } }
+              spec = {
+                priorityClassName = "infra-high"
+                containers = [{
+                  name = "manager"
+                  resources = {
+                    requests = { cpu = "100m", memory = "256Mi" }
+                    limits   = { cpu = "500m", memory = "256Mi" }
+                  }
+                }]
+              }
+            }
+          }
+        })
+      }
+      "cattle-turtles-system/rancher-turtles-controller-manager" = {
+        namespace = "cattle-turtles-system"
+        resource  = "deployment"
+        name      = "rancher-turtles-controller-manager"
+        patch = jsonencode({
+          metadata = { labels = { "app.kubernetes.io/part-of" = "rancher" } }
+          spec = {
+            template = {
+              metadata = { labels = { "app.kubernetes.io/part-of" = "rancher" } }
+              spec = {
+                priorityClassName = "infra-high"
+                containers = [{
+                  name = "manager"
+                  resources = {
+                    requests = { cpu = "100m", memory = "600Mi" }
+                    limits   = { cpu = "500m", memory = "600Mi" }
+                  }
+                }]
+              }
+            }
+          }
+        })
+      }
+    }
+  ) : local.rancher_managed_resource_patches_base
+
+  rancher_managed_probe_exceptions = merge({
     "cattle-fleet-system/fleet-controller" = {
       namespace = "cattle-fleet-system"
       name      = "fleet-controller"
@@ -765,7 +868,13 @@ locals {
       namespace = "cattle-fleet-system"
       name      = "helmops"
     }
-  }
+    }, local.rancher_version_major_minor == "2.15" ? {
+    "cattle-fleet-local-system/fleet-agent" = {
+      namespace = "cattle-fleet-local-system"
+      name      = "fleet-agent"
+      reason    = "Rancher-managed local Fleet agent has no configured health endpoint; retain managed-chart defaults until a supported probe is verified."
+    }
+  } : {})
 }
 
 check "tls_source_valid" {
@@ -882,6 +991,7 @@ resource "kubernetes_manifest" "platform_other" {
     ]
   }
   depends_on = [
+    terraform_data.rancher_mode_guard,
     kubernetes_manifest.platform_namespaces,
     kubernetes_secret_v1.portainer_admin,
     kubernetes_secret_v1.portainer_oauth_ca,
@@ -1074,6 +1184,7 @@ resource "kubernetes_deployment_v1" "rancher" {
   }
 
   depends_on = [
+    terraform_data.rancher_mode_guard,
     kubernetes_manifest.platform_namespaces,
     kubernetes_secret_v1.rancher_bootstrap,
     kubernetes_secret_v1.rancher_ca,
@@ -1156,6 +1267,11 @@ resource "kubernetes_secret_v1" "rancher_ca" {
 resource "null_resource" "rancher_ready" {
   count = local.rancher_auth_enabled ? 1 : 0
 
+  triggers = local.rancher_helm_enabled ? {
+    deployment_mode = local.rancher_deployment_mode_value
+    version         = local.rancher_version_value
+  } : null
+
   provisioner "local-exec" {
     command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n cattle-system rollout status deploy/rancher --timeout=900s && KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n cattle-system wait --for=condition=Available deploy/rancher --timeout=900s"
   }
@@ -1165,6 +1281,7 @@ resource "null_resource" "rancher_ready" {
     kubernetes_deployment_v1.rancher,
     kubernetes_manifest.platform_ingress,
     kubernetes_secret_v1.rancher_ca,
+    helm_release.rancher,
   ]
 }
 
@@ -1173,15 +1290,18 @@ resource "local_sensitive_file" "rancher_keycloakoidc_authconfig" {
 
   filename   = "${path.module}/.generated-rancher-keycloakoidc-authconfig.yaml"
   content    = yamlencode(local.rancher_keycloakoidc_manifest)
-  depends_on = [null_resource.rancher_ready]
+  depends_on = [null_resource.rancher_ready, null_resource.rancher_local_admin]
 }
 
 resource "null_resource" "rancher_keycloakoidc_authconfig" {
   count = local.rancher_auth_enabled ? 1 : 0
 
-  triggers = {
+  triggers = merge({
     manifest_sha = sha256(yamlencode(local.rancher_keycloakoidc_manifest))
-  }
+    }, local.rancher_helm_enabled ? {
+    deployment_mode = local.rancher_deployment_mode_value
+    version         = local.rancher_version_value
+  } : {})
 
   provisioner "local-exec" {
     command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl apply -f ${local_sensitive_file.rancher_keycloakoidc_authconfig[0].filename}"
@@ -1201,9 +1321,12 @@ resource "local_file" "rancher_auth_global_role_bindings" {
 resource "null_resource" "rancher_auth_global_role_bindings" {
   for_each = local.rancher_auth_global_role_bindings
 
-  triggers = {
+  triggers = merge({
     manifest_sha = sha256(yamlencode(each.value))
-  }
+    }, local.rancher_helm_enabled ? {
+    deployment_mode = local.rancher_deployment_mode_value
+    version         = local.rancher_version_value
+  } : {})
 
   provisioner "local-exec" {
     command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl apply -f ${local_file.rancher_auth_global_role_bindings[each.key].filename}"
@@ -1215,9 +1338,12 @@ resource "null_resource" "rancher_auth_global_role_bindings" {
 resource "null_resource" "rancher_managed_resource_patches" {
   for_each = !var.skip_platform && local.rancher_enabled ? local.rancher_managed_resource_patches : {}
 
-  triggers = {
+  triggers = merge({
     patch_sha = sha256(each.value.patch)
-  }
+    }, local.rancher_helm_enabled ? {
+    deployment_mode = local.rancher_deployment_mode_value
+    version         = local.rancher_version_value
+  } : {})
 
   provisioner "local-exec" {
     command = "for i in $(seq 1 60); do KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n ${each.value.namespace} get ${each.value.resource} ${each.value.name} >/dev/null 2>&1 && break; if [ \"$i\" -eq 60 ]; then KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n ${each.value.namespace} get ${each.value.resource} ${each.value.name}; exit 1; fi; sleep 10; done; KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} kubectl -n ${each.value.namespace} patch ${each.value.resource} ${each.value.name} --type=strategic --patch '${each.value.patch}'"
@@ -1242,7 +1368,7 @@ resource "kubernetes_annotations" "rancher_managed_probe_exceptions" {
 
   annotations = {
     "policy.pve-k8s-talos.io/allow-missing-probes" = "true"
-    "policy.pve-k8s-talos.io/exception-reason"     = "Rancher-managed Fleet controllers do not expose supported Kubernetes readiness and liveness health endpoints."
+    "policy.pve-k8s-talos.io/exception-reason"     = try(each.value.reason, "Rancher-managed Fleet controllers do not expose supported Kubernetes readiness and liveness health endpoints.")
   }
 
   field_manager = "opentofu-platform-exceptions"
