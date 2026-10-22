@@ -176,6 +176,19 @@ after every Helm platform apply, including applies without provisioner changes,
 before deployment provenance is advanced. Failure reports pending object names
 and release statuses without dumping values, Secrets, or operation tokens.
 Failed/pending Helm operations are never automatically rolled back or deleted.
+The gate includes all release statuses with explicit Helm 3/4-compatible filters.
+If the latest
+Rancher operation's `helm` container has terminated but its release remains
+pending/failed for ninety seconds, deployment stops with the release, revision,
+operation name and exit code. A running proxy sidecar does not count as a running
+Helm operation; even exit code zero does not prove release-state persistence.
+A new revision or operation resets the grace period. Operation tokens, command
+arguments and raw logs are never included in diagnostics.
+
+Both the pre-upgrade gate and final readiness check also require a successful
+server-side dry-run Secret creation through the registered Rancher Secret
+webhook. This exercises the API server's actual admission path without storing
+a Secret. Ready replicas and EndpointSlices alone cannot prove this path works.
 
 The official Rancher chart's `webhook` values configure two webhook replicas,
 resources, `infra-high` priority, and a PodDisruptionBudget with `minAvailable: 1`
@@ -185,14 +198,23 @@ installation, the platform applies the availability patch and waits for two
 stable replicas. The patch makes
 that strategy explicit (`maxUnavailable: 0`, `maxSurge: 1`), adds a readiness
 probe at the official HTTPS `/healthz` endpoint, and requires ten seconds of
-readiness before retiring an old pod. Keeping a serving webhook prevents its
-Secret validation from blocking Helm's own release-state writes during a
-rollout. This does not guarantee availability after simultaneous pod/node
-failures or eliminate failures unrelated to bootstrap.
+readiness before retiring an old pod. This reduces the risk of its Secret
+validation blocking Helm's own release-state writes during a rollout.
+
+Fresh installations remain a separate limitation: the pre-upgrade preparation
+skips an absent webhook, and the official nested chart does not expose readiness
+or minimum-ready-time settings. A clean bootstrap has still left the webhook and
+Turtles releases pending after admission connection failures despite two ready
+replicas. The checks above detect and report this condition; they do not repair
+the persisted release or eliminate the initial registration race. A successful
+repeat deployment on an already migrated cluster is not evidence that a fresh
+installation is fixed. Verify any future bootstrap fix on a disposable fresh
+installation before claiming unattended migration support.
 
 Sources: [Rancher config template](https://github.com/rancher/rancher/blob/v2.15.2/chart/templates/configMap.yaml),
 [webhook chart values](https://github.com/rancher/charts/blob/release-v2.15/charts/rancher-webhook/110.0.3%2Bup0.11.3/values.yaml),
-[webhook Deployment and health endpoints](https://github.com/rancher/charts/blob/release-v2.15/charts/rancher-webhook/110.0.3%2Bup0.11.3/templates/deployment.yaml).
+[webhook Deployment and health endpoints](https://github.com/rancher/charts/blob/release-v2.15/charts/rancher-webhook/110.0.3%2Bup0.11.3/templates/deployment.yaml),
+[Rancher operation/container status handling](https://github.com/rancher/rancher/blob/v2.15.2/pkg/controllers/dashboard/helm/operations.go).
 
 The post-renderer uses Python 3/PyYAML, adds ownership labels, and removes the
 chart's private PriorityClass in favor of the shared `infra-observability`

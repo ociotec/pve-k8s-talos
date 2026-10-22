@@ -161,6 +161,64 @@ class RancherLocalAdminTest(unittest.TestCase):
 
 
 class RancherReadinessTest(unittest.TestCase):
+    def test_admission_check_requires_the_secret_webhook_and_never_stores_a_secret(self):
+        with patch.object(READY, "kubectl", return_value=None), patch.object(READY.subprocess, "run") as run:
+            self.assertIn("not registered", READY.admission_pending())
+            run.assert_not_called()
+        config = {"webhooks": [{"name": "rancher.cattle.io.secrets"}]}
+        failed = subprocess.CompletedProcess([], 1, "", "connection refused; private response")
+        with patch.object(READY, "kubectl", return_value=config), patch.object(READY.subprocess, "run", return_value=failed) as run:
+            self.assertEqual(READY.admission_pending(), "Rancher Secret admission unavailable")
+            self.assertIn("--dry-run=server", run.call_args.args[0])
+            probe = json.loads(run.call_args.kwargs["input"])
+            self.assertEqual(probe["kind"], "Secret")
+            self.assertNotIn("data", probe)
+            self.assertNotIn("stringData", probe)
+
+    def test_admission_permissions_are_not_retried(self):
+        config = {"webhooks": [{"name": "rancher.cattle.io.secrets"}]}
+        forbidden = subprocess.CompletedProcess([], 1, "", "Forbidden: private response")
+        with patch.object(READY, "kubectl", return_value=config), patch.object(READY.subprocess, "run", return_value=forbidden):
+            with self.assertRaisesRegex(RuntimeError, "denied the admission"):
+                READY.admission_pending()
+
+    def test_ready_replicas_do_not_mask_a_broken_admission_path(self):
+        repos, workloads, helm = self.inventory()
+        with patch.object(READY, "kubectl", side_effect=[repos, workloads]), patch.object(READY.subprocess, "run", return_value=helm), patch.object(READY, "admission_pending", return_value="Secret admission unavailable"):
+            self.assertEqual(READY.systems_pending(["system/webhook"], ["system/webhook"]), "Secret admission unavailable")
+
+    def test_completed_helm_container_with_running_proxy_is_stalled(self):
+        operation = {"metadata": {"name": "operation-1", "creationTimestamp": "2026-01-01T00:00:00Z"},
+                     "status": {"namespace": "system", "releaseName": "webhook", "podNamespace": "cattle-system", "podName": "operation-1"}}
+        pod = {"status": {"containerStatuses": [
+            {"name": "proxy", "state": {"running": {}}},
+            {"name": "helm", "state": {"terminated": {"exitCode": 0}}}]}}
+        clock = {}
+        with patch.object(READY, "kubectl", side_effect=lambda *a: {"items": [operation]} if a[1].startswith("operations") else pod), patch.object(READY.time, "monotonic", side_effect=[0, 91]):
+            READY.check_stalled_operations({"system/webhook": "pending-install"}, clock)
+            with self.assertRaisesRegex(RuntimeError, "system/webhook.*exit 0"):
+                READY.check_stalled_operations({"system/webhook": "pending-install"}, clock)
+
+    def test_a_running_helm_container_is_allowed_to_finish(self):
+        operation = {"metadata": {"name": "operation-1", "creationTimestamp": "2026-01-01T00:00:00Z"},
+                     "status": {"namespace": "system", "releaseName": "webhook", "podNamespace": "cattle-system", "podName": "operation-1"}}
+        pod = {"status": {"containerStatuses": [{"name": "helm", "state": {"running": {}}}]}}
+        clock = {"old": 0}
+        with patch.object(READY, "kubectl", side_effect=lambda *a: {"items": [operation]} if a[1].startswith("operations") else pod):
+            READY.check_stalled_operations({"system/webhook": "pending-upgrade"}, clock)
+        self.assertEqual(clock, {})
+
+    def test_new_helm_revision_resets_stall_grace_period(self):
+        operation = {"metadata": {"name": "operation-1"}, "status": {
+            "namespace": "system", "releaseName": "webhook", "podNamespace": "cattle-system", "podName": "operation-1"}}
+        pod = {"status": {"containerStatuses": [{"name": "helm", "state": {"terminated": {"exitCode": 123}}}]}}
+        clock = {}
+        with patch.object(READY, "kubectl", side_effect=lambda *a: {"items": [operation]} if a[1].startswith("operations") else pod), patch.object(READY.time, "monotonic", side_effect=[0, 91]):
+            READY.check_stalled_operations({"system/webhook": "pending-upgrade (revision 1)"}, clock)
+            READY.check_stalled_operations({"system/webhook": "pending-upgrade (revision 2)"}, clock)
+        self.assertEqual(len(clock), 1)
+        self.assertEqual(next(iter(clock.values())), 91)
+
     def test_existing_webhook_is_prepared_before_waiting(self):
         events = []
         def query(*args):
@@ -228,7 +286,7 @@ class RancherReadinessTest(unittest.TestCase):
 
     def pending(self, **kwargs):
         repos, workloads, helm = self.inventory(**kwargs)
-        with patch.object(READY, "kubectl", side_effect=[repos, workloads]), patch.object(READY.subprocess, "run", return_value=helm):
+        with patch.object(READY, "kubectl", side_effect=[repos, workloads]), patch.object(READY.subprocess, "run", return_value=helm), patch.object(READY, "admission_pending", return_value=None):
             return READY.systems_pending(["system/webhook"], ["system/webhook"])
 
     def test_ready_pods_do_not_hide_a_pending_helm_release(self):

@@ -73,6 +73,61 @@ def deployment_ready(obj, replicas=None):
             and status.get("replicas", 0) == desired)
 
 
+def admission_pending():
+    config = kubectl("get", "validatingwebhookconfiguration", "rancher.cattle.io",
+                     "--ignore-not-found", "-o", "json")
+    if not config or not any(w.get("name") == "rancher.cattle.io.secrets"
+                             for w in config.get("webhooks", [])):
+        return "Rancher Secret admission is not registered"
+    # Exercise API server -> Service -> webhook, not just pod health. Nothing is stored.
+    probe = {"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+             "metadata": {"generateName": "rancher-admission-check-", "namespace": "cattle-system"}}
+    result = subprocess.run(["kubectl", "--request-timeout=30s", "create",
+                             "--dry-run=server", "-f", "-", "-o", "name"],
+                            input=json.dumps(probe), capture_output=True, text=True, timeout=40)
+    if result.returncode and any(word in result.stderr.lower() for word in ("forbidden", "unauthorized")):
+        raise RuntimeError("Kubernetes denied the admission readiness check")
+    return "Rancher Secret admission unavailable" if result.returncode else None
+
+
+def check_stalled_operations(pending, stalled_since):
+    """Detect a terminated Helm container even if its proxy keeps the pod Running."""
+    operations = kubectl("get", "operations.catalog.cattle.io", "-A", "-o", "json")
+    if operations is None:
+        stalled_since.clear()
+        return
+    latest = {}
+    for operation in sorted(operations["items"], key=lambda o: o["metadata"].get("creationTimestamp", "")):
+        status = operation.get("status") or {}
+        release = status.get("namespace", "") + "/" + status.get("releaseName", "")
+        if release in pending:
+            latest[release] = operation
+    observed = set()
+    for release, operation in latest.items():
+        status = operation.get("status") or {}
+        if not status.get("podName") or not status.get("podNamespace"):
+            continue
+        pod = kubectl("get", "pod", status["podName"], "-n", status["podNamespace"],
+                      "--ignore-not-found", "-o", "json")
+        for container in ((pod or {}).get("status") or {}).get("containerStatuses") or []:
+            terminated = (container.get("state") or {}).get("terminated")
+            if container.get("name") != "helm" or terminated is None:
+                continue
+            key = (release, pending[release], operation["metadata"]["name"])
+            observed.add(key)
+            now = time.monotonic()
+            since = stalled_since.setdefault(key, now)
+            # Allow reconciliation; a new revision/operation resets this clock.
+            if now - since >= 90:
+                raise RuntimeError("Rancher Helm stalled: " + release + "=" + pending[release]
+                                   + "; operation " + operation["metadata"]["name"]
+                                   + " helm container terminated (exit " + str(terminated.get("exitCode"))
+                                   + "). Inspect its helm container logs; release state was not changed.")
+    for key in list(stalled_since):
+        if key not in observed:
+            del stalled_since[key]
+
+
 def prepare_webhook(patch, timeout=600):
     # Stabilize existing replicas before changing Helm values, not afterwards.
     objects = kubectl("get", "deployments", "-n", "cattle-system", "-o", "json")
@@ -87,12 +142,12 @@ def prepare_webhook(patch, timeout=600):
     def pending():
         obj = kubectl("get", "deployment", "rancher-webhook", "-n", "cattle-system", "-o", "json")
         if deployment_ready(obj, 2) and obj["spec"].get("minReadySeconds", 0) >= 10:
-            return None
+            return admission_pending()
         return "two stable webhook replicas are not yet available"
     wait(pending, "webhook availability before Helm", timeout=timeout, stable=2)
 
 
-def systems_pending(deployments, releases, replicas=None):
+def systems_pending(deployments, releases, replicas=None, stalled_since=None):
     repos = kubectl("get", "clusterrepos.catalog.cattle.io", "-o", "json")
     if repos is None:
         return "catalog API unavailable"
@@ -102,15 +157,26 @@ def systems_pending(deployments, releases, replicas=None):
     missing = {"rancher-charts", "rancher-partner-charts", "rancher-rke2-charts"} - downloaded
     if missing:
         return "catalogs: " + ", ".join(sorted(missing))
-    result = subprocess.run(["helm", "list", "-A", "--max", "10000", "-o", "json"],
+    # Explicit filters work with Helm 3 and 4; Helm 4 removed --all.
+    result = subprocess.run(["helm", "list", "-A", "--deployed", "--pending", "--failed",
+                             "--uninstalling", "--uninstalled", "--superseded",
+                             "--max", "10000", "-o", "json"],
                             capture_output=True, text=True, timeout=40)
     if result.returncode:
+        if "unknown flag" in result.stderr.lower():
+            raise RuntimeError("Installed Helm does not support the release readiness query")
         return "Helm release query unavailable"
-    statuses = {(r["namespace"] + "/" + r["name"]): r["status"] for r in json.loads(result.stdout)}
+    inventory = {r["namespace"] + "/" + r["name"]: r for r in json.loads(result.stdout)}
+    statuses = {name: release["status"] for name, release in inventory.items()}
     pending = [name + "=" + statuses.get(name, "missing")
                for name in releases if statuses.get(name) != "deployed"]
     if pending:
+        if stalled_since is not None:
+            check_stalled_operations({name: statuses[name] + " (revision " + str(inventory[name].get("revision", "unknown")) + ")"
+                                      for name in releases if name in statuses and statuses[name] != "deployed"}, stalled_since)
         return "Helm: " + ", ".join(pending)
+    if stalled_since is not None:
+        stalled_since.clear()
     objects = kubectl("get", "deployments", "-A", "-o", "json")
     if objects is None:
         return "Deployment API unavailable"
@@ -120,7 +186,7 @@ def systems_pending(deployments, releases, replicas=None):
         if deployment_ready(obj, (replicas or {}).get(name)):
             ready.add(name)
     missing = set(deployments) - ready
-    return "Deployments: " + ", ".join(sorted(missing)) if missing else None
+    return "Deployments: " + ", ".join(sorted(missing)) if missing else admission_pending()
 
 
 def openapi_pending():
@@ -143,10 +209,11 @@ def main():
         parser.error("systems requires --checks-file")
     if args.phase == "prepare-webhook" and not args.patch_file:
         parser.error("prepare-webhook requires --patch-file")
+    stalled_since = {}
     def check():
         try:
             return (openapi_pending() if args.phase == "openapi"
-                    else systems_pending(**json.loads(args.checks_file.read_text())))
+                    else systems_pending(**json.loads(args.checks_file.read_text()), stalled_since=stalled_since))
         except subprocess.TimeoutExpired:
             return "readiness query timed out"
     try:
