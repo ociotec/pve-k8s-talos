@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded, read-only gates for Rancher's asynchronous bootstrap."""
+"""Bounded webhook preparation and readiness gates for Rancher bootstrap."""
 
 import argparse
 import json
@@ -61,6 +61,37 @@ def retry_http(action, timeout=180):
         time.sleep(2)
 
 
+def deployment_ready(obj, replicas=None):
+    if not obj:
+        return False
+    status, spec = obj.get("status", {}), obj["spec"]
+    desired = spec.get("replicas", 1)
+    return (desired > 0 and desired == (desired if replicas is None else replicas)
+            and status.get("observedGeneration", 0) >= obj["metadata"]["generation"]
+            and status.get("updatedReplicas", 0) == desired
+            and status.get("availableReplicas", 0) == desired
+            and status.get("replicas", 0) == desired)
+
+
+def prepare_webhook(patch, timeout=600):
+    # Stabilize existing replicas before changing Helm values, not afterwards.
+    objects = kubectl("get", "deployments", "-n", "cattle-system", "-o", "json")
+    if objects is None:
+        raise RuntimeError("Cannot inspect the existing Rancher webhook")
+    if not any(o["metadata"]["name"] == "rancher-webhook" for o in objects["items"]):
+        return  # A fresh webhook is created exclusively by its Helm chart.
+    result = kubectl("patch", "deployment", "rancher-webhook", "-n", "cattle-system",
+                     "--type=strategic", "-p", json.dumps(patch), "-o", "json")
+    if result is None:
+        raise RuntimeError("Failed to prepare Rancher webhook availability")
+    def pending():
+        obj = kubectl("get", "deployment", "rancher-webhook", "-n", "cattle-system", "-o", "json")
+        if deployment_ready(obj, 2) and obj["spec"].get("minReadySeconds", 0) >= 10:
+            return None
+        return "two stable webhook replicas are not yet available"
+    wait(pending, "webhook availability before Helm", timeout=timeout, stable=2)
+
+
 def systems_pending(deployments, releases, replicas=None):
     repos = kubectl("get", "clusterrepos.catalog.cattle.io", "-o", "json")
     if repos is None:
@@ -85,15 +116,8 @@ def systems_pending(deployments, releases, replicas=None):
         return "Deployment API unavailable"
     ready = set()
     for obj in objects["items"]:
-        status, spec = obj.get("status", {}), obj["spec"]
-        desired = spec.get("replicas", 1)
         name = obj["metadata"]["namespace"] + "/" + obj["metadata"]["name"]
-        if desired != (replicas or {}).get(name, desired):
-            continue
-        if (desired > 0 and status.get("observedGeneration", 0) >= obj["metadata"]["generation"]
-                and status.get("updatedReplicas", 0) == desired
-                and status.get("availableReplicas", 0) == desired
-                and status.get("replicas", 0) == desired):
+        if deployment_ready(obj, (replicas or {}).get(name)):
             ready.add(name)
     missing = set(deployments) - ready
     return "Deployments: " + ", ".join(sorted(missing)) if missing else None
@@ -110,12 +134,15 @@ def openapi_pending():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phase", choices=["systems", "openapi"])
+    parser.add_argument("phase", choices=["systems", "openapi", "prepare-webhook"])
     parser.add_argument("--checks-file", type=Path)
+    parser.add_argument("--patch-file", type=Path)
     parser.add_argument("--timeout", type=int, default=1800)
     args = parser.parse_args()
     if args.phase == "systems" and not args.checks_file:
         parser.error("systems requires --checks-file")
+    if args.phase == "prepare-webhook" and not args.patch_file:
+        parser.error("prepare-webhook requires --patch-file")
     def check():
         try:
             return (openapi_pending() if args.phase == "openapi"
@@ -123,6 +150,10 @@ def main():
         except subprocess.TimeoutExpired:
             return "readiness query timed out"
     try:
+        if args.phase == "prepare-webhook":
+            prepare_webhook(json.loads(args.patch_file.read_text()), timeout=args.timeout)
+            print("Rancher webhook prepared before Helm.")
+            return 0
         wait(check, "Rancher " + args.phase, args.timeout, stable=2 if args.phase == "systems" else 1)
         print("Rancher " + args.phase + " readiness verified.")
         return 0

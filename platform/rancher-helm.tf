@@ -89,6 +89,7 @@ resource "helm_release" "rancher" {
     kubernetes_secret_v1.preissued_tls,
     kubernetes_secret_v1.rancher_ca,
     kubernetes_secret_v1.rancher_bootstrap,
+    null_resource.rancher_webhook_prepare,
   ]
 }
 
@@ -143,6 +144,27 @@ resource "null_resource" "rancher_local_admin" {
     command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} python3 ${path.module}/ensure-rancher-admin.py"
   }
   depends_on = [null_resource.rancher_ready, helm_release.rancher]
+}
+
+resource "local_file" "rancher_webhook_patch" {
+  count           = local.rancher_helm_enabled ? 1 : 0
+  filename        = "${path.module}/.generated-rancher-webhook-patch.json"
+  content         = local.rancher_managed_resource_patches["cattle-system/rancher-webhook"].patch
+  file_permission = "0644"
+}
+
+resource "null_resource" "rancher_webhook_prepare" {
+  count = local.rancher_helm_enabled ? 1 : 0
+  triggers = {
+    script_sha = filesha256("${path.module}/rancher_readiness.py")
+    patch_sha  = sha256(local_file.rancher_webhook_patch[0].content)
+    values_sha = sha256(yamlencode(local.rancher_helm_values))
+    version    = local.rancher_chart_version_value
+  }
+  provisioner "local-exec" {
+    command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} python3 ${path.module}/rancher_readiness.py prepare-webhook --timeout 600 --patch-file ${local_file.rancher_webhook_patch[0].filename}"
+  }
+  depends_on = [terraform_data.rancher_mode_guard, kubernetes_manifest.platform_namespaces]
 }
 
 locals {

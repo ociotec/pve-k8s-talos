@@ -180,7 +180,9 @@ Failed/pending Helm operations are never automatically rolled back or deleted.
 The official Rancher chart's `webhook` values configure two webhook replicas,
 resources, `infra-high` priority, and a PodDisruptionBudget with `minAvailable: 1`
 from its first installation. With two replicas Kubernetes' default rolling
-strategy permits zero unavailable replicas. The subsequent platform patch makes
+strategy permits zero unavailable replicas. Before upgrading an existing
+installation, the platform applies the availability patch and waits for two
+stable replicas. The patch makes
 that strategy explicit (`maxUnavailable: 0`, `maxSurge: 1`), adds a readiness
 probe at the official HTTPS `/healthz` endpoint, and requires ten seconds of
 readiness before retiring an old pod. Keeping a serving webhook prevents its

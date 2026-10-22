@@ -161,6 +161,21 @@ class RancherLocalAdminTest(unittest.TestCase):
 
 
 class RancherReadinessTest(unittest.TestCase):
+    def test_existing_webhook_is_prepared_before_waiting(self):
+        events = []
+        def query(*args):
+            events.append(args[0])
+            return {"items": [{"metadata": {"name": "rancher-webhook"}}]}
+        with patch.object(READY, "kubectl", side_effect=query), patch.object(READY, "wait", side_effect=lambda *a, **kw: events.append("wait")):
+            READY.prepare_webhook({"spec": {"replicas": 2, "minReadySeconds": 10}})
+        self.assertEqual(events, ["get", "patch", "wait"])
+
+    def test_fresh_install_does_not_create_a_webhook_outside_helm(self):
+        with patch.object(READY, "kubectl", return_value={"items": []}) as query, patch.object(READY, "wait") as wait:
+            READY.prepare_webhook({"spec": {"replicas": 2}})
+        query.assert_called_once()
+        wait.assert_not_called()
+
     def test_auth_config_must_exist_and_be_enabled(self):
         with patch.object(READY, "kubectl", side_effect=[None, {"enabled": True}]):
             self.assertIsNotNone(READY.auth_pending())
@@ -255,6 +270,7 @@ class RancherVersionIntegrationTest(unittest.TestCase):
         result = subprocess.run(["tofu", "-chdir=" + os.environ["RANCHER_TEST_WORKSPACE"], "graph", "-type=plan"],
                                 text=True, capture_output=True, check=True)
         self.assertIn('"[root] null_resource.rancher_managed_resource_patches (expand)" -> "[root] null_resource.rancher_system_ready (expand)"', result.stdout)
+        self.assertIn('"[root] helm_release.rancher (expand)" -> "[root] null_resource.rancher_webhook_prepare (expand)"', result.stdout)
 
     def test_webhook_chart_settings_match_the_final_patch(self):
         result = subprocess.run(["tofu", "-chdir=" + os.environ["RANCHER_TEST_WORKSPACE"], "console", "-no-color"],
