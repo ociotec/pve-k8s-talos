@@ -16,6 +16,10 @@ locals {
   keycloak_hostname        = "keycloak.${local.domain}"
   keycloak_tls_secret_name = "keycloak-tls"
   keycloak_image_tag       = "26.7.0"
+  # Optional repository without tag; defaults to the upstream Keycloak image.
+  keycloak_image_repository = "quay.io/keycloak/keycloak"
+  # Extra startup options; use ["--optimized"] only for images prepared with kc.sh build.
+  keycloak_extra_args = []
   # Tracing is enabled by default. Uncomment to disable it.
   # keycloak_tracing_enabled = false
   # The default sampler ratio is 1 so every request is traced. Uncomment to sample 10%.

@@ -137,6 +137,9 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
     Redpanda Console, and operational tool pods use `infra-observability`.
 - `identity_constants.tf`
   - Keycloak hostname, TLS secret, PostgreSQL sizing/image, bootstrap admin settings, realm groups, and optional OIDC clients for consumers such as Rancher, Portainer, and Grafana.
+  - Set `keycloak_image_repository` (without tag) and `keycloak_image_tag` separately. The repository defaults to `quay.io/keycloak/keycloak` when omitted; custom images must support the existing Keycloak startup arguments, environment variables, and health endpoints.
+  - `keycloak_extra_args` is an optional literal list of extra startup options (default: `[]`), for example `["--optimized"]`. Use one `--option=value` string per valued option. The platform keeps `start`, `--http-enabled`, `--hostname`, and `--proxy-headers`; extras cannot override those options. Kubernetes arguments replace the image's `CMD`.
+  - Use `--optimized` only for images prepared with `kc.sh build`, such as `gcs/keycloak`: it skips preparation at startup. Without it, preparation runs at startup. To add a Java provider, copy its JAR into `/opt/keycloak/providers/` in a derived image and run `kc.sh build` again. Provider or build-time option changes require rebuilding; database credentials and hostname remain configurable at startup.
 - `monitoring_constants.tf`
   - Storage class, image versions, hostnames, and optional Keycloak auth settings for Grafana.
 - `platform_constants.tf`

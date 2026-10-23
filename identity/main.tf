@@ -30,6 +30,22 @@ provider "kubernetes" {
 locals {
   cluster_credentials              = try(jsondecode(file("${path.module}/credentials.json")), {})
   identity_constants_source        = file("${path.module}/constants.tf")
+  keycloak_image_repository_value = can(regex("(?m)^\\s*keycloak_image_repository\\s*=\\s*\"([^\"]+)\"\\s*$", local.identity_constants_source)[0]) ? (
+    regex("(?m)^\\s*keycloak_image_repository\\s*=\\s*\"([^\"]+)\"\\s*$", local.identity_constants_source)[0]
+  ) : "quay.io/keycloak/keycloak"
+  # Read an optional literal string list without requiring a local in older clusters.
+  # Quoted strings and comments are tokens so brackets/quotes inside them stay intact.
+  keycloak_extra_args_source = try(regex("(?ms)^\\s*keycloak_extra_args\\s*=\\s*\\[((?:\"(?:[^\"\\\\]|\\\\.)*\"|#[^\\r\\n]*|//[^\\r\\n]*|/\\*.*?\\*/|[^\"\\]])*)\\]", local.identity_constants_source)[0], "")
+  keycloak_extra_args_token_pattern = "\"(?:[^\"\\\\]|\\\\.)*\"|#[^\\r\\n]*|//[^\\r\\n]*|/\\*[^*]*\\*+(?:[^/*][^*]*\\*+)*/"
+  keycloak_extra_args_tokens = regexall(local.keycloak_extra_args_token_pattern, local.keycloak_extra_args_source)
+  keycloak_extra_args_is_literal = !can(regex("(?m)^\\s*keycloak_extra_args\\s*=", local.identity_constants_source)) || (
+    can(regex("(?ms)^\\s*keycloak_extra_args\\s*=\\s*\\[", local.identity_constants_source)) &&
+    trimspace(replace(replace(local.keycloak_extra_args_source, "/${local.keycloak_extra_args_token_pattern}/", ""), "/[,[:space:]]/", "")) == ""
+  )
+  keycloak_extra_args_value = [
+    for token in local.keycloak_extra_args_tokens : jsondecode(token)
+    if startswith(token, "\"")
+  ]
   keycloak_tracing_enabled_value = can(regex("(?m)^\\s*keycloak_tracing_enabled\\s*=\\s*(true|false)\\s*$", local.identity_constants_source)[0]) ? (
     tobool(regex("(?m)^\\s*keycloak_tracing_enabled\\s*=\\s*(true|false)\\s*$", local.identity_constants_source)[0])
   ) : true
@@ -290,6 +306,8 @@ locals {
     for doc in split("\n---\n", templatefile("${path.module}/keycloak.yaml", {
       identity_namespace          = local.identity_namespace
       keycloak_hostname           = local.keycloak_hostname
+      keycloak_image_repository    = local.keycloak_image_repository_value
+      keycloak_extra_args          = local.keycloak_extra_args_value
       keycloak_image_tag          = local.keycloak_image_tag
       keycloak_tracing_enabled    = local.keycloak_tracing_enabled_value
       keycloak_tracing_sampler_ratio = local.keycloak_tracing_sampler_ratio_value
@@ -453,11 +471,23 @@ resource "kubernetes_secret_v1" "keycloak_admin" {
 resource "kubernetes_manifest" "identity_other" {
   for_each = !var.skip_identity ? local.identity_other_by_id : tomap({})
   manifest = each.value
+  field_manager {
+    # Reclaim Keycloak settings changed manually through an operational UI.
+    force_conflicts = each.value.kind == "Deployment" && each.value.metadata.name == "keycloak"
+  }
   computed_fields = [
     "metadata.annotations",
     "spec.template.metadata.annotations",
   ]
   lifecycle {
+    precondition {
+      condition = local.keycloak_extra_args_is_literal && alltrue([
+        for arg in local.keycloak_extra_args_value :
+        can(regex("^--[^=[:space:]]+(=.*)?$", arg)) &&
+        !can(regex("^--(http-enabled|hostname|proxy-headers)(=|$)", arg))
+      ])
+      error_message = "keycloak_extra_args must contain --option or --option=value strings; http-enabled, hostname and proxy-headers are managed by the platform."
+    }
     ignore_changes = [
       manifest.metadata.annotations,
       manifest.spec.template.metadata.annotations,

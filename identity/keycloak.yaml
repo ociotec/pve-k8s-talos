@@ -237,9 +237,12 @@ spec:
               memory: 32Mi
       containers:
         - name: keycloak
-          image: quay.io/keycloak/keycloak:${keycloak_image_tag}
+          image: ${keycloak_image_repository}:${keycloak_image_tag}
           args:
             - start
+%{ for arg in keycloak_extra_args ~}
+            - ${jsonencode(arg)}
+%{ endfor ~}
             - --http-enabled=true
             - --hostname=https://${keycloak_hostname}
             - --proxy-headers=xforwarded
