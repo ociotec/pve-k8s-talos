@@ -208,6 +208,8 @@ set -euo pipefail
 cluster_out_dir="$FIXTURES"
 cluster_root_workspace="$FIXTURES"
 cluster_talosconfig_path=unused
+cluster_kubeconfig_path=unused
+kubectl() { :; }
 require_cmd() { :; }
 error() { echo "$*" >&2; }
 message() { :; }

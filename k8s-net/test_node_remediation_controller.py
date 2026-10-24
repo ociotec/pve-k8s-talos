@@ -273,5 +273,38 @@ class ControllerTest(unittest.TestCase):
         self.assertEqual(worker["spec"]["taints"], [])
 
 
+
+    def test_planned_maintenance_suspends_suspicion_until_expiry(self):
+        for state in ('', 'suspect'):
+            worker = node('worker-1', state=state, state_age=20, ready=False)
+            worker['metadata']['annotations'].update({
+                remediation.MAINTENANCE_OWNER: 'deployment-test',
+                remediation.MAINTENANCE_UNTIL: remediation.timestamp(remediation.utcnow() + dt.timedelta(minutes=10)),
+            })
+            controller = self.controller(worker)
+            controller.reconcile('worker-1', {'host': 'pve-1', 'vmid': 101, 'fence_cidrs': ['192.0.2.10/32']})
+            self.assertEqual(controller.pve.actions, [])
+            self.assertEqual(worker['metadata']['annotations'].get(remediation.STATE, ''), state)
+
+    def test_expired_or_invalid_maintenance_does_not_disable_recovery(self):
+        for until in (ago(1), 'not a timestamp'):
+            worker = node('worker-1', ready=False)
+            worker['metadata']['annotations'].update({remediation.MAINTENANCE_OWNER: 'deployment-test', remediation.MAINTENANCE_UNTIL: until})
+            controller = self.controller(worker)
+            controller.reconcile('worker-1', {'host': 'pve-1', 'vmid': 101, 'fence_cidrs': ['192.0.2.10/32']})
+            self.assertEqual(worker['metadata']['annotations'][remediation.STATE], 'suspect')
+
+
+    @mock.patch.object(remediation.time, 'sleep', return_value=None)
+    def test_maintenance_never_interrupts_an_execution_fence(self, _sleep):
+        worker=node('worker-1',state='fencing',ready=False)
+        worker['metadata']['annotations'].update({remediation.MAINTENANCE_OWNER:'deployment-test',remediation.MAINTENANCE_UNTIL:remediation.timestamp(remediation.utcnow()+dt.timedelta(minutes=10))})
+        controller=self.controller(worker)
+        controller.kube.attachments=[{'metadata':{'name':'rbd'}}]
+        controller.reconcile('worker-1',{'host':'pve-1','vmid':101,'fence_cidrs':['192.0.2.10/32']})
+        self.assertEqual(controller.pve.actions,['stop'])
+        self.assertEqual(worker['metadata']['annotations'][remediation.STATE],'storage-fencing')
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,15 @@
 resource "talos_machine_secrets" "machine_secrets" {
 }
 
+# Reconcile only Talos's proxy; other modules retain ownership of DNS and RBAC.
+output "kube_proxy_configuration" {
+  value = {
+    enabled = !try(yamldecode(split("\n---\n", values(local.controlplane_machine_config)[0])[0]).cluster.proxy.disabled, false)
+    image   = try(yamldecode(split("\n---\n", values(local.controlplane_machine_config)[0])[0]).cluster.proxy.image, "")
+  }
+  sensitive = true
+}
+
 data "talos_client_configuration" "talosconfig" {
   cluster_name         = var.constants["talos"]["cluster_name"]
   client_configuration = talos_machine_secrets.machine_secrets.client_configuration
@@ -27,7 +36,9 @@ locals {
   } : local.worker_vms
   machine_configuration_apply_modes = {
     for name, _ in var.vms : name => (
-      local.cluster_already_bootstrapped ? "staged_if_needing_reboot" : "auto"
+      # Steady-state changes activate one node at a time in deploy.sh, including
+      # hot image/config changes that would otherwise restart every API server.
+      local.cluster_already_bootstrapped && var.defer_node_config_activation ? "staged" : "auto"
     )
   }
   network_interface_patches = {

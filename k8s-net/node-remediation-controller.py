@@ -25,6 +25,8 @@ COOLDOWN_UNTIL = "remediation.pve-k8s-talos/cooldown-until"
 LAST_ERROR = "remediation.pve-k8s-talos/last-error"
 HAD_RBD_ATTACHMENT = "remediation.pve-k8s-talos/had-rbd-attachment"
 DISABLED_LABEL = "remediation.pve-k8s-talos/disabled"
+MAINTENANCE_UNTIL = "pve-k8s-talos/maintenance-until"
+MAINTENANCE_OWNER = "pve-k8s-talos/maintenance-owner"
 OUT_OF_SERVICE = "node.kubernetes.io/out-of-service"
 QUARANTINE = "remediation.pve-k8s-talos/quarantine"
 TAINTS = (
@@ -482,6 +484,17 @@ class Controller:
         now = utcnow()
         lease_age = self.lease_age(node_name)
         self.publish_node_metrics(node_name, node, lease_age, now)
+
+        # Planned work may suspend suspicion, never an execution/storage fence
+        # already in progress. Expired or malformed leases restore normal recovery.
+        if state in ("", "suspect", "cooldown") and annotations.get(MAINTENANCE_OWNER):
+            try:
+                maintenance_until = parse_time(annotations.get(MAINTENANCE_UNTIL))
+                if maintenance_until and now < maintenance_until <= now + dt.timedelta(hours=1):
+                    HealthHandler.publish_phase(node_name, "disabled")
+                    return
+            except (ValueError, TypeError):
+                pass
 
         if labels.get(DISABLED_LABEL, "false").lower() == "true" and not state:
             return

@@ -81,6 +81,7 @@ spec:
         prometheus.io/port: "8080"
         prometheus.io/scrape: "true"
         remediation.pve-k8s-talos/config-checksum: ${config_checksum}
+        pve-k8s-talos/maintenance-protocol: "1"
       labels:
         app.kubernetes.io/name: node-remediation-controller
         app.kubernetes.io/instance: node-remediation-controller

@@ -13,6 +13,8 @@ Usage:
 Options:
   --cluster-name <name>     Cluster name used for log messages.
   --ceph-constants <path>   Path to ceph_constants.tf.
+  --inspect-only           Inventory and check dependencies without deleting anything.
+  --preflight-only         Also reject retained backups; do not delete anything.
 
 Environment:
   CEPH_SSH_USER             SSH user for the Ceph SSH host. Default: root
@@ -235,8 +237,15 @@ restore_ceph_pool_deletion_config() {
     fi
   fi
 
+  if [[ -n "${dependency_plan:-}" ]]; then
+    rm -f "${dependency_plan}"
+  fi
   if [[ "${status}" -eq 0 ]]; then
-    message "External Ceph purge completed."
+    if [[ "${inspect_only:-false}" == "true" || "${preflight_only:-false}" == "true" ]]; then
+      message "External Ceph inventory completed; no storage was changed."
+    else
+      message "External Ceph purge completed."
+    fi
   fi
 
   exit "${status}"
@@ -266,19 +275,6 @@ ceph_filesystem_exists() {
   printf '%s' "${output}" | jq -er --arg fs "${filesystem_name}" '.[] | select(.name == $fs)' >/dev/null 2>&1
 }
 
-ceph_mds_exists() {
-  local mds_name="$1"
-  local output
-
-  if ! output="$(remote_ceph "ceph fs dump --format json")"; then
-    error "Failed to query Ceph MDS daemons while checking ${mds_name} on ${ceph_ssh_host}." >&2
-    exit 1
-  fi
-
-  printf '%s' "${output}" | jq -er --arg mds "${mds_name}" \
-    '([.standbys[]?.name] + [.filesystems[]?.mdsmap.info[]?.name])[] | select(. == $mds)' >/dev/null 2>&1
-}
-
 purge_rbd_pool_images() {
   local pool_name="$1"
   local output
@@ -290,17 +286,18 @@ purge_rbd_pool_images() {
   fi
 
   output="$(remote_ceph "rbd ls ${pool_name} --format json")"
-  if [[ "${output}" == "[]" ]]; then
-    return 0
+  if [[ "${output}" != "[]" ]]; then
+    message "Deleting orphaned RBD images from pool ${pool_name}..."
   fi
-
-  message "Deleting orphaned RBD images from pool ${pool_name}..."
   while IFS= read -r image_name; do
     [[ -z "${image_name}" ]] && continue
     remove_rbd_image_with_retries "${pool_name}" "${image_name}"
   done < <(printf '%s' "${output}" | jq -r '.[]')
 
-  remote_ceph "rbd trash purge ${pool_name} --threshold 0" 1>/dev/null 2>&1 || true
+  if ! remote_ceph "rbd trash ls ${pool_name} --format json" | jq -e 'length == 0' >/dev/null; then
+    error "RBD trash changed during purge; review backup dependencies before deleting pool ${pool_name}." >&2
+    exit 1
+  fi
 }
 
 remove_rbd_image_with_retries() {
@@ -357,23 +354,9 @@ delete_cephfs_if_present() {
   remote_ceph "ceph fs volume rm ${filesystem_name} --yes-i-really-mean-it" 1>/dev/null
 }
 
-delete_mds_if_present() {
-  local mds_name="$1"
-
-  if [[ -z "${mds_name}" ]]; then
-    return 0
-  fi
-
-  if ! ceph_mds_exists "${mds_name}"; then
-    message "External Ceph MDS ${mds_name} is already absent."
-    return 0
-  fi
-
-  message "Deleting external Ceph MDS ${mds_name}..."
-  remote_ceph "pveceph mds destroy ${mds_name}" 1>/dev/null
-}
-
 cluster_name=""
+inspect_only=false
+preflight_only=false
 ceph_constants_path=""
 ceph_ssh_user="${CEPH_SSH_USER:-root}"
 ceph_ssh_host=""
@@ -390,6 +373,14 @@ while [[ $# -gt 0 ]]; do
     --ceph-constants)
       ceph_constants_path="$2"
       shift 2
+      ;;
+    --preflight-only)
+      preflight_only=true
+      shift
+      ;;
+    --inspect-only)
+      inspect_only=true
+      shift
       ;;
     -h|--help)
       usage
@@ -410,6 +401,7 @@ fi
 
 require_local_cmd jq
 require_local_cmd ssh
+require_local_cmd python3
 
 if [[ ! -r "${ceph_constants_path}" ]]; then
   error "Cannot read ceph constants file: ${ceph_constants_path}" >&2
@@ -487,12 +479,40 @@ for summary in "${summaries[@]}"; do
 done
 
 trap restore_ceph_pool_deletion_config EXIT
+dependency_plan="$(mktemp "${TMPDIR:-/tmp}/ceph-purge-dependencies.XXXXXX")"
+dependency_args=(--ssh-host "${ceph_ssh_host}" --ssh-user "${ceph_ssh_user}" --prefix "${ceph_prefix}" --plan "${dependency_plan}")
+for spec in "${cephfs_specs[@]}"; do
+  IFS='|' read -r filesystem_name metadata_pool_name data_pool_name extra_pool_name <<< "${spec}"
+  dependency_args+=(--filesystem "${filesystem_name}")
+  for pool_name in "${metadata_pool_name}" "${data_pool_name}" "${extra_pool_name}"; do
+    [[ -z "${pool_name}" ]] || dependency_args+=(--pool "${pool_name}")
+  done
+done
+for spec in "${rbd_pool_specs[@]}"; do
+  IFS='|' read -r pool_name check_rbd_images <<< "${spec}"
+  dependency_args+=(--pool "${pool_name}")
+  if [[ "${check_rbd_images}" == "true" ]]; then
+    dependency_args+=(--rbd-pool "${pool_name}")
+  fi
+done
+# Capture ownership and remote MDS locations before fs volume rm discards them.
+python3 "${script_dir}/ceph-purge-dependencies.py" inventory "${dependency_args[@]}"
+if [[ "${inspect_only}" == "true" ]]; then
+  jq '{pools: (.pools | length), filesystems: (.filesystems | length), rules: (.rules | length), profiles: (.profiles | length), mds_directories: (.daemons | length), mds_auth: (.auth | length), snapshots: (.snapshots | length), trash_images: (.trash | length)}' "${dependency_plan}"
+  exit 0
+fi
+if jq -e '(.snapshots | length) > 0 or (.trash | length) > 0' "${dependency_plan}" >/dev/null; then
+  error "RBD snapshots or trashed images remain. Review their backup/clone dependencies and authorize their disposal before purging storage." >&2
+  exit 1
+fi
+if [[ "${preflight_only}" == "true" ]]; then
+  exit 0
+fi
 ensure_ceph_pool_deletion_enabled
 
 for spec in "${cephfs_specs[@]}"; do
   IFS='|' read -r filesystem_name metadata_pool_name data_pool_name extra_pool_name <<< "${spec}"
   delete_cephfs_if_present "${filesystem_name}"
-  delete_mds_if_present "${filesystem_name}"
   delete_pool_if_present "${extra_pool_name}"
   delete_pool_if_present "${data_pool_name}"
   delete_pool_if_present "${metadata_pool_name}"
@@ -505,3 +525,6 @@ for spec in "${rbd_pool_specs[@]}"; do
   fi
   delete_pool_if_present "${pool_name}"
 done
+
+python3 "${script_dir}/ceph-purge-dependencies.py" cleanup \
+  --ssh-host "${ceph_ssh_host}" --ssh-user "${ceph_ssh_user}" --plan "${dependency_plan}"

@@ -72,6 +72,9 @@ locals {
   prometheus_image_tag     = "v3.13.2"
   loki_image_tag           = "3.7.4"
   tempo_image_tag          = "3.0.2"
+  # Optional synthetic trace through the repository OTel/Tempo pipeline after deploy.
+  # Leave disabled for collectors with custom routing or sampling policies.
+  tempo_deployment_trace_probe_enabled = false
   otel_collector_image_tag = "0.155.0"
   # Disabled by default because this opens an Internet-facing trace-ingest endpoint.
   # Frontends deployed under the cluster domain are accepted without creating

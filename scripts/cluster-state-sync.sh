@@ -120,6 +120,10 @@ repository_dirty() {
 }
 
 cluster_source_status() {
+  local report_exclusions=()
+  if credentials_report_is_tracked; then
+    report_exclusions+=(":(exclude)secrets/credentials_and_urls.md")
+  fi
   git -C "${cluster_repo_dir}" status \
     --porcelain=v1 \
     --untracked-files=all \
@@ -128,7 +132,15 @@ cluster_source_status() {
     ":(exclude,glob)out/**/terraform.tfstate" \
     ":(exclude)out/kubeconfig" \
     ":(exclude)out/talosconfig" \
-    ":(exclude)out/.talos-bootstrap-complete"
+    ":(exclude)out/.talos-bootstrap-complete" \
+    "${report_exclusions[@]}"
+}
+
+# Tracking this sensitive report is an explicit cluster-repository decision.
+# Never opt other clusters into publishing credentials automatically.
+credentials_report_is_tracked() {
+  git -C "${cluster_repo_dir}" ls-files --error-unmatch \
+    -- secrets/credentials_and_urls.md >/dev/null 2>&1
 }
 
 require_repository_root "${platform_dir}" "Platform repository"
@@ -300,6 +312,9 @@ runtime_file_candidates() {
   if [[ -d "${cluster_repo_dir}/out" ]]; then
     find "${cluster_repo_dir}/out" -type f -name terraform.tfstate -print
   fi
+  if credentials_report_is_tracked && [[ -f "${cluster_repo_dir}/secrets/credentials_and_urls.md" ]]; then
+    printf '%s\n' "${cluster_repo_dir}/secrets/credentials_and_urls.md"
+  fi
 }
 
 while IFS= read -r runtime_path; do
@@ -324,6 +339,9 @@ status_args=(
   ":(exclude)out/talosconfig"
   ":(exclude)out/.talos-bootstrap-complete"
 )
+if credentials_report_is_tracked; then
+  status_args+=(":(exclude)secrets/credentials_and_urls.md")
+fi
 if [[ "${include_purged_credentials}" == "true" ]]; then
   status_args+=(
     ":(exclude)secrets/credentials.json"
@@ -344,6 +362,9 @@ fi
 if [[ -d "${cluster_repo_dir}/out" \
   || -n "$(git -C "${cluster_repo_dir}" ls-files -- out)" ]]; then
   git -C "${cluster_repo_dir}" add -A -- out
+fi
+if credentials_report_is_tracked; then
+  git -C "${cluster_repo_dir}" add -A -- secrets/credentials_and_urls.md
 fi
 if [[ "${include_purged_credentials}" == "true" ]]; then
   if [[ -d "${cluster_repo_dir}/secrets" \

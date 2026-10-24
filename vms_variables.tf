@@ -96,3 +96,9 @@ locals {
   controlplane_vms = { for k, v in var.vms : k => v if var.resources[v.type].k8s_node == "controlplane" }
   worker_vms       = { for k, v in var.vms : k => v if var.resources[v.type].k8s_node == "worker" }
 }
+
+variable "defer_node_config_activation" {
+  type        = bool
+  default     = true
+  description = "Stage steady-state node configuration for rolling activation; deploy.sh disables this during the initial bootstrap."
+}

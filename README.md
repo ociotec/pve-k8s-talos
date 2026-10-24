@@ -377,7 +377,10 @@ On existing clusters, `deploy.sh --talos-only` verifies registry authentication
 with a temporary kubelet pod (`imagePullPolicy: Always`, no pull secrets).
 On Talos 1.13 and earlier, the checker reads `cri/conf.d/01-registries.part`.
 Static CRI credentials need a node reboot when newer than the running process;
-without explicit `--reboot-for-registry-auth`, deployment stops before draining.
+if this pending change was applied outside the staged configuration workflow,
+the registry checker stops before draining unless `--reboot-for-registry-auth`
+is explicit. Normal staged root activation already performs its planned rolling
+reboots before the independent registry check.
 
 Starting with Talos **1.14.0**, registry settings are merged in memory into
 `cri/conf.d/cri.toml`; the separate registry fragment is no longer published.
@@ -408,6 +411,90 @@ nodes that already loaded the credentials. Successful validation is recorded in
 `pve-k8s-talos/registry-auth-validated`. Initial bootstrap uses its freshly
 started runtime; dedicated pull checks begin on subsequent deployments.
 
+### Existing clusters and compatible tooling
+
+`deploy.sh` resolves the exact configured Talos CLI release. A matching client in
+`PATH` is reused; otherwise the official release asset is checked against its
+SHA-256 list and cached inside the cluster repository's private Git directory.
+The global CLI and provider lockfiles are not changed. Older configured Talos
+releases resolve their own CLI instead of inheriting the newest cluster's version.
+
+Initial bootstrap still applies configurations automatically. On existing
+clusters, configuration changes are staged and activated one node at a time,
+with PDB-aware drain, readiness and etcd checks. Workload availability is checked
+between nodes against a private baseline, so pre-existing application degradation
+does not hide newly introduced failures. Unchanged persisted configuration
+does not require a reboot. This also prevents parallel hot configuration updates
+from restarting every control-plane API server together.
+
+Before the first steady-state deployment using this workflow, deploy the
+`k8s-net` remediation controller update. Its running pods must advertise the
+bounded maintenance protocol before node changes begin; an older controller
+stops the operation with that instruction. This is independent of the cluster's
+Talos or Kubernetes version. Existing fencing is never interrupted by a new
+maintenance lease. On failure, unfinished nodes remain protected only until the
+lease expires, and the private local maintenance journal permits resumption.
+
+Ordinary in-place deployment supports patch upgrades and verifies each API server
+and the configured kube-proxy image, preserving custom image repositories and
+proxy-disabled clusters. Minor-version transitions and downgrades stop before
+changing nodes and require a reviewed migration/recreation procedure. This avoids
+letting an upgrade command overwrite DNS or RBAC owned by other modules. Creation
+of a new cluster still uses its configured version.
+
+Optional `talos.image_unpack_sync_fs = "true"` enables durable image unpacking
+through the explicitly supported `/etc/cri/conf.d/20-customization.part` legacy
+configuration entry, using `op: create`. Talos 1.14 projects this entry through
+its compatibility shim; 1.10–1.13 inject it into the physical configuration.
+Arbitrary new files under `/etc` are not supported by `machine.files`.
+
+The option is disabled when omitted and does not change the pinned provider.
+If a node's existing patch already defines that customization entry, enabling
+the option stops with a review instruction rather than replacing user TOML.
+Other files and settings are preserved. Before advancing between nodes, deployment
+checks the global setting through containerd's actual imports. Measure unpack
+latency before enabling it broadly. This addresses image unpacking, not application
+writes or Tempo PVC data.
+
+### Cold monitoring bootstrap and data health
+
+Before monitoring apply, the configured Grafana Operator chart supplies any
+missing CRDs, which are created atomically with the release's Helm ownership.
+Existing CRDs are inspected without modification; foreign ownership is rejected.
+Helm continues to manage mutable CRD upgrades normally. No operator or CRD version
+is copied from a particular cluster.
+
+Monitoring completion requires a successful Tempo blocklist poll without tenant
+block/index errors. A global `blocklist poll complete` line alone is insufficient.
+The check never modifies or removes Tempo data. Optional
+`tempo_deployment_trace_probe_enabled = true` sends one synthetic OTLP trace and
+queries it by ID through the repository's collector and Tempo services. Leave it
+disabled for custom routing or sampling policies unless the probe is appropriate.
+The OTLP/HTTP and trace-by-ID APIs used are documented by
+[OpenTelemetry](https://opentelemetry.io/docs/specs/otlp/#otlphttp) and
+[Tempo](https://grafana.com/docs/tempo/latest/api_docs/).
+
+For private cluster repositories that already track
+`secrets/credentials_and_urls.md`, runtime synchronization includes that exact
+generated report. Untracked reports and other secret files are never opted into
+publication automatically. The existing runtime allowlist otherwise remains in
+force, including on deployment failure.
+
+External Ceph purge inventories pool/filesystem dependencies before removal and
+checks them again before deleting exclusive EC profiles, CRUSH rules, MDS
+directories and MDS authentication. Shared rules and shared MDS daemons are
+preserved. Unknown cluster-prefixed storage or dependencies used by retained
+storage stop the purge for explicit review. All Proxmox members must be online
+and reachable for a complete MDS-directory inventory. Inspect without deletion:
+
+```bash
+../../scripts/purge-external-ceph.sh --cluster-name <cluster> \
+  --ceph-constants ceph_constants.tf --inspect-only
+```
+
+Run from the real cluster directory with its `.envrc` loaded. Protected recovery
+snapshots/clones remain subject to their explicit retention/disposal decision.
+
 ### Create the infrastructre
 
 The easiest way is to use the provided deployment script:
@@ -417,13 +504,16 @@ cd clusters/<cluster>
 ../../scripts/deploy.sh
 ```
 
-Alternatively, you can apply the plan manually:
+For inspection, generate a plan from the existing workspace:
 
 ```bash
-tofu -chdir=out/root apply -auto-approve
+tofu -chdir=out/root plan
 ```
 
-The deployment script automatically generates `talosconfig` and `kubeconfig` under `out/` for the current cluster.
+Use `deploy.sh` to apply: it coordinates staged activation, maintenance, health
+checks and runtime synchronization. A direct root apply does not activate staged
+configuration on an existing cluster. The deployment script automatically
+generates `talosconfig` and `kubeconfig` under `out/` for the current cluster.
 
 **Configuring your environment for future sessions:**
 

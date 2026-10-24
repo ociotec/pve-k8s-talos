@@ -41,7 +41,8 @@ Options:
                             all Kubernetes service sections. Skip flags only shape the
                             generated Talos no_proxy configuration in this mode.
       --reboot-for-registry-auth
-                            Allow drained, rolling node reboots for static registry auth.
+                            Allow additional drained registry-only reboots for static
+                            auth already changed outside staged root activation.
       --services-only       Skip Talos VM/root apply and deploy Kubernetes services only.
                             Requires existing out/kubeconfig and out/talosconfig.
       --development         Allow uncommitted platform and cluster source changes.
@@ -258,6 +259,8 @@ if [[ "${consolidate_development}" == "true" && ! -f "${development_marker}" ]];
   error "No local development deployment marker exists for ${cluster_name}." >&2
   exit 1
 fi
+
+
 
 if [[ -r "${cluster_kubeconfig_path}" ]]; then
   require_cmd kubectl
@@ -675,6 +678,15 @@ tf_map_string_value() {
           value = substr(line, RSTART, RLENGTH)
           sub(/^[^=]*=[[:space:]]*"/, "", value)
           sub(/".*/, "", value)
+          print value
+          exit
+        }
+
+        # Map(string) inputs also accept HCL boolean literals by coercion.
+        if (match(line, "^[[:space:]]*\"?" key_name "\"?[[:space:]]*=[[:space:]]*(true|false)([[:space:]]|$)")) {
+          value = substr(line, RSTART, RLENGTH)
+          sub(/^[^=]*=[[:space:]]*/, "", value)
+          gsub(/[[:space:]]/, "", value)
           print value
           exit
         }
@@ -1222,8 +1234,10 @@ validate_node_remediation_proxmox_access() {
   while IFS='|' read -r worker_name node_name vm_id; do
     [[ -n "${worker_name}" ]] || continue
     target_count=$((target_count + 1))
-    if ! proxmox_api_request GET "/nodes/${node_name}/qemu/${vm_id}/status/current" | jq -e '.data.status != null' >/dev/null; then
-      error "The configured deployment token cannot audit Proxmox worker ${worker_name} on ${node_name} (VM ${vm_id})." >&2
+    # This preflight runs before VM creation; check effective ACLs for planned IDs.
+    # The dedicated remediation token is checked against actual VMs after apply.
+    if ! proxmox_api_request GET "/access/permissions?path=/vms/${vm_id}" | jq -e --arg path "/vms/${vm_id}" '.data[$path]["VM.Audit"] == 1' >/dev/null; then
+      error "The configured deployment token lacks VM.Audit for worker ${worker_name} on ${node_name} (VM ${vm_id}), or its permissions could not be queried." >&2
       exit 1
     fi
   done < <(collect_worker_vm_targets)
@@ -1810,6 +1824,18 @@ handle_deploy_exit() {
 
   trap - ERR EXIT
   set +e
+
+  if [[ -n "${node_maintenance_state:-}" && -f "${node_maintenance_state}" ]]; then
+    python3 "${script_dir}/node-maintenance.py" finish --kubeconfig "${cluster_kubeconfig_path}" \
+      --state "${node_maintenance_state}" --owner "${node_maintenance_owner}"
+    if [[ "$?" -ne 0 ]]; then
+      error "Node maintenance cleanup failed; its bounded leases remain visible for recovery." >&2
+      [[ "${exit_code}" -ne 0 ]] || exit_code=1
+    fi
+    if [[ ! -f "${node_maintenance_state}" && -n "${root_workload_baseline:-}" ]]; then
+      rm -f "${root_workload_baseline}"
+    fi
+  fi
 
   if [[ "${exit_code}" -ne 0 ]]; then
     report_current_section_failure
@@ -3296,10 +3322,20 @@ wait_for_controlplane_etcd_ready() {
   local node_ip="$2"
   local timeout_seconds="${3:-600}"
   local start
+  local remaining
+  local request_timeout
 
   start="$(date +%s)"
   while true; do
-    if talosctl --talosconfig "${cluster_talosconfig_path}" \
+    remaining=$((timeout_seconds - $(date +%s) + start))
+    if (( remaining <= 0 )); then
+      error "Timed out waiting for etcd on ${node_name} after its Talos reboot." >&2
+      return 1
+    fi
+    request_timeout="${remaining}"
+    (( request_timeout <= 15 )) || request_timeout=15
+    if timeout --kill-after=5s "${request_timeout}s" \
+      talosctl --talosconfig "${cluster_talosconfig_path}" \
       -n "${node_ip}" etcd status >/dev/null 2>&1; then
       return 0
     fi
@@ -3414,6 +3450,7 @@ reconcile_staged_talos_nodes() {
   local start
   local activation_timeout_seconds=900
   local staged_result
+  local maintenance_renewed_at
 
   if [[ ! -f "${cluster_out_dir}/.talos-bootstrap-complete" ]]; then
     return 0
@@ -3443,11 +3480,11 @@ reconcile_staged_talos_nodes() {
       return 1
     fi
     if [[ "${node_role}" == "worker" ]]; then
-      priority=10
-    elif [[ "${node_ip}" == "${primary_controlplane_ip}" ]]; then
       priority=30
-    else
+    elif [[ "${node_ip}" == "${primary_controlplane_ip}" ]]; then
       priority=20
+    else
+      priority=10
     fi
     unsorted_node_lines+=(
       "${priority}|${node_name}|${node_ip}|${node_role}"
@@ -3482,6 +3519,25 @@ reconcile_staged_talos_nodes() {
 
     wait_for_all_kubernetes_nodes_ready 600 "${node_name}"
 
+    if [[ -n "${root_workload_baseline:-}" ]]; then
+      python3 "${script_dir}/check-workload-health.py" --kubeconfig "${cluster_kubeconfig_path}" \
+        --baseline "${root_workload_baseline}"
+    fi
+
+    if [[ -n "${node_maintenance_state:-}" && -f "${node_maintenance_state}" ]]; then
+      python3 "${script_dir}/node-maintenance.py" renew --kubeconfig "${cluster_kubeconfig_path}" \
+        --state "${node_maintenance_state}" --owner "${node_maintenance_owner}"
+    fi
+    # Honour disruption budgets and avoid cutting application writes in flight.
+    kubectl --kubeconfig "${cluster_kubeconfig_path}" drain "${node_name}" \
+      --ignore-daemonsets --delete-emptydir-data --timeout=600s
+
+    if [[ -n "${node_maintenance_state:-}" && -f "${node_maintenance_state}" ]]; then
+      python3 "${script_dir}/node-maintenance.py" renew --kubeconfig "${cluster_kubeconfig_path}" \
+        --state "${node_maintenance_state}" --owner "${node_maintenance_owner}"
+    fi
+    maintenance_renewed_at="$(date +%s)"
+
     message "Rebooting ${node_name} to activate its staged Talos config..."
     talosctl --talosconfig "${cluster_talosconfig_path}" \
       -n "${node_ip}" \
@@ -3490,6 +3546,12 @@ reconcile_staged_talos_nodes() {
 
     start="$(date +%s)"
     while true; do
+      if [[ -n "${node_maintenance_state:-}" && -f "${node_maintenance_state}" ]] \
+        && (( $(date +%s) - maintenance_renewed_at >= 60 )); then
+        python3 "${script_dir}/node-maintenance.py" renew --kubeconfig "${cluster_kubeconfig_path}" \
+          --state "${node_maintenance_state}" --owner "${node_maintenance_owner}"
+        maintenance_renewed_at="$(date +%s)"
+      fi
       if ! node_has_staged_machineconfig "${node_ip}" \
         && node_machineconfig_matches_file "${node_ip}" "${machineconfig_path}"; then
         break
@@ -3502,12 +3564,21 @@ reconcile_staged_talos_nodes() {
     done
 
     wait_for_node_ready "${node_name}" 600
+    kubectl --kubeconfig "${cluster_kubeconfig_path}" uncordon "${node_name}" >/dev/null
     if [[ "${node_role}" == "controlplane" ]]; then
       wait_for_controlplane_etcd_ready "${node_name}" "${node_ip}" 600
     fi
     wait_for_all_kubernetes_nodes_ready 600
+    if [[ -n "${root_workload_baseline:-}" ]]; then
+      python3 "${script_dir}/check-workload-health.py" --kubeconfig "${cluster_kubeconfig_path}" \
+        --baseline "${root_workload_baseline}"
+    fi
     wait_for_machineconfig_match \
       "${node_name}" "${node_ip}" "${machineconfig_path}" 180
+    if [[ "$(tf_map_string_value "${cluster_constants_path}" talos image_unpack_sync_fs)" == "true" ]]; then
+      python3 "${script_dir}/check-image-unpack-durability.py" --talosconfig "${cluster_talosconfig_path}" \
+        --node-address "${node_ip}" --node-name "${node_name}"
+    fi
     message "${node_name} recovered with the desired Talos machine configuration."
   done
 }
@@ -3552,11 +3623,23 @@ wait_for_k8s_api_ready() {
   local endpoint_ip="$1"
   local timeout_seconds="${2:-120}"
   local start
+  local ready
+  local consecutive=0
 
   start="$(date +%s)"
   while true; do
-    if curl --silent --show-error --insecure --max-time 5 "https://${endpoint_ip}:6443/readyz" >/dev/null 2>&1; then
-      return 0
+    # Use the cluster credentials and CA: an HTTP error or a TLS response alone
+    # does not prove readiness. Discovery is also needed by manifest providers.
+    ready="$(kubectl --kubeconfig "${cluster_kubeconfig_path}" --server="https://${endpoint_ip}:6443" --request-timeout=5s get --raw /readyz 2>/dev/null || true)"
+    if [[ "${ready}" == "ok" ]] && kubectl --kubeconfig "${cluster_kubeconfig_path}" \
+      --server="https://${endpoint_ip}:6443" --request-timeout=5s get --raw /apis 2>/dev/null |
+      jq -e '.groups | type == "array"' >/dev/null; then
+      consecutive=$((consecutive + 1))
+      if (( consecutive >= 2 )); then
+        return 0
+      fi
+    else
+      consecutive=0
     fi
 
     if (( $(date +%s) - start >= timeout_seconds )); then
@@ -3564,7 +3647,7 @@ wait_for_k8s_api_ready() {
       exit 1
     fi
 
-    sleep 5
+    sleep 2
   done
 }
 
@@ -3689,7 +3772,10 @@ reconcile_talos_discovery_service_steady_state() {
 }
 
 talos_kubernetes_version() {
-  awk -F'"' '/"kubernetes_version"/ { print $4; exit }' "$1"
+  local value
+  value="$(tf_map_string_value "$1" talos kubernetes_version)"
+  # Match the existing generation default in both machine-config data templates.
+  printf '%s\n' "${value:-v1.35.0}"
 }
 
 normalize_kubernetes_version() {
@@ -3894,6 +3980,14 @@ ceph_mode_from_constants() {
 
 deploy_start="$(start_timer)"
 trap handle_deploy_exit EXIT
+if [[ "${services_only}" != "true" && "${destroy_only}" != "true" ]]; then
+  # Match older releases too, without changing the global CLI or depending on
+  # /tmp. Git's private directory is excluded from every runtime distribution.
+  configured_talos_version="$(tf_map_string_value "${cluster_constants_path}" talos version)"
+  resolved_talosctl="$(python3 "${script_dir}/resolve-talosctl.py" \
+    --version "${configured_talos_version}" --cache-dir "${cluster_git_dir}/talosctl-cache")"
+  export PATH="$(dirname "${resolved_talosctl}"):${PATH}"
+fi
 message "Provider upgrades are disabled by default. Update manually when needed: tofu -chdir=<workspace> init -upgrade"
 if [[ "${purge_external_ceph}" == "true" ]]; then
   if [[ "$(ceph_mode_from_constants "${cluster_ceph_constants_path}")" != "external" ]]; then
@@ -3927,6 +4021,12 @@ else
   run_gen_talos_assets
   run_tofu_init "${cluster_root_workspace}"
   if [[ "${destroy_first}" == "true" ]]; then
+    if [[ "${purge_external_ceph}" == "true" ]]; then
+      # Reject backup/dependency blockers before deleting any VM. The purge
+      # inventories again afterwards so this preflight never authorizes stale data.
+      "${script_dir}/purge-external-ceph.sh" --cluster-name "${cluster_name}" \
+        --ceph-constants "${cluster_ceph_constants_path}" --preflight-only
+    fi
     if state_dir_has_state "${cluster_root_workspace}"; then
       message "Regenerating Talos assets required for destroy..."
       run_gen_talos_assets
@@ -3966,6 +4066,27 @@ else
   talos_bootstrap_marker_was_present=false
   if [[ -f "${cluster_out_dir}/.talos-bootstrap-complete" ]]; then
     talos_bootstrap_marker_was_present=true
+  fi
+  # Keep both initial bootstrap applies automatic, even after the first one
+  # creates the marker. Subsequent deployments activate changes sequentially.
+  export TF_VAR_defer_node_config_activation="${talos_bootstrap_marker_was_present}"
+  if [[ "${talos_bootstrap_marker_was_present}" == "true" ]]; then
+    python3 "${script_dir}/reconcile-kubernetes-components.py" --kubeconfig "${cluster_kubeconfig_path}" \
+      --version "$(talos_kubernetes_version "${cluster_constants_path}")" --check-transition
+    node_maintenance_state="${cluster_git_dir}/pve-k8s-talos-node-maintenance.json"
+    node_maintenance_owner="${deployment_id}"
+    if [[ -f "${node_maintenance_state}" ]]; then
+      node_maintenance_owner="$(jq -er '.owner' "${node_maintenance_state}")"
+    fi
+    node_maintenance_args=()
+    while IFS='|' read -r maintenance_node maintenance_ip; do
+      node_maintenance_args+=(--node "${maintenance_node}")
+    done < <(cluster_node_name_ip_pairs)
+    python3 "${script_dir}/node-maintenance.py" begin --kubeconfig "${cluster_kubeconfig_path}" \
+      --state "${node_maintenance_state}" --owner "${node_maintenance_owner}" "${node_maintenance_args[@]}"
+    root_workload_baseline="${cluster_git_dir}/pve-k8s-talos-node-workloads.json"
+    python3 "${script_dir}/check-workload-health.py" --kubeconfig "${cluster_kubeconfig_path}" \
+      --baseline "${root_workload_baseline}" --capture
   fi
   run_gen_talos_assets
   run_tofu_init "${cluster_root_workspace}"
@@ -4051,8 +4172,18 @@ else
   reconcile_secondary_network_workers
   reconcile_talos_discovery_service_steady_state
   wait_for_kubernetes_version_convergence "${cluster_constants_path}"
+  tofu -chdir="${cluster_root_workspace}" output -json kube_proxy_configuration |
+    python3 "${script_dir}/reconcile-kubernetes-components.py" --kubeconfig "${cluster_kubeconfig_path}" \
+      --version "$(talos_kubernetes_version "${cluster_constants_path}")"
   reboot_nodes_with_pending_kubelet_max_pods "${cluster_constants_path}"
   reconcile_talos_registry_auth
+  if [[ -n "${node_maintenance_state:-}" && -f "${node_maintenance_state}" ]]; then
+    python3 "${script_dir}/node-maintenance.py" finish --kubeconfig "${cluster_kubeconfig_path}" \
+      --state "${node_maintenance_state}" --owner "${node_maintenance_owner}"
+    if [[ ! -f "${node_maintenance_state}" && -n "${root_workload_baseline:-}" ]]; then
+      rm -f "${root_workload_baseline}"
+    fi
+  fi
   message "k8s cluster is up and running. Current nodes:"
   "${script_dir}/render-k8s-nodes.sh" --kubeconfig "${active_kubeconfig_path}"
   record_deployment_status "k8s"
@@ -4263,9 +4394,12 @@ if [[ "${skip_monitoring}" == "true" ]]; then
   finish_deploy_section "monitoring" "skipped"
 else
   prepare_monitoring_workspace
+  monitoring_health_since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   message "Deploying monitoring stack..."
   run_tofu_init "${cluster_monitoring_workspace}"
   run tofu -chdir="${cluster_monitoring_workspace}" validate
+  python3 "${script_dir}/bootstrap-grafana-operator-crds.py" \
+    --constants "${cluster_monitoring_constants_path}" --kubeconfig "${cluster_kubeconfig_path}"
   migrate_grafana_workload_state_to_helm "${cluster_monitoring_workspace}"
   reset_legacy_loki_storage
   monitoring_prometheus_config_hash_before=""
@@ -4382,6 +4516,12 @@ else
   wait_for_deployments_ready "monitoring" "600s" "${monitoring_deployments[@]}"
   wait_for_daemonsets_ready "monitoring" "600s" "${monitoring_daemonsets[@]}"
   wait_for_service_endpoints "monitoring" "600" "${monitoring_services[@]}"
+  tempo_health_args=()
+  if [[ "$(tf_bool_value "${cluster_monitoring_constants_path}" tempo_deployment_trace_probe_enabled)" == "true" ]]; then
+    tempo_health_args+=(--trace-probe)
+  fi
+  python3 "${script_dir}/check-tempo-health.py" --kubeconfig "${cluster_kubeconfig_path}" \
+    --since-time "${monitoring_health_since}" "${tempo_health_args[@]}"
   finalize_log_collector_migration "${monitoring_log_collector}"
   # Reconcile the desired sync job after Grafana is ready. A previous failed
   # apply or TTL cleanup must not leave dashboard defaults unpublished.
