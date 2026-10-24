@@ -200,6 +200,10 @@ locals {
   beyla_enabled_value = can(regex("(?m)^\\s*beyla_enabled\\s*=\\s*(true|false)\\s*$", local.monitoring_constants_source)[0]) ? (
     tobool(regex("(?m)^\\s*beyla_enabled\\s*=\\s*(true|false)\\s*$", local.monitoring_constants_source)[0])
   ) : true
+  # Empty preserves the selected Tempo release's default for existing clusters.
+  tempo_block_version_value = try(regex("(?m)^\\s*tempo_block_version\\s*=\\s*\"([^\"]*)\"\\s*(?:#.*)?$", local.monitoring_constants_source)[0], "")
+  policy_reporter_chart_version_value = try(regex("(?m)^\\s*policy_reporter_chart_version\\s*=\\s*\"([^\"]+)\"\\s*(?:#.*)?$", local.monitoring_constants_source)[0], "3.8.1")
+  policy_reporter_image_tag_value = try(regex("(?m)^\\s*policy_reporter_image_tag\\s*=\\s*\"([^\"]+)\"\\s*(?:#.*)?$", local.monitoring_constants_source)[0], "")
   beyla_image_tag_value = can(regex("(?m)^\\s*beyla_image_tag\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]) ? (
     regex("(?m)^\\s*beyla_image_tag\\s*=\\s*\"([^\"]+)\"\\s*$", local.monitoring_constants_source)[0]
   ) : "3.15.0"
@@ -971,6 +975,8 @@ locals {
       tempo_storage_size              = local.tempo_storage_size_value
       tempo_retention                 = local.tempo_retention
       tempo_image_tag                 = local.tempo_image_tag
+      tempo_block_version             = local.tempo_block_version_value
+      tempo_config_hash               = sha256(jsonencode([filesha256("${path.module}/tempo.yaml"), local.tempo_retention, local.tempo_block_version_value, local.tempo_image_tag]))
       tempo_v3_enabled                = try(tonumber(split(".", trimprefix(local.tempo_image_tag, "v"))[0]), 0) >= 3
       tempo_cpu_request               = local.tempo_cpu_request_value
       tempo_cpu_limit                 = local.tempo_cpu_limit_value
@@ -1218,6 +1224,17 @@ locals {
     for target in local.expected_preissued_tls_secret_targets : target
     if !contains(keys(local.preissued_tls_secrets_by_target), target)
   ]
+}
+
+check "tempo_block_format" {
+  assert {
+    condition = contains(["", "vParquet3", "vParquet4", "vParquet5"], local.tempo_block_version_value)
+    error_message = "tempo_block_version must be empty or an explicit vParquet3, vParquet4, or vParquet5 format supported by the selected Tempo image."
+  }
+  assert {
+    condition = local.tempo_block_version_value != "vParquet3" || !try(tonumber(split(".", trimprefix(local.tempo_image_tag, "v"))[0]) > 3 || (tonumber(split(".", trimprefix(local.tempo_image_tag, "v"))[0]) == 3 && tonumber(split(".", trimprefix(local.tempo_image_tag, "v"))[1]) >= 1), false)
+    error_message = "Tempo 3.1 and newer cannot write vParquet3 blocks. Existing blocks remain readable."
+  }
 }
 
 check "tls_source_valid" {
@@ -1766,12 +1783,12 @@ resource "helm_release" "policy_reporter" {
   namespace  = "monitoring"
   repository = "oci://ghcr.io/kyverno/charts"
   chart      = "policy-reporter"
-  version    = "3.8.1"
+  version    = local.policy_reporter_chart_version_value
   wait       = true
   timeout    = 600
   atomic     = true
 
-  values = [yamlencode({
+  values = [yamlencode(merge({
     priorityClassName = "infra-observability"
     resources = {
       requests = { cpu = "100m", memory = "256Mi" }
@@ -1821,7 +1838,9 @@ resource "helm_release" "policy_reporter" {
         limits   = { cpu = "500m", memory = "256Mi" }
       }
     } }
-  })]
+  }, local.policy_reporter_image_tag_value == "" ? {} : {
+    image = { tag = local.policy_reporter_image_tag_value }
+  }))]
 
   depends_on = [
     kubernetes_secret_v1.policy_reporter_oauth,

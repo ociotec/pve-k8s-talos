@@ -1147,11 +1147,43 @@ proxmox_api_request() {
   curl "${curl_args[@]}" "${base}${path}"
 }
 
+rook_csi_resource_names() {
+  local version namespace major minor
+  version="$(tf_string_value "${cluster_ceph_constants_path}" rook_version || true)"
+  namespace="$(tf_string_value "${cluster_ceph_constants_path}" ceph_namespace || true)"
+  version="${version:-1.19.4}"
+  namespace="${namespace:-rook-ceph}"
+  rook_csi_namespace="${namespace}"
+  rook_csi_operator_enabled=false
+  rook_csi_rbd_controller=csi-rbdplugin-provisioner
+  rook_csi_cephfs_controller=csi-cephfsplugin-provisioner
+  rook_csi_rbd_node=csi-rbdplugin
+  rook_csi_cephfs_node=csi-cephfsplugin
+  rook_csi_rbd_addons_node=""
+  rook_csi_cephfs_addons_node=""
+  if [[ "${version#v}" =~ ^([0-9]+)\.([0-9]+)\. ]]; then
+    major="${BASH_REMATCH[1]}"; minor="${BASH_REMATCH[2]}"
+    if (( major > 1 || (major == 1 && minor >= 20) )); then
+      rook_csi_operator_enabled=true
+      rook_csi_rbd_controller="${namespace}.rbd.csi.ceph.com-ctrlplugin"
+      rook_csi_cephfs_controller="${namespace}.cephfs.csi.ceph.com-ctrlplugin"
+      rook_csi_rbd_node="${namespace}.rbd.csi.ceph.com-nodeplugin"
+      rook_csi_cephfs_node="${namespace}.cephfs.csi.ceph.com-nodeplugin"
+      if [[ "$(tf_bool_value "${cluster_ceph_constants_path}" ceph_csi_addons_enabled)" == "true" ]]; then
+        rook_csi_rbd_addons_node="${rook_csi_rbd_node}-csi-addons"
+        rook_csi_cephfs_addons_node="${rook_csi_cephfs_node}-csi-addons"
+      fi
+    fi
+  fi
+}
+
 validate_existing_node_remediation_fencing() {
   local object_json
   local resource
   local namespace
+  local require_addons
   local -a kube_args=(--kubeconfig "${cluster_kubeconfig_path}" --request-timeout=30s)
+  rook_csi_resource_names
 
   # Match the Rook RBD fencing backend in k8s-net/main.tf. This checks the
   # installed dependency, without applying or initializing skipped Ceph modules.
@@ -1166,39 +1198,52 @@ validate_existing_node_remediation_fencing() {
     error "CSI-Addons NetworkFence v1alpha1 is unavailable. Include the Ceph section to reconcile fencing." >&2
     return 1
   fi
-  if ! object_json="$(kubectl "${kube_args[@]}" -n rook-ceph get configmap rook-ceph-operator-config -o json)" ||
-    ! jq -e '.data.CSI_ENABLE_CSIADDONS == "true"' <<<"${object_json}" >/dev/null; then
+  if [[ "${rook_csi_operator_enabled}" == "true" ]]; then
+    object_json="$(kubectl "${kube_args[@]}" -n "${rook_csi_namespace}" get operatorconfig.csi.ceph.io ceph-csi-operator-config -o json)" || return 1
+    require_addons="$(jq -r '.spec.driverSpecDefaults.deployCsiAddons // false' <<<"${object_json}")"
+  else
+    object_json="$(kubectl "${kube_args[@]}" -n "${rook_csi_namespace}" get configmap rook-ceph-operator-config -o json)" || return 1
+    require_addons="$(jq -r '.data.CSI_ENABLE_CSIADDONS // "false"' <<<"${object_json}")"
+  fi
+  if [[ "${require_addons}" != "true" ]]; then
     error "The deployed Rook operator has CSI-Addons disabled. Include the Ceph section to reconcile fencing." >&2
     return 1
   fi
-  for resource in csi-addons-controller-manager csi-rbdplugin-provisioner; do
-    namespace=rook-ceph
+  for resource in csi-addons-controller-manager "${rook_csi_rbd_controller}"; do
+    namespace="${rook_csi_namespace}"
     [[ "${resource}" != "csi-addons-controller-manager" ]] || namespace=csi-addons-system
     if ! object_json="$(kubectl "${kube_args[@]}" -n "${namespace}" get deployment "${resource}" -o json)" ||
-      ! jq -e --arg name "${resource}" '
+      ! jq -e --arg name "${resource}" --arg rbd "${rook_csi_rbd_controller}" '
         (.spec.replicas // 1) > 0 and
         (.status.observedGeneration // 0) >= .metadata.generation and
         (.status.updatedReplicas // 0) == (.spec.replicas // 1) and
         (.status.availableReplicas // 0) >= (.spec.replicas // 1) and
-        ($name != "csi-rbdplugin-provisioner" or
+        ($name != $rbd or
           any(.spec.template.spec.containers[]; .name == "csi-addons"))
       ' <<<"${object_json}" >/dev/null; then
       error "Cannot verify ready fencing dependency ${resource} and its CSI-Addons sidecar. Check API connectivity and fencing readiness before skipping Ceph." >&2
       return 1
     fi
   done
-  if ! object_json="$(kubectl "${kube_args[@]}" -n rook-ceph get daemonset csi-rbdplugin -o json)" ||
-    ! jq -e '.status.desiredNumberScheduled > 0 and
+  for resource in "${rook_csi_rbd_node}" "${rook_csi_rbd_addons_node}"; do
+    [[ -n "${resource}" ]] || continue
+    require_addons=true
+    if [[ "${rook_csi_operator_enabled}" == "true" && "${resource}" == "${rook_csi_rbd_node}" ]]; then
+      require_addons=false
+    fi
+    if ! object_json="$(kubectl "${kube_args[@]}" -n "${rook_csi_namespace}" get daemonset "${resource}" -o json)" ||
+    ! jq -e --argjson require_addons "${require_addons}" '.status.desiredNumberScheduled > 0 and
       (.status.observedGeneration // 0) >= .metadata.generation and
       .status.updatedNumberScheduled == .status.desiredNumberScheduled and
       .status.numberReady == .status.desiredNumberScheduled and
-      any(.spec.template.spec.containers[]; .name == "csi-addons")' <<<"${object_json}" >/dev/null; then
+      ($require_addons == false or any(.spec.template.spec.containers[]; .name == "csi-addons"))' <<<"${object_json}" >/dev/null; then
     error "RBD node fencing sidecars are missing or not ready. Reconcile Ceph before skipping it." >&2
     return 1
-  fi
+    fi
+  done
   # Only query Secret metadata; never read or print credential values.
-  if ! kubectl "${kube_args[@]}" -n rook-ceph get secret rook-csi-rbd-provisioner -o name >/dev/null ||
-    ! kubectl "${kube_args[@]}" get csidriver rook-ceph.rbd.csi.ceph.com -o name >/dev/null; then
+  if ! kubectl "${kube_args[@]}" -n "${rook_csi_namespace}" get secret rook-csi-rbd-provisioner -o name >/dev/null ||
+    ! kubectl "${kube_args[@]}" get csidriver "${rook_csi_namespace}.rbd.csi.ceph.com" -o name >/dev/null; then
     error "The RBD fencing Secret or CSI driver is missing. Include the Ceph section to reconcile fencing." >&2
     return 1
   fi
@@ -2431,12 +2476,11 @@ prepare_k8s_net_workspace() {
     link_into_workspace "${repo_root}/k8s-net/.terraform" "${workspace}/.terraform"
   fi
   link_into_workspace "${repo_root}/k8s-net/main.tf" "${workspace}/main.tf"
-  link_into_workspace "${repo_root}/k8s-net/cert-manager.yaml" "${workspace}/cert-manager.yaml"
+  python3 "${script_dir}/prepare-infrastructure-manifests.py" \
+    --section k8s-net --constants "${cluster_k8s_net_constants_path}" --output "${workspace}"
   link_into_workspace "${repo_root}/k8s-net/ingress-nginx-controller.yaml" "${workspace}/ingress-nginx-controller.yaml"
   link_into_workspace "${repo_root}/k8s-net/ingress-nginx-pod-cleanup.py" "${workspace}/ingress-nginx-pod-cleanup.py"
-  link_into_workspace "${repo_root}/k8s-net/metallb-native.yaml" "${workspace}/metallb-native.yaml"
   link_into_workspace "${repo_root}/k8s-net/metallb-pool.yaml" "${workspace}/metallb-pool.yaml"
-  link_into_workspace "${repo_root}/k8s-net/metrics-server.yaml" "${workspace}/metrics-server.yaml"
   link_into_workspace "${repo_root}/k8s-net/kyverno-policies.yaml" "${workspace}/kyverno-policies.yaml"
   link_into_workspace "${repo_root}/k8s-net/node-remediation-controller.py" "${workspace}/node-remediation-controller.py"
   link_into_workspace "${repo_root}/k8s-net/node-remediation.yaml" "${workspace}/node-remediation.yaml"
@@ -2581,6 +2625,8 @@ prepare_s3_storage_workspace() {
     link_into_workspace "${repo_root}/s3-storage/.terraform" "${workspace}/.terraform"
   fi
   link_into_workspace "${repo_root}/s3-storage/main.tf" "${workspace}/main.tf"
+  python3 "${script_dir}/prepare-s3-defaults.py" \
+    --constants "${cluster_s3_storage_constants_path}" --output "${workspace}/compatibility-defaults.tf"
   link_into_workspace "${cluster_s3_storage_constants_path}" "${workspace}/constants.tf"
   link_into_workspace "${cluster_k8s_net_constants_path}" "${workspace}/k8s_net_constants.tf"
   link_into_workspace "${cluster_vms_path}" "${workspace}/vms.auto.tfvars"
@@ -2637,7 +2683,8 @@ prepare_rook_workspaces() {
 
   require_cluster_file "${cluster_ceph_constants_path}" "ceph constants"
   mkdir -p "${rook_root}" "${cluster_rook_01_workspace}" "${cluster_rook_02_workspace}" "${cluster_rook_03_workspace}" "${cluster_rook_04_workspace}"
-  link_into_workspace "${repo_root}/rook/manifests" "${rook_root}/manifests"
+  python3 "${script_dir}/prepare-infrastructure-manifests.py" \
+    --section rook --constants "${cluster_ceph_constants_path}" --output "${rook_root}/manifests"
   if [[ -d "${repo_root}/rook/01-crds-common-operator/.terraform" ]]; then
     link_into_workspace "${repo_root}/rook/01-crds-common-operator/.terraform" "${cluster_rook_01_workspace}/.terraform"
   fi
@@ -4281,28 +4328,33 @@ else
   run tofu -chdir="${cluster_rook_04_workspace}" apply -auto-approve
   if [[ "${ceph_mode_value}" == "external" ]]; then
     message "Waiting for Rook Ceph CSI resources..."
-    wait_for_resource_existence "rook-ceph" "deploy/csi-cephfsplugin-provisioner" 120
-    wait_for_resource_existence "rook-ceph" "deploy/csi-rbdplugin-provisioner" 120
-    wait_for_resource_existence "rook-ceph" "daemonset/csi-cephfsplugin" 120
-    wait_for_resource_existence "rook-ceph" "daemonset/csi-rbdplugin" 120
+    rook_csi_resource_names
+    rook_csi_workloads=(
+      "deploy/${rook_csi_cephfs_controller}" "deploy/${rook_csi_rbd_controller}"
+      "daemonset/${rook_csi_cephfs_node}" "daemonset/${rook_csi_rbd_node}"
+    )
+    for rook_csi_addons_node in "${rook_csi_rbd_addons_node}" "${rook_csi_cephfs_addons_node}"; do
+      [[ -z "${rook_csi_addons_node}" ]] || rook_csi_workloads+=("daemonset/${rook_csi_addons_node}")
+    done
+    for rook_csi_workload in "${rook_csi_workloads[@]}"; do
+      wait_for_resource_existence "${rook_csi_namespace}" "${rook_csi_workload}" 180
+    done
 
     external_csi_config_hash_after="$(rook_external_csi_configuration_sha256)"
     if kubernetes_resource_changed \
       "${external_csi_config_hash_before}" \
       "${external_csi_config_hash_after}"; then
       message "External Ceph CSI configuration changed; restarting CSI components..."
-      kubectl -n rook-ceph rollout restart deploy/csi-cephfsplugin-provisioner 1>/dev/null
-      kubectl -n rook-ceph rollout restart deploy/csi-rbdplugin-provisioner 1>/dev/null
-      kubectl -n rook-ceph rollout restart daemonset/csi-cephfsplugin 1>/dev/null
-      kubectl -n rook-ceph rollout restart daemonset/csi-rbdplugin 1>/dev/null
+      for rook_csi_workload in "${rook_csi_workloads[@]}"; do
+        kubectl -n "${rook_csi_namespace}" rollout restart "${rook_csi_workload}" 1>/dev/null
+      done
     else
       message "External Ceph CSI configuration is unchanged; skipping CSI restart."
     fi
 
-    wait_for_rollout_ready "rook-ceph" "deploy/csi-cephfsplugin-provisioner" "300s"
-    wait_for_rollout_ready "rook-ceph" "deploy/csi-rbdplugin-provisioner" "180s"
-    wait_for_rollout_ready "rook-ceph" "daemonset/csi-cephfsplugin" "300s"
-    wait_for_rollout_ready "rook-ceph" "daemonset/csi-rbdplugin" "300s"
+    for rook_csi_workload in "${rook_csi_workloads[@]}"; do
+      wait_for_rollout_ready "${rook_csi_namespace}" "${rook_csi_workload}" "300s"
+    done
   fi
   kubectl -n rook-ceph get storageclasses.storage.k8s.io
   record_deployment_status "ceph"

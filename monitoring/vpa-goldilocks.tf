@@ -11,6 +11,8 @@ variable "vpa_goldilocks" {
     tls_secret_name = optional(string, "goldilocks-tls")
     keycloak_realm  = optional(string, "")
     allowed_groups  = optional(list(string), ["k8s-admins", "monitoring-view"])
+    oauth2_proxy_image_tag = optional(string, "v7.15.3")
+    recommender_image_tag = optional(string, "1.7.1")
     # Null selects capacity-based sizing from declared worker CPU and RAM.
     recommender_cpu_request = optional(string)
     recommender_cpu_limit   = optional(string)
@@ -250,7 +252,7 @@ locals {
       goldilocks_oidc_issuer                 = local.goldilocks_oidc_issuer
       goldilocks_oidc_client_id              = local.goldilocks_client_id
       goldilocks_oauth_redirect_uri          = "https://${local.goldilocks_hostname_value}/oauth2/callback"
-      goldilocks_oauth2_proxy_image_tag      = "v7.15.3"
+      goldilocks_oauth2_proxy_image_tag      = var.vpa_goldilocks.oauth2_proxy_image_tag
       goldilocks_oauth2_proxy_cookie_name    = "_goldilocks_oauth2_proxy"
       goldilocks_oauth2_proxy_allowed_groups = local.goldilocks_effective_groups
       goldilocks_oauth2_proxy_cpu_request    = "50m"
@@ -334,7 +336,7 @@ resource "helm_release" "vpa" {
     "metrics-server"    = { enabled = false }
     recommender = {
       enabled = true
-      image   = { repository = "registry.k8s.io/autoscaling/vpa-recommender", tag = "1.7.1" }
+      image   = { repository = "registry.k8s.io/autoscaling/vpa-recommender", tag = var.vpa_goldilocks.recommender_image_tag }
       podLabels = {
         "app.kubernetes.io/part-of"    = "vpa"
         "app.kubernetes.io/managed-by" = "infrastructure"

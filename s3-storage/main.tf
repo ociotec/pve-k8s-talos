@@ -6,7 +6,7 @@ terraform {
     }
     null = {
       source  = "hashicorp/null"
-      version = ">= 3.2.4, < 3.3.0"
+      version = ">= 3.2.4, < 4.0.0"
     }
   }
 }
@@ -157,6 +157,8 @@ locals {
     local.s3_namespace_value,
   )
 
+  # Optional because older Garage releases do not recognize public_endpoint.
+  garage_s3_public_endpoint_value = local.garage_s3_public_endpoint
   garage_config_toml = <<-EOT
   metadata_dir = "/var/lib/garage/meta"
   data_dir = "/var/lib/garage/data"
@@ -175,7 +177,7 @@ locals {
   [s3_api]
   api_bind_addr = "0.0.0.0:3900"
   s3_region = "${local.garage_s3_region_value}"
-  root_domain = ".${local.garage_s3_hostname_value}"
+  root_domain = ".${local.garage_s3_hostname_value}"${trimspace(local.garage_s3_public_endpoint_value) != "" ? format("\npublic_endpoint = %s", jsonencode(local.garage_s3_public_endpoint_value)) : ""}
 
   [admin]
   api_bind_addr = "0.0.0.0:3903"

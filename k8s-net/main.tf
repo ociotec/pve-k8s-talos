@@ -2,7 +2,7 @@ terraform {
   required_providers {
     proxmox = {
       source  = "bpg/proxmox"
-      version = "~> 0.104.0"
+      version = ">= 0.104.0, < 0.119.0"
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"
@@ -283,6 +283,7 @@ locals {
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
   ]
+  kyverno_chart_version_value = try(regex("(?m)^\\s*kyverno_chart_version\\s*=\\s*\"([^\"]+)\"\\s*(?:#.*)?$", local.constants_source)[0], "3.7.0")
   kyverno_policies = [
     for doc in split("\n---\n", templatefile("${path.module}/kyverno-policies.yaml", {
       failure_action = local.kyverno_failure_action
@@ -773,7 +774,7 @@ resource "helm_release" "kyverno" {
   create_namespace = true
   repository       = "oci://ghcr.io/kyverno/charts"
   chart            = "kyverno"
-  version          = "3.7.0"
+  version          = local.kyverno_chart_version_value
   wait             = true
   timeout          = 600
   atomic           = true

@@ -24,6 +24,8 @@ locals {
   effective_ceph_mode        = try(local.ceph_mode, "internal")
   effective_ceph_namespace   = try(local.ceph_namespace, "rook-ceph")
   effective_ceph_name_prefix = try(local.ceph_name_prefix, "cluster")
+  rook_version_value = try(regex("(?m)^\\s*rook_version\\s*=\\s*\"([^\"]+)\"\\s*(?:#.*)?$", file("${path.module}/ceph_constants.tf"))[0], "1.19.4")
+  rook_csi_operator_enabled = try(tonumber(split(".", trimprefix(local.rook_version_value, "v"))[0]) > 1 || tonumber(split(".", trimprefix(local.rook_version_value, "v"))[1]) >= 20, false)
 
   effective_ceph_block_replicated = merge(
     {
@@ -357,7 +359,8 @@ locals {
 
   # Rook owns these CSI workloads and may recreate their pod templates. Keep
   # the operational grouping labels in one post-reconcile patch map.
-  rook_managed_workload_label_patches = {
+  # The CSI operator reads pod labels from Driver CRs on newer Rook releases.
+  rook_managed_workload_label_patches = local.rook_csi_operator_enabled ? {} : {
     "deployment/csi-cephfsplugin-provisioner" = {
       resource = "deployment"
       kind     = "Deployment"

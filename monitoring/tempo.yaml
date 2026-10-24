@@ -56,6 +56,10 @@ data:
     storage:
       trace:
         backend: local
+%{ if tempo_block_version != "" ~}
+        block:
+          version: ${tempo_block_version}
+%{ endif ~}
         wal:
           path: /var/tempo/wal
         local:
@@ -126,6 +130,7 @@ spec:
         app.kubernetes.io/managed-by: infrastructure
         pve-k8s-talos/section: monitoring
       annotations:
+        checksum/config: ${tempo_config_hash}
         prometheus.io/scrape: "true"
         prometheus.io/port: "3200"
         prometheus.io/path: /metrics

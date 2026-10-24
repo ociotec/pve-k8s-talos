@@ -7,8 +7,8 @@ locals {
   redpanda_storage_class_name      = "redpanda-local"
   redpanda_console_hostname        = "redpanda-console.${local.domain}"
   redpanda_console_tls_secret_name = "redpanda-console-tls"
-  redpanda_image                   = "docker.redpanda.com/redpandadata/redpanda:v26.1.6"
-  redpanda_console_image           = "docker.redpanda.com/redpandadata/console:v3.7.2"
+  redpanda_image                   = "docker.redpanda.com/redpandadata/redpanda:v26.2.5"
+  redpanda_console_image           = "docker.redpanda.com/redpandadata/console:v3.13.1"
 
   # Redpanda cluster-wide settings. Keys must match official Redpanda cluster
   # properties. Numeric values are passed through unchanged; strings may use
@@ -77,7 +77,7 @@ locals {
   redpanda_console_auth_allowed_groups = ["k8s-admins"]
   redpanda_console_auth_ca_secret_name = "redpanda-console-oauth-ca"
 
-  redpanda_console_oauth2_proxy_image_tag         = "v7.15.2"
+  redpanda_console_oauth2_proxy_image_tag         = "v7.15.5"
   redpanda_console_oauth2_proxy_cookie_name       = "_redpanda_console_oauth2_proxy"
   redpanda_console_oauth2_proxy_cpu_request       = "50m"
   redpanda_console_oauth2_proxy_cpu_limit         = "200m"

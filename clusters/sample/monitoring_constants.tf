@@ -1,4 +1,8 @@
 locals {
+  # Leave empty to use the selected Tempo release's default write format.
+  tempo_block_version = ""
+  policy_reporter_chart_version = "3.11.1"
+  policy_reporter_image_tag = "3.11.2"
   # Empty by default: this cluster publishes no cross-cluster query APIs.
   grafana_datasource_suffix = ""
   monitoring_api_consumers  = []
@@ -29,7 +33,7 @@ locals {
   policy_reporter_tls_secret_name          = "policy-reporter-tls"
   policy_reporter_auth_keycloak_realm      = "company"
   policy_reporter_auth_allowed_groups      = ["k8s-admins", "monitoring-view"]
-  policy_reporter_oauth2_proxy_image_tag   = "v7.15.3"
+  policy_reporter_oauth2_proxy_image_tag   = "v7.15.5"
   policy_reporter_oauth2_proxy_cookie_name = "_policy_reporter_oauth2_proxy"
   policy_reporter_oauth2_proxy_cpu_request = "50m"
   policy_reporter_oauth2_proxy_cpu_limit   = "200m"
@@ -68,14 +72,14 @@ locals {
   loki_ingestion_burst_size_mb = 30
   tempo_retention              = "336h" # 14 days
 
-  grafana_image_tag        = "13.1.1"
-  prometheus_image_tag     = "v3.13.2"
-  loki_image_tag           = "3.7.4"
-  tempo_image_tag          = "3.0.2"
+  grafana_image_tag        = "13.2.4"
+  prometheus_image_tag     = "v3.15.1"
+  loki_image_tag           = "3.7.9"
+  tempo_image_tag          = "3.1.1"
   # Optional synthetic trace through the repository OTel/Tempo pipeline after deploy.
   # Leave disabled for collectors with custom routing or sampling policies.
   tempo_deployment_trace_probe_enabled = false
-  otel_collector_image_tag = "0.155.0"
+  otel_collector_image_tag = "0.163.2"
   # Disabled by default because this opens an Internet-facing trace-ingest endpoint.
   # Frontends deployed under the cluster domain are accepted without creating
   # an application-to-monitoring configuration dependency.
@@ -90,7 +94,7 @@ locals {
   # Enable localhost:8080 above only in development-cluster constants.
   # Beyla auto-instruments only repository-managed oauth2-proxy containers.
   beyla_enabled        = true
-  beyla_image_tag      = "3.15.0"
+  beyla_image_tag      = "3.39.1"
   beyla_cpu_request    = "100m"
   beyla_cpu_limit      = "500m"
   beyla_mem_request    = "256Mi"
@@ -100,18 +104,18 @@ locals {
   # Existing clusters without this setting remain on Promtail until they opt in.
   kubernetes_log_collector  = "alloy"
   kubernetes_events_enabled = true
-  alloy_image_tag           = "v1.18.1"
+  alloy_image_tag           = "v1.21.2"
 
-  promtail_image_tag           = "3.6.10"
-  kube_state_metrics_image_tag = "v2.19.1"
+  promtail_image_tag           = "3.6.11"
+  kube_state_metrics_image_tag = "v2.20.0"
   node_exporter_image_tag      = "v1.12.1"
 
   grafana_admin_user                    = "admin"
   grafana_admin_password_length         = 24
   grafana_db_name                       = "grafana"
   grafana_db_username                   = "grafana"
-  grafana_postgres_image_tag            = "18.4"
-  grafana_postgres_exporter_image_tag   = "v0.19.1"
+  grafana_postgres_image_tag            = "18.6"
+  grafana_postgres_exporter_image_tag   = "v0.20.1"
   grafana_postgres_pvc_size             = "8Gi"
   grafana_postgres_password_length      = 24
   grafana_postgres_cpu_request          = "100m"
@@ -136,7 +140,7 @@ locals {
   # manifest-managed Deployment and Service.
   grafana_helm_enabled        = true
   grafana_helm_take_ownership = false
-  grafana_helm_chart_version  = "13.2.5"
+  grafana_helm_chart_version  = "14.0.1"
 
   # Install the cluster-wide Grafana Operator and its mutable CRDs first.
   # Enable registration in a second monitoring deployment after the CRDs exist.
@@ -163,7 +167,7 @@ locals {
   prometheus_auth_keycloak_realm            = "company"
   prometheus_auth_allowed_groups            = ["monitoring-view", "monitoring-edit"]
   prometheus_auth_ca_secret_name            = "prometheus-oauth-ca"
-  prometheus_oauth2_proxy_image_tag         = "v7.15.2"
+  prometheus_oauth2_proxy_image_tag         = "v7.15.5"
   prometheus_oauth2_proxy_cookie_name       = "_prometheus_oauth2_proxy"
   prometheus_oauth2_proxy_cpu_request       = "50m"
   prometheus_oauth2_proxy_cpu_limit         = "200m"

@@ -24,7 +24,7 @@ locals {
   benchmark_kafka_enabled_value = try(local.benchmark_kafka_enabled, false)
   # Benchmark Kafka uses the same Redpanda image and broker bootstrap pattern as
   # the Kafka section, but this module cannot read locals from another module.
-  benchmark_kafka_image_value     = "docker.redpanda.com/redpandadata/redpanda:v26.1.6"
+  benchmark_kafka_image_value     = try(regex("(?m)^\\s*benchmark_kafka_image\\s*=\\s*\"([^\"]+)\"\\s*(?:#.*)?$", file("${path.module}/constants.tf"))[0], "docker.redpanda.com/redpandadata/redpanda:v26.1.6")
   benchmark_kafka_bootstrap_value = "redpanda-0.redpanda.kafka.svc.cluster.local:9092,redpanda-1.redpanda.kafka.svc.cluster.local:9092,redpanda-2.redpanda.kafka.svc.cluster.local:9092"
   benchmark_priority_class_name   = "benchmark-low"
 

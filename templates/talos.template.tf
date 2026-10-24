@@ -1,11 +1,19 @@
 resource "talos_machine_secrets" "machine_secrets" {
 }
 
+locals {
+  # Talos 1.14 moves kube-proxy from Config.cluster.proxy to its own document.
+  kube_proxy_document = try(one([
+    for doc in split("\n---\n", values(local.controlplane_machine_config)[0]) : yamldecode(doc)
+    if try(yamldecode(doc).kind == "KubeProxyConfig", false)
+  ]), null)
+}
+
 # Reconcile only Talos's proxy; other modules retain ownership of DNS and RBAC.
 output "kube_proxy_configuration" {
   value = {
-    enabled = !try(yamldecode(split("\n---\n", values(local.controlplane_machine_config)[0])[0]).cluster.proxy.disabled, false)
-    image   = try(yamldecode(split("\n---\n", values(local.controlplane_machine_config)[0])[0]).cluster.proxy.image, "")
+    enabled = !try(local.kube_proxy_document.disabled, yamldecode(split("\n---\n", values(local.controlplane_machine_config)[0])[0]).cluster.proxy.disabled, false)
+    image   = try(local.kube_proxy_document.image, yamldecode(split("\n---\n", values(local.controlplane_machine_config)[0])[0]).cluster.proxy.image, "")
   }
   sensitive = true
 }

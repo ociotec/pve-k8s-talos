@@ -15,7 +15,7 @@ locals {
 
   keycloak_hostname        = "keycloak.${local.domain}"
   keycloak_tls_secret_name = "keycloak-tls"
-  keycloak_image_tag       = "26.7.0"
+  keycloak_image_tag       = "26.8.1"
   # Optional repository without tag; defaults to the upstream Keycloak image.
   keycloak_image_repository = "quay.io/keycloak/keycloak"
   # Extra startup options; use ["--optimized"] only for images prepared with kc.sh build.
@@ -36,8 +36,8 @@ locals {
 
   keycloak_db_name            = "keycloak"
   keycloak_db_username        = "keycloak"
-  postgres_image_tag          = "18.3"
-  postgres_exporter_image_tag = "v0.19.1"
+  postgres_image_tag          = "18.6"
+  postgres_exporter_image_tag = "v0.20.1"
   postgres_pvc_size           = "8Gi"
   postgres_password_length    = 24
 

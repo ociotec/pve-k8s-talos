@@ -1,0 +1,77 @@
+{
+  "cert_manager_version": {
+    "default": "1.20.2",
+    "releases": {
+      "1.21.3": {
+        "cert-manager.yaml": {
+          "url": "https://github.com/cert-manager/cert-manager/releases/download/v1.21.3/cert-manager.yaml",
+          "sha256": "c04a51295adda2b1a775146751f973e787190778c7f35180861d9678876e5c74"
+        }
+      }
+    }
+  },
+  "metrics_server_version": {
+    "default": "0.8.1",
+    "releases": {
+      "0.9.0": {
+        "metrics-server.yaml": {
+          "url": "https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.9.0/components.yaml",
+          "sha256": "1cec29a5267809306a2c6ec74a3e449abbb705b4a8beed0c8a1963910f72c79b"
+        }
+      }
+    }
+  },
+  "metallb_version": {
+    "default": "0.15.3",
+    "releases": {
+      "0.16.0": {
+        "metallb-native.yaml": {
+          "url": "https://raw.githubusercontent.com/metallb/metallb/v0.16.0/config/manifests/metallb-native.yaml",
+          "sha256": "b0b9be2802f10aa32d45308b4457d06cde0c70544712c8d0cf5511657ffd2b69"
+        }
+      }
+    }
+  },
+  "rook_version": {
+    "default": "1.19.4",
+    "releases": {
+      "1.21.0": {
+        "rook/crds.yaml": {
+          "url": "https://raw.githubusercontent.com/rook/rook/v1.21.0/deploy/examples/crds.yaml",
+          "sha256": "e9ce36f83c435b9eeb7ad5883c7043a6bfc05ed3581ab1d482acd7823ee81fe2"
+        },
+        "rook/common.yaml": {
+          "url": "https://raw.githubusercontent.com/rook/rook/v1.21.0/deploy/examples/common.yaml",
+          "sha256": "9b518fd1b05bd720a8fcf98a209b9b4ce551ad7b1ed811f0a9c200f74316df7d"
+        },
+        "rook/operator.yaml": {
+          "url": "https://raw.githubusercontent.com/rook/rook/v1.21.0/deploy/examples/operator.yaml",
+          "sha256": "5e670dca54401cdf62fd41b8bdc56cf9964d98fbe40d5cac5f90528c64054c98"
+        },
+        "rook/csi-operator.yaml": {
+          "url": "https://raw.githubusercontent.com/rook/rook/v1.21.0/deploy/examples/csi-operator.yaml",
+          "sha256": "a8d07a406a39dffcea64c2ee37db04adbe20e557ee3805df262b8aef54407359"
+        }
+      }
+    }
+  },
+  "csi_addons_version": {
+    "default": "0.14.0",
+    "releases": {
+      "0.15.1": {
+        "csi-addons/crds.yaml": {
+          "url": "https://github.com/csi-addons/kubernetes-csi-addons/releases/download/v0.15.1/crds.yaml",
+          "sha256": "d38490d9a81ddf894863bdb5aad8d69c06e6b18b4ca8773813780f47bc095116"
+        },
+        "csi-addons/rbac.yaml": {
+          "url": "https://github.com/csi-addons/kubernetes-csi-addons/releases/download/v0.15.1/rbac.yaml",
+          "sha256": "04f275a2c1a91517fb160c2b12366c06dbed13a16f411710285013cbf3a0181e"
+        },
+        "csi-addons/setup-controller.yaml": {
+          "url": "https://github.com/csi-addons/kubernetes-csi-addons/releases/download/v0.15.1/setup-controller.yaml",
+          "sha256": "87376a275bdf5b395a1043a4c581cfb20e33dbb21e018330b2269e1a6f368c3c"
+        }
+      }
+    }
+  }
+}

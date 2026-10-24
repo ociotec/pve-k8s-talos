@@ -1,9 +1,7 @@
 locals {
-  # V0.21.04 is the latest source release, but its official image workflow
-  # failed. V0.21.03 is the latest successfully published stable image.
   benchmark_namespace    = "benchmark"
-  benchmark_stress_image = "ghcr.io/colinianking/stress-ng:f882a7540accdaa38f15474594b7f0339d5f7472@sha256:8d663e5a331a72ae17118d27647b8bd2e0f4970bcbc6e1b0088b29f2e4e8cfa8"
-  benchmark_fio_image    = "openeuler/fio:3.42-oe2403sp3@sha256:5aa41b711c36d226852d4ce1e4a0d5d31e5e15d641f4526febf58c28def9caea"
+  benchmark_stress_image = "ghcr.io/colinianking/stress-ng:72a9d0cae0f420a887991d4024d3101c4af7a4fc@sha256:2ea9a7c3828eda1b1ca3d0b0c5a669ec252f9caf97a6a33aedcea6b2a66d1cbe"
+  benchmark_fio_image    = "openeuler/fio:3.43-oe2403sp4@sha256:7b7d4a5bfdc52accdc667dbe1d37c9c7ca6f313b9472eec6c84d41697d3cc607"
 
   # Workload names include these unit sizes, for example benchmark-cpu-2vcpus.
   benchmark_cpu_vcpus    = 2
@@ -33,6 +31,7 @@ locals {
   # Keep the Kafka benchmark disabled in sample clusters unless a real Redpanda
   # section is present and the profile set is intentionally enabled.
   benchmark_kafka_enabled = false
+  benchmark_kafka_image = "docker.redpanda.com/redpandadata/redpanda:v26.2.5"
 
   benchmark_kafka_metadata_topics     = 50
   benchmark_kafka_metadata_partitions = 1

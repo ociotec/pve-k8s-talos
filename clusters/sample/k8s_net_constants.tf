@@ -1,4 +1,9 @@
 locals {
+  # Release selection is optional; omitted values retain legacy manifests.
+  cert_manager_version = "1.21.3"
+  metrics_server_version = "0.9.0"
+  metallb_version = "0.16.0"
+  kyverno_chart_version = "3.9.2"
   domain = "home.arpa"
 
   tls_source = "ca_issuer"

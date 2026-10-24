@@ -1,6 +1,8 @@
 # Monitoring functionality enabled by default; configure the cluster identity realm.
 # Goldilocks uses goldilocks.<cluster-domain> and the default TLS certificate.
 vpa_goldilocks = {
+  oauth2_proxy_image_tag = "v7.15.5"
+  recommender_image_tag = "1.8.1"
   vpa_enabled        = true
   goldilocks_enabled = true
   keycloak_realm     = "company"

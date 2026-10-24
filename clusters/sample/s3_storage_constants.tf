@@ -1,4 +1,6 @@
 locals {
+  # Supported by Garage 2.5 and newer; omit for older image overrides.
+  garage_s3_public_endpoint = format("https://%s", local.garage_s3_hostname)
   s3_namespace              = "s3"
   garage_name               = "garage"
   garage_node_k8s_label     = "s3"
@@ -9,7 +11,7 @@ locals {
   garage_console_hostname            = "s3-console.${local.domain}"
   garage_s3_tls_secret_name          = "s3-api-tls"
   garage_console_tls_secret_name     = "s3-console-tls"
-  garage_image                       = "dxflrs/garage:v2.3.0"
+  garage_image                       = "dxflrs/garage:v2.5.0"
   garage_console_image               = "khairul169/garage-webui:1.1.0"
   garage_replication_factor          = 3
   garage_console_auth_keycloak_realm = "company"
@@ -25,7 +27,7 @@ locals {
   garage_console_mem_request = "256Mi"
   garage_console_mem_limit   = "256Mi"
 
-  garage_oauth2_proxy_image_tag   = "v7.15.2"
+  garage_oauth2_proxy_image_tag   = "v7.15.5"
   garage_oauth2_proxy_cpu_request = "50m"
   garage_oauth2_proxy_cpu_limit   = "200m"
   garage_oauth2_proxy_mem_request = "128Mi"

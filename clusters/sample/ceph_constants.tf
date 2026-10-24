@@ -1,8 +1,11 @@
 locals {
+  rook_version = "1.21.0"
+  csi_addons_version = "0.15.1"
   ceph_mode          = "internal"
   ceph_namespace     = "rook-ceph"
   ceph_cluster_name  = "rook-ceph"
-  ceph_cluster_image = "quay.io/ceph/ceph:v20.2.1"
+  # In external mode, this release must not be newer than the provider cluster.
+  ceph_cluster_image = "quay.io/ceph/ceph:v20.2.4"
 
   ceph_name_prefix = "sample"
 

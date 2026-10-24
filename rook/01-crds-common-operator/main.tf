@@ -13,6 +13,7 @@ provider "kubernetes" {
 
 locals {
   constants_source = file("${path.module}/ceph_constants.tf")
+  ceph_client_image = try(regex("(?m)^\\s*ceph_cluster_image\\s*=\\s*\"([^\"]+)\"\\s*(?:#.*)?$", local.constants_source)[0], "quay.io/ceph/ceph:v20.2.1")
   # One cluster override sets both the reservation and OOM ceiling.
   operator_memory = try(
     regex("(?m)^\\s*ceph_operator_memory\\s*=\\s*\"([^\"]+)\"\\s*(?:#.*)?$", local.constants_source)[0],
@@ -137,7 +138,15 @@ locals {
   ]
   rook_toolbox = [
     for doc in split("\n---\n", file("${path.module}/../manifests/toolbox.yaml")) :
-    yamldecode(doc)
+    merge(yamldecode(doc), {
+      spec = merge(yamldecode(doc).spec, {
+        template = merge(yamldecode(doc).spec.template, {
+          spec = merge(yamldecode(doc).spec.template.spec, {
+            containers = [for container in yamldecode(doc).spec.template.spec.containers : merge(container, { image = local.ceph_client_image })]
+          })
+        })
+      })
+    })
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
   ]
 

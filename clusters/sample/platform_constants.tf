@@ -6,7 +6,7 @@ locals {
 
   storage_class = "${local.ceph_name_prefix}-rbd-ec"
 
-  portainer_image_tag              = "2.39.4"
+  portainer_image_tag              = "2.45.3"
   portainer_storage_class          = local.storage_class
   portainer_pvc_size               = "10Gi"
   portainer_admin_password_length  = 24
