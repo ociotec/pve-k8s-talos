@@ -780,9 +780,15 @@ locals {
       if !contains([
         "cattle-provisioning-capi-system/capi-controller-manager",
         "cattle-system/api-extension",
+        "fleet-default/rke2-machineconfig-cleanup-cronjob",
       ], key)
     },
     {
+      # Fresh Rancher 2.15 installations place the local cluster cleanup in fleet-local.
+      "fleet-local/rke2-machineconfig-cleanup-cronjob" = merge(
+        local.rancher_managed_resource_patches_base["fleet-default/rke2-machineconfig-cleanup-cronjob"],
+        { namespace = "fleet-local" }
+      )
       "cattle-system/rancher-webhook" = merge(local.rancher_managed_resource_patches_base["cattle-system/rancher-webhook"], {
         patch = jsonencode(merge(jsondecode(local.rancher_managed_resource_patches_base["cattle-system/rancher-webhook"].patch), {
           metadata = {
