@@ -375,10 +375,20 @@ That example renders Talos YAML using `skipFallback: true`, `overridePath: true`
 
 On existing clusters, `deploy.sh --talos-only` verifies registry authentication
 with a temporary kubelet pod (`imagePullPolicy: Always`, no pull secrets).
+On Talos 1.13 and earlier, the checker reads `cri/conf.d/01-registries.part`.
 Static CRI credentials need a node reboot when newer than the running process;
 without explicit `--reboot-for-registry-auth`, deployment stops before draining.
 
-With that option, the script protects nodes awaiting activation with a temporary
+Starting with Talos **1.14.0**, registry settings are merged in memory into
+`cri/conf.d/cri.toml`; the separate registry fragment is no longer published.
+The checker uses the merged resource when the legacy resource returns
+`NotFound`, verifies its materialized contents, and waits for Talos to reload
+CRI automatically. A pending automatic reload never triggers a node drain or
+reboot. Permission and transport errors stop validation without selecting a
+different file. See the [Talos 1.14 CRI documentation](https://docs.siderolabs.com/talos/v1.14/configure-your-talos-cluster/images-container-runtime/containerd)
+and [the 1.14.0 configuration controller](https://github.com/siderolabs/talos/blob/v1.14.0/internal/app/machined/pkg/controllers/files/cri_config.go).
+
+With that option on legacy Talos, the script protects nodes awaiting activation with a temporary
 cordon and NoSchedule taint. At least one Ready, schedulable worker must already
 have working credentials to receive displaced workloads. Workers are drained
 and rebooted first, then control-plane nodes one at a time, with readiness and

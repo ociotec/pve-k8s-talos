@@ -45,6 +45,7 @@ class FakeReconciler(MODULE.Reconciler):
         self.calls = []
         self.probe = None
         self.fail_pull = False
+        self.file_id = MODULE.FILE_ID
         self.inject_secret = False
         self.move_probe = False
         self.fail_cleanup = False
@@ -79,9 +80,13 @@ class FakeReconciler(MODULE.Reconciler):
                     self.node_data["status"]["nodeInfo"]["bootID"] = "boot-b"
                 return ""
             if op[0] == "read":
+                if op[1] != "/etc/" + self.file_id:
+                    raise MODULE.ReconcileError("Unexpected CRI file path.")
                 return self.file["spec"]["contents"] if self.disk_matches else "not materialized"
             kind = op[1]
             if kind == "etcfilespecs.files.talos.dev":
+                if op[2] != self.file_id:
+                    raise MODULE.ResourceNotFoundError("Talos resource not found.")
                 return copy.deepcopy(self.file)
             if kind == "etcfilestatuses.files.talos.dev":
                 return {"spec": {"specVersion": str(self.file["metadata"]["version"]) if self.materialized else "1"}}
@@ -147,6 +152,60 @@ class ReconcileTest(unittest.TestCase):
     def pending(self):
         self.r.process["metadata"]["updated"] = "2026-01-01T00:00:01Z"
         self.r.node_data["metadata"]["annotations"][MODULE.MAINTENANCE] = "true"
+
+    def test_legacy_registry_fragment_remains_supported(self):
+        current = self.r.runtime()
+        self.assertEqual(current["file_id"], MODULE.FILE_ID)
+        self.assertFalse(current["automatic_reload"])
+        self.assertTrue(current["has_auth"])
+
+    def test_merged_config_is_used_when_the_legacy_resource_is_absent(self):
+        self.r.file_id = "cri/conf.d/cri.toml"
+        current = self.r.runtime()
+        self.assertEqual(current["file_id"], self.r.file_id)
+        self.assertTrue(current["automatic_reload"])
+        self.assertTrue(current["has_auth"])
+        self.r.reconcile()
+        self.assertIn("create-Pod", self.r.calls)
+        self.assertNotIn("reboot", self.r.calls)
+
+    def test_merged_config_waits_for_automatic_reload_without_draining(self):
+        self.r.file_id = "cri/conf.d/cri.toml"
+        self.r.process["metadata"]["updated"] = "2026-01-01T00:00:01Z"
+        self.sleep.side_effect = lambda _: self.r.process["metadata"].update(
+            updated="2026-01-01T00:00:03Z")
+        self.r.reconcile()
+        self.assertIn("create-Pod", self.r.calls)
+        self.assertNotIn("drain", self.r.calls)
+        self.assertNotIn("reboot", self.r.calls)
+
+    def test_automatic_reload_timeout_never_touches_a_node(self):
+        self.r.file_id = "cri/conf.d/cri.toml"
+        self.r.process["metadata"]["updated"] = "2026-01-01T00:00:01Z"
+        with patch.object(MODULE.time, "monotonic", side_effect=range(30)):
+            with self.assertRaisesRegex(MODULE.ReconcileError, "automatic CRI reload"):
+                self.r.reconcile()
+        self.assertEqual(self.r.calls, [])
+
+    def test_resource_access_errors_do_not_fall_back_to_another_file(self):
+        original = self.r.talos_resource
+        requested = []
+        def resource(kind, resource_id):
+            requested.append(resource_id)
+            if kind == "etcfilespecs.files.talos.dev":
+                raise MODULE.ReconcileError("Simulated permission or transport error.")
+            return original(kind, resource_id)
+        self.r.talos_resource = resource
+        with self.assertRaisesRegex(MODULE.ReconcileError, "permission or transport"):
+            self.r.runtime()
+        self.assertEqual(requested, [MODULE.FILE_ID])
+        self.assertEqual(self.r.calls, [])
+
+    def test_missing_both_supported_files_is_an_error(self):
+        self.r.file_id = "unsupported/config.toml"
+        with self.assertRaisesRegex(MODULE.ReconcileError, "No supported CRI"):
+            self.r.runtime()
+        self.assertEqual(self.r.calls, [])
 
     def test_pending_credentials_require_explicit_permission(self):
         self.pending()
@@ -304,6 +363,21 @@ class ReconcileTest(unittest.TestCase):
                 MODULE.Reconciler(self.r.args).command(["talosctl", "read", "/unused"])
         self.assertNotIn("test-password", str(error.exception))
 
+    def test_only_a_real_notfound_response_allows_resource_fallback(self):
+        for code in ["NotFound", "PermissionDenied", "Unavailable"]:
+            with self.subTest(code=code):
+                stderr = f"rpc error: code = {code} desc = test-password"
+                if code == "Unavailable":
+                    stderr += " upstream code = NotFound"
+                result = subprocess.CompletedProcess([], 1, stdout="", stderr=stderr)
+                with patch.object(MODULE.subprocess, "run", return_value=result):
+                    with self.assertRaises(MODULE.ReconcileError) as error:
+                        MODULE.Reconciler(self.r.args).talos_resource(
+                            "etcfilespecs.files.talos.dev", MODULE.FILE_ID)
+                self.assertEqual(isinstance(error.exception, MODULE.ResourceNotFoundError),
+                                 code == "NotFound")
+                self.assertNotIn("test-password", str(error.exception))
+
     def test_drain_uses_evictions_and_never_forces_unmanaged_pods(self):
         self.pending()
         original = self.r.command
@@ -422,6 +496,18 @@ class ReconcileTest(unittest.TestCase):
         with patch.object(MODULE, "Reconciler", return_value=self.r):
             with self.assertRaisesRegex(MODULE.ReconcileError, "no nodes were cordoned"):
                 MODULE.prepare_cluster(args)
+        self.assertEqual(self.r.calls, [])
+
+    def test_prepare_waits_for_merged_config_without_reboot_permission(self):
+        args = self.r.args
+        args.prepare_node = ["worker-a|192.0.2.10|worker"]
+        args.allow_node_reboot = False
+        self.r.file_id = MODULE.MERGED_FILE_ID
+        self.r.process["metadata"]["updated"] = "2026-01-01T00:00:01Z"
+        self.sleep.side_effect = lambda _: self.r.process["metadata"].update(
+            updated="2026-01-01T00:00:03Z")
+        with patch.object(MODULE, "Reconciler", return_value=self.r):
+            MODULE.prepare_cluster(args)
         self.assertEqual(self.r.calls, [])
 
     def test_prepare_without_loaded_seed_does_not_cordon(self):

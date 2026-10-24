@@ -14,12 +14,17 @@ import uuid
 
 
 FILE_ID = "cri/conf.d/01-registries.part"
+MERGED_FILE_ID = "cri/conf.d/cri.toml"
 ANNOTATION = "pve-k8s-talos/registry-auth-validated"
 MAINTENANCE = "pve-k8s-talos/registry-auth-maintenance"
 PROBE_IMAGE = "registry.k8s.io/pause:3.10"
 
 
 class ReconcileError(RuntimeError):
+    pass
+
+
+class ResourceNotFoundError(ReconcileError):
     pass
 
 
@@ -51,6 +56,9 @@ class Reconciler:
             raise ReconcileError(f"{args[0]} command failed ({type(exc).__name__}).") from exc
         if result.returncode:
             # Never print Talos configuration contents or registry credentials.
+            code = re.search(r"\bcode\s*=\s*(\w+)", result.stderr)
+            if args[0] == "talosctl" and "get" in args and code and code[1] == "NotFound":
+                raise ResourceNotFoundError("Talos resource not found.")
             if "drain" in args:
                 raise ReconcileError("Drain failed (eviction/PDBs remain enforced): " + result.stderr.strip())
             raise ReconcileError(f"{args[0]} command failed (exit {result.returncode}).")
@@ -74,13 +82,22 @@ class Reconciler:
         ])["items"]
 
     def runtime(self):
-        spec = self.talos_resource("etcfilespecs.files.talos.dev", FILE_ID)
-        status = self.talos_resource("etcfilestatuses.files.talos.dev", FILE_ID)
+        # Talos 1.14 merges registry settings in memory instead of publishing
+        # the separate registry fragment. Keep the legacy check where available.
+        for file_id in (FILE_ID, MERGED_FILE_ID):
+            try:
+                spec = self.talos_resource("etcfilespecs.files.talos.dev", file_id)
+                break
+            except ResourceNotFoundError:
+                continue
+        else:
+            raise ReconcileError("No supported CRI registry configuration resource is available.")
+        status = self.talos_resource("etcfilestatuses.files.talos.dev", file_id)
         process = self.talos_resource("servicepids", "cri")
         service = self.talos_resource("services", "cri")["spec"]
         if str(status["spec"].get("specVersion")) != str(spec["metadata"]["version"]):
             raise ReconcileError("The CRI registry configuration has not reached disk yet.")
-        if self.command(self.talos + ["read", "/etc/" + FILE_ID], raw=True) != spec["spec"]["contents"]:
+        if self.command(self.talos + ["read", "/etc/" + file_id], raw=True) != spec["spec"]["contents"]:
             raise ReconcileError("The CRI registry file differs from the generated configuration.")
         if not service.get("running") or not service.get("healthy") or service.get("unknown"):
             raise ReconcileError("CRI is not running and healthy.")
@@ -91,16 +108,30 @@ class Reconciler:
         process_time = process["metadata"]["updated"]
         pending = timestamp(file_time) > timestamp(process_time)
         signature = json.dumps({
+            "configFile": file_id,
             "fileUpdated": file_time, "fileVersion": str(spec["metadata"]["version"]),
             "processUpdated": process_time, "pid": pid, "probeImage": self.args.probe_image,
         }, sort_keys=True, separators=(",", ":"))
         return {
+            "file_id": file_id, "automatic_reload": file_id == MERGED_FILE_ID,
             "pending": pending, "signature": signature, "file_time": file_time,
             "process": (process_time, pid),
             "content_hash": hashlib.sha256(spec["spec"]["contents"].encode()).hexdigest(),
             "has_auth": bool(re.search(r"(?m)^\s*\[.*registry\.configs\..*\.auth\]",
                                        spec["spec"]["contents"])),
         }
+
+    def loaded_runtime(self):
+        current = self.runtime()
+        deadline = time.monotonic() + self.args.timeout
+        # Talos 1.14 reloads the merged configuration by restarting CRI itself.
+        # Never drain or reboot a node to race that automatic reload.
+        while current["automatic_reload"] and current["pending"]:
+            if time.monotonic() >= deadline:
+                raise ReconcileError("Timed out waiting for automatic CRI reload; no node reboot was requested.")
+            time.sleep(2)
+            current = self.runtime()
+        return current
 
     def protect(self):
         node = self.node()
@@ -301,7 +332,7 @@ class Reconciler:
                 raise ReconcileError(prefix + "Failed to clean up registry pull probe resources: " + "; ".join(cleanup_errors))
 
     def reconcile(self):
-        current = self.runtime()
+        current = self.loaded_runtime()
         node = self.node()
         annotations = node["metadata"].get("annotations", {})
         owned = annotations.get(MAINTENANCE) == "true"
@@ -337,7 +368,7 @@ def prepare_cluster(args):
         node_args = argparse.Namespace(**vars(args))
         node_args.node_name, node_args.node_address = name, address
         reconciler = Reconciler(node_args)
-        runtime, node = reconciler.runtime(), reconciler.node()
+        runtime, node = reconciler.loaded_runtime(), reconciler.node()
         if not reconciler.ready(node):
             raise ReconcileError("All nodes must be Ready before registry maintenance.")
         entries.append((reconciler, runtime, node, role))
