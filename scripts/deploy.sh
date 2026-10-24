@@ -2433,6 +2433,11 @@ prepare_monitoring_workspace() {
     link_into_workspace "${repo_root}/monitoring/.terraform" "${workspace}/.terraform"
   fi
   link_into_workspace "${repo_root}/monitoring/main.tf" "${workspace}/main.tf"
+  link_into_workspace "${repo_root}/monitoring/intercluster.tf" "${workspace}/intercluster.tf"
+  link_into_workspace "${repo_root}/monitoring/query-api.conf" "${workspace}/query-api.conf"
+  python3 "${script_dir}/prepare-monitoring-defaults.py" \
+    --constants "${cluster_monitoring_constants_path}" \
+    --output "${workspace}/intercluster-defaults.tf"
   link_into_workspace "${repo_root}/monitoring/vpa-goldilocks.tf" "${workspace}/vpa-goldilocks.tf"
   link_into_workspace "${repo_root}/monitoring/goldilocks-oauth2-proxy.yaml" "${workspace}/goldilocks-oauth2-proxy.yaml"
   if [[ -r "${cluster_dir}/vpa-goldilocks.auto.tfvars" ]]; then
@@ -4345,6 +4350,11 @@ else
     monitoring_daemonsets+=(beyla)
   fi
   monitoring_services=(grafana-postgres grafana loki tempo otel-collector prometheus kube-state-metrics node-exporter)
+  # Check only this cluster's gateway. Peer availability never gates deployment.
+  if kubectl -n monitoring get deploy/monitoring-query-api >/dev/null 2>&1; then
+    monitoring_deployments+=(monitoring-query-api)
+    monitoring_services+=(monitoring-query-api)
+  fi
   monitoring_pvcs=(grafana-postgres-data grafana-data loki-data tempo-data prometheus-data)
   if [[ "${monitoring_events_enabled}" == "true" ]]; then
     monitoring_deployments+=(alloy-events)
@@ -4373,15 +4383,35 @@ else
   wait_for_daemonsets_ready "monitoring" "600s" "${monitoring_daemonsets[@]}"
   wait_for_service_endpoints "monitoring" "600" "${monitoring_services[@]}"
   finalize_log_collector_migration "${monitoring_log_collector}"
-  grafana_dashboard_sync_job="$(
-    kubectl -n monitoring get jobs -l app=grafana-dashboard-sync \
-      -o jsonpath='{range .items[*]}{.metadata.creationTimestamp}{" "}{.metadata.name}{"\n"}{end}' 2>/dev/null \
-      | sort \
-      | tail -n 1 \
-      | awk '{ print $2 }'
-  )"
+  # Reconcile the desired sync job after Grafana is ready. A previous failed
+  # apply or TTL cleanup must not leave dashboard defaults unpublished.
+  grafana_dashboard_sync_file="$(mktemp)"
+  grafana_dashboard_sync_job="$(python3 - "${cluster_monitoring_workspace}/.generated-monitoring-jobs.yaml" "${grafana_dashboard_sync_file}" <<'PYJOB'
+import json
+import pathlib
+import sys
+import yaml
+
+source = pathlib.Path(sys.argv[1])
+jobs = [job for job in yaml.safe_load_all(source.read_text())
+        if job and job.get("kind") == "Job"
+        and job.get("metadata", {}).get("labels", {}).get("app") == "grafana-dashboard-sync"] if source.exists() else []
+if len(jobs) > 1:
+    raise SystemExit("More than one Grafana dashboard sync job was rendered")
+if jobs:
+    pathlib.Path(sys.argv[2]).write_text(json.dumps(jobs[0]))
+    print(jobs[0]["metadata"]["name"])
+PYJOB
+)"
   if [[ -n "${grafana_dashboard_sync_job}" ]]; then
+    if [[ "$(kubectl -n monitoring get job "${grafana_dashboard_sync_job}" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' --ignore-not-found)" == "True" ]]; then
+      kubectl -n monitoring delete job "${grafana_dashboard_sync_job}" --wait=true >/dev/null
+    fi
+    kubectl apply -f "${grafana_dashboard_sync_file}" >/dev/null
+    rm -f "${grafana_dashboard_sync_file}"
     wait_for_job_complete "monitoring" "${grafana_dashboard_sync_job}" "600"
+  else
+    rm -f "${grafana_dashboard_sync_file}"
   fi
   if [[ "${monitoring_prometheus_config_changed}" == "true" ]]; then
     message "Reloading Prometheus scrape configuration..."

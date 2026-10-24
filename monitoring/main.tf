@@ -16,6 +16,10 @@ terraform {
       source  = "hashicorp/helm"
       version = ">= 3.0.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = ">= 3.8.1"
+    }
   }
 }
 
@@ -665,6 +669,25 @@ locals {
     for filename in local.grafana_dashboard_files :
     filename => replace(filename, "/", "__")
   }
+  grafana_dashboard_models = {
+    for filename in local.grafana_dashboard_files : filename => jsondecode(file("${path.module}/grafana/dashboards/${filename}"))
+  }
+  grafana_dashboard_contents = {
+    for filename, model in local.grafana_dashboard_models : filename => (
+      trimspace(local.grafana_datasource_suffix) == "" ? file("${path.module}/grafana/dashboards/${filename}") : replace(jsonencode(merge(model, {
+        templating = merge(try(model.templating, {}), {
+          list = [for variable in try(model.templating.list, []) : merge(variable,
+            try(variable.type, "") == "datasource" && contains(keys(local.monitoring_query_services), try(variable.query, "")) ? {
+              current = merge(try(variable.current, {}), {
+                text  = "${local.monitoring_query_services[variable.query].title} ${local.grafana_datasource_suffix}"
+                value = local.monitoring_query_services[variable.query].uid
+              })
+            } : {}
+          )]
+        })
+      })), "/(\"uid\"\\s*:\\s*)\"Prometheus\"/", "$1\"${local.monitoring_query_services.prometheus.uid}\"")
+    )
+  }
   grafana_dashboard_directories = sort(distinct([
     for filename in local.grafana_dashboard_files : dirname(filename)
   ]))
@@ -749,7 +772,7 @@ locals {
     ],
     [
       for filename in local.grafana_dashboard_files :
-      file("${path.module}/grafana/dashboards/${filename}")
+      local.grafana_dashboard_contents[filename]
     ]
   ))), 0, 12)
   prometheus_storage_class_value          = local.prometheus_storage_class
@@ -785,6 +808,8 @@ locals {
       prometheus_image_tag                       = local.prometheus_image_tag
       prometheus_hostname                        = local.prometheus_hostname
       prometheus_api_hostname                    = local.prometheus_api_hostname_value
+      monitoring_query_enabled                   = local.monitoring_query_exports_enabled
+      domain                                     = local.domain
       prometheus_cpu_request                     = local.prometheus_cpu_request_value
       prometheus_cpu_limit                       = local.prometheus_cpu_limit_value
       prometheus_go_max_procs                    = local.prometheus_go_max_procs_value
@@ -829,12 +854,18 @@ locals {
       prometheus_api_hostname               = local.prometheus_api_hostname_value
       prometheus_api_tls_secret_name        = local.prometheus_api_tls_secret_name_value
       prometheus_api_basic_auth_secret_name = local.prometheus_api_basic_auth_secret_name_value
+      prometheus_api_service_name           = local.monitoring_query_exports_enabled ? "monitoring-query-api" : "prometheus"
     })) :
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
   ]
   grafana_manifests_all = [
     for doc in split("\n---\n", templatefile("${path.module}/grafana.yaml", {
+      grafana_datasources_yaml            = yamlencode({ apiVersion = 1, datasources = local.grafana_local_datasources })
+      grafana_remote_enabled             = local.grafana_remote_enabled
+      grafana_postgres_init_command       = jsonencode(local.grafana_postgres_init_command)
+      grafana_postgres_migration_env      = yamlencode(local.grafana_postgres_migration_env)
+      grafana_postgres_migration_enabled  = trimspace(local.grafana_datasource_suffix) != ""
       storage_class                       = local.grafana_storage_class
       grafana_storage_size                = local.grafana_storage_size
       grafana_image_tag                   = local.grafana_image_tag
@@ -1135,7 +1166,7 @@ locals {
         }
         data = {
           for filename, key in configmap.files :
-          key => file("${path.module}/grafana/dashboards/${filename}")
+          key => local.grafana_dashboard_contents[filename]
         }
       }
     ],
@@ -1468,7 +1499,10 @@ resource "kubernetes_secret_v1" "prometheus_api_basic_auth" {
   }
 
   data = {
-    auth = format("%s:%s", local.prometheus_api_basic_auth_user, local.monitoring_prometheus_api_basic_auth_hash)
+    auth = join("\n", compact([
+      format("%s:%s", local.prometheus_api_basic_auth_user, local.monitoring_prometheus_api_basic_auth_hash),
+      local.monitoring_query_auth,
+    ]))
   }
 
   type       = "Opaque"
@@ -1836,6 +1870,7 @@ resource "helm_release" "grafana" {
       app = "grafana"
     }
     podAnnotations = {
+      "checksum/datasources" = sha256(yamlencode(local.grafana_local_datasources))
       "prometheus.io/scrape" = "true"
       "prometheus.io/port"   = "3000"
       "prometheus.io/path"   = "/metrics"
@@ -1952,8 +1987,8 @@ resource "helm_release" "grafana" {
     extraInitContainers = [{
       name    = "wait-for-postgres"
       image   = "postgres:${local.grafana_postgres_image_tag_value}"
-      command = ["sh", "-c", "until pg_isready -h grafana-postgres -p 5432 -U \"$POSTGRES_USER\"; do sleep 5; done"]
-      env = [{
+      command = local.grafana_postgres_init_command
+      env = concat([{
         name = "POSTGRES_USER"
         valueFrom = {
           secretKeyRef = {
@@ -1961,7 +1996,7 @@ resource "helm_release" "grafana" {
             key  = "username"
           }
         }
-      }]
+      }], local.grafana_postgres_migration_env)
       resources = {
         requests = {
           cpu    = try(local.grafana_wait_for_postgres_cpu_request, "20m")
@@ -2200,6 +2235,7 @@ resource "kubernetes_manifest" "monitoring_ingress" {
   for_each = { for i, m in local.monitoring_ingress : i => m }
   manifest = each.value
   depends_on = [
+    kubernetes_manifest.monitoring_query_api,
     kubernetes_manifest.monitoring_other,
     kubernetes_manifest.monitoring_certificates,
     kubernetes_secret_v1.prometheus_api_basic_auth,

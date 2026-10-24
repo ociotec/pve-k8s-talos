@@ -1,4 +1,21 @@
 locals {
+  # Empty by default: this cluster publishes no cross-cluster query APIs.
+  grafana_datasource_suffix = ""
+  monitoring_api_consumers  = []
+  grafana_remote_clusters   = {}
+  # Query proxy defaults: 20m/200m CPU and 64Mi memory request=limit.
+  monitoring_query_api = {}
+
+  # Optional entry inside grafana_remote_clusters (Grafana Operator required):
+  # peer-dev = {
+  #   datasource_suffix      = "PEER"
+  #   prometheus_url         = "https://prometheus-api.peer.example.com"
+  #   loki_url               = "https://loki-api.peer.example.com"
+  #   tempo_url              = "https://tempo-api.peer.example.com"
+  #   ca_file                = "./certs/peer-ca.pem"
+  #   credentials_secret_ref = "monitoring-peer-reader"
+  # }
+
   grafana_hostname               = "grafana.${local.domain}"
   prometheus_hostname            = "prometheus.${local.domain}"
   prometheus_api_hostname        = "prometheus-api.${local.domain}"

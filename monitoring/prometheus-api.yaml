@@ -22,6 +22,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: prometheus
+                name: ${prometheus_api_service_name}
                 port:
                   number: 9090

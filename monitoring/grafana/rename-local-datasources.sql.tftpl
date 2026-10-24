@@ -1,0 +1,30 @@
+-- Grafana's file provisioner looks up sources by name, while its HTTP API
+-- rejects updates to read-only provisioned sources. Rename in place before
+-- Grafana starts; never delete/recreate sources or touch remote sources.
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+SET LOCAL statement_timeout = '30s';
+DO $migration$
+BEGIN
+  -- A fresh Grafana creates its schema and correctly named sources itself.
+  IF to_regclass('public.data_source') IS NULL THEN
+    RETURN;
+  END IF;
+%{ for source in datasources ~}
+  IF EXISTS (
+    SELECT 1 FROM public.data_source
+    WHERE org_id = 1 AND uid = '${replace(source.uid, "'", "''")}'
+      AND (type <> '${replace(source.type, "'", "''")}' OR url <> '${replace(source.url, "'", "''")}')
+  ) THEN
+    RAISE EXCEPTION 'Refusing to rename a non-local datasource with UID ${replace(source.uid, "'", "''")}';
+  END IF;
+  UPDATE public.data_source
+  SET name = '${replace(source.name, "'", "''")}'
+  WHERE org_id = 1 AND uid = '${replace(source.uid, "'", "''")}'
+    AND type = '${replace(source.type, "'", "''")}'
+    AND url = '${replace(source.url, "'", "''")}'
+    AND name IS DISTINCT FROM '${replace(source.name, "'", "''")}';
+%{ endfor ~}
+END;
+$migration$;
+COMMIT;

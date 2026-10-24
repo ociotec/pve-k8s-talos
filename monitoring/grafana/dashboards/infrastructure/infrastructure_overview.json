@@ -30,7 +30,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "description": "Control-plane node CPU usage from node-exporter. Thresholds: gray = N/A when node/exporter is not ready; green < 50%; yellow >= 50% and < 80%; red >= 80%. Node membership and control-plane roles are discovered from Kubernetes at the end of the selected time range; historical utilization remains unchanged. No inventory is shown when kube-state-metrics is unavailable.",
       "fieldConfig": {
@@ -123,7 +123,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "description": "Control-plane node RAM usage from node-exporter. Thresholds: gray = N/A when node/exporter is not ready; green < 50%; yellow >= 50% and < 80%; red >= 80%. Node membership and control-plane roles are discovered from Kubernetes at the end of the selected time range; historical utilization remains unchanged. No inventory is shown when kube-state-metrics is unavailable.",
       "fieldConfig": {
@@ -216,7 +216,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "description": "Automatic worker remediation phase over time. States: Healthy (normal operation), Suspect (confirming node loss), PVE fencing (stopping the VM), Storage fencing (releasing volumes), Recovering (waiting for the node), Unfencing (restoring storage access), Cooldown (retries suppressed temporarily), Disabled (automation disabled), Error (recovery blocked). Error overrides the active phase when the controller records a blocking failure.",
       "fieldConfig": {
@@ -317,7 +317,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "description": "Worker node CPU usage from node-exporter. Thresholds: gray = N/A when node/exporter is not ready; green < 50%; yellow >= 50% and < 80%; red >= 80%. Node membership and control-plane roles are discovered from Kubernetes at the end of the selected time range; historical utilization remains unchanged. No inventory is shown when kube-state-metrics is unavailable.",
       "fieldConfig": {
@@ -410,7 +410,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "description": "Worker node RAM usage from node-exporter. Thresholds: gray = N/A when node/exporter is not ready; green < 50%; yellow >= 50% and < 80%; red >= 80%. Node membership and control-plane roles are discovered from Kubernetes at the end of the selected time range; historical utilization remains unchanged. No inventory is shown when kube-state-metrics is unavailable.",
       "fieldConfig": {
@@ -503,7 +503,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "description": "Worker CPU aggregate. Usage is compared with worker CPU capacity; requests and limits are compared with worker CPU allocatable. Limits can exceed allocatable. Bar color uses percent of each bar max: green < 50%; yellow >= 50% and < 80%; red >= 80%.",
       "fieldConfig": {
@@ -633,7 +633,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -698,7 +698,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "description": "Worker RAM aggregate. Usage is compared with worker node memory total; requests and limits are compared with worker memory allocatable. Limits can exceed allocatable. Bar color uses percent of each bar max: green < 50%; yellow >= 50% and < 80%; red >= 80%.",
       "fieldConfig": {
@@ -828,7 +828,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -893,7 +893,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "description": "Worker pod capacity and workload signals. Workers pods used is compared with worker allocatable pods: green < 50%, yellow >= 50% and < 80%, red >= 80%. Problem pods counts Pending, Unknown, and Failed pods, excluding pods terminated by the kubelet after normal workload replacement; green = 0, yellow > 0 and <= 10% of worker allocatable pods, red > 10%. Warning events (last 30'): green = 0, yellow > 0 and <= 10% of worker allocatable pods, red > 10%.",
       "fieldConfig": {
@@ -1080,7 +1080,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -1145,7 +1145,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -1236,7 +1236,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -1300,7 +1300,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -1364,7 +1364,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -1428,7 +1428,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -1492,7 +1492,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -1559,7 +1559,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -1617,7 +1617,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -1676,7 +1676,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -1735,7 +1735,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -1903,7 +1903,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "${datasource}"
       },
       "description": "Workload replica status for Deployments, StatefulSets, and DaemonSets. Green = all expected replicas ready; gray = intentionally scaled to zero; yellow = partially available; red = unavailable when replicas are expected.",
       "fieldConfig": {
@@ -2096,6 +2096,23 @@
     "list": [
       {
         "current": {
+          "selected": false,
+          "text": "Prometheus",
+          "value": "PBFA97CFB590B2093"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "type": "datasource"
+      },
+      {
+        "current": {
           "selected": true,
           "text": "kube-system|cert-manager|metallb-system|ingress-nginx|monitoring|identity|rook-ceph|cattle-system|cattle-capi-system|cattle-fleet-system|cattle-fleet-local-system|cattle-provisioning-capi-system|fleet-default|portainer|kafka|s3",
           "value": "kube-system|cert-manager|metallb-system|ingress-nginx|monitoring|identity|rook-ceph|cattle-system|cattle-capi-system|cattle-fleet-system|cattle-fleet-local-system|cattle-provisioning-capi-system|fleet-default|portainer|kafka|s3"
@@ -2155,7 +2172,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "Prometheus"
+          "uid": "${datasource}"
         },
         "definition": "label_values({__name__=~\"kube_(deployment|statefulset|daemonset)_labels\",namespace=~\"${infra_namespaces:raw}\",label_app_kubernetes_io_part_of!=\"\"}, label_app_kubernetes_io_part_of)",
         "hide": 2,

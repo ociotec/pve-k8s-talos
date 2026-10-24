@@ -5,21 +5,7 @@ metadata:
   namespace: monitoring
 data:
   datasources.yaml: |
-    apiVersion: 1
-    datasources:
-      - name: Prometheus
-        type: prometheus
-        access: proxy
-        url: http://prometheus.monitoring.svc.cluster.local:9090
-        isDefault: true
-      - name: Loki
-        type: loki
-        access: proxy
-        url: http://loki.monitoring.svc.cluster.local:3100
-      - name: Tempo
-        type: tempo
-        access: proxy
-        url: http://tempo.monitoring.svc.cluster.local:3200
+    ${indent(4, grafana_datasources_yaml)}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -273,6 +259,7 @@ spec:
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "3000"
+        checksum/datasources: ${sha256(grafana_datasources_yaml)}
         prometheus.io/path: /metrics
     spec:
       priorityClassName: infra-observability
@@ -286,16 +273,16 @@ spec:
       initContainers:
         - name: wait-for-postgres
           image: postgres:${grafana_postgres_image_tag}
-          command:
-            - sh
-            - -c
-            - until pg_isready -h grafana-postgres -p 5432 -U "$POSTGRES_USER"; do sleep 5; done
+          command: ${grafana_postgres_init_command}
           env:
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
                   name: grafana-db
                   key: username
+%{ if grafana_postgres_migration_enabled ~}
+            ${indent(12, grafana_postgres_migration_env)}
+%{ endif ~}
           resources:
             requests:
               cpu: ${grafana_wait_for_postgres_cpu_request}
@@ -594,14 +581,11 @@ spec:
               sync_dashboard() {
                 file="$1"
                 folder_uid="$2"
-                uid="$(sed -n 's/^  "uid"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file" | head -n 1)"
-                if [ -z "$uid" ]; then
-                  echo "Dashboard $file has no uid" >&2
-                  exit 1
-                fi
-
-                echo "Syncing dashboard $uid into $folder_uid"
-                payload="/tmp/dashboard-$${uid}.json"
+                # Grafana reads the UID from the JSON payload. Do not parse it
+                # with a line-based expression: rendered JSON can be compact.
+                dashboard_name="$(basename "$file" .json)"
+                echo "Syncing dashboard $dashboard_name into $folder_uid"
+                payload="/tmp/dashboard-$${dashboard_name}.json"
                 printf '{"dashboard":' > "$payload"
                 cat "$file" >> "$payload"
                 printf ',"folderUid":"%s","overwrite":true,"message":"provisioned from repository"}' "$folder_uid" >> "$payload"
@@ -777,6 +761,17 @@ spec:
     - host: ${grafana_hostname}
       http:
         paths:
+%{ if grafana_remote_enabled ~}
+%{ for api_path in ["/api/datasources", "/api/ds/query"] ~}
+          - path: ${api_path}
+            pathType: Prefix
+            backend:
+              service:
+                name: monitoring-query-api
+                port:
+                  number: 3000
+%{ endfor ~}
+%{ endif ~}
           - path: /
             pathType: Prefix
             backend:
