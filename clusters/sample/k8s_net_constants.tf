@@ -3,6 +3,8 @@ locals {
   cert_manager_version = "1.21.3"
   metrics_server_version = "0.9.0"
   metallb_version = "0.16.0"
+  # Static in-container health client for the distroless MetalLB controller.
+  metallb_probe_image = "busybox:1.38.0-musl@sha256:ea2b9914a16a4ac1981994af97b318f7c7d4db76b580c56177f08bf76f4a0be8"
   kyverno_chart_version = "3.9.2"
   domain = "home.arpa"
 

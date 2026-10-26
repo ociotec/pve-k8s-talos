@@ -45,6 +45,7 @@ class FakeReconciler(MODULE.Reconciler):
         self.calls = []
         self.probe = None
         self.fail_pull = False
+        self.transient_pull = False
         self.file_id = MODULE.FILE_ID
         self.inject_secret = False
         self.move_probe = False
@@ -123,8 +124,12 @@ class FakeReconciler(MODULE.Reconciler):
                     "ready": not self.fail_pull,
                     "state": {"waiting": {"reason": "ImagePullBackOff"}} if self.fail_pull else {"running": {}},
                 }]}
+                if self.transient_pull:
+                    self.probe["status"]["containerStatuses"][0]["state"]["waiting"]["message"] = "DeadlineExceeded: timeout awaiting response headers"
                 return self.probe
             if op[:2] == ["get", "pod"]:
+                if self.transient_pull:
+                    self.probe["status"] = {"containerStatuses": [{"ready": True, "state": {"running": {}}}]}
                 return self.probe
             if op[0] == "delete":
                 self.calls.append("delete-" + op[1])
@@ -249,6 +254,35 @@ class ReconcileTest(unittest.TestCase):
         self.r.reconcile()
         self.assertNotIn("restart", self.r.calls)
         self.assertIn("annotate", self.r.calls)
+
+    def test_transient_registry_timeout_allows_kubelet_to_retry(self):
+        self.r.fail_pull = True
+        self.r.transient_pull = True
+        self.r.reconcile()
+        self.assertEqual(self.r.calls.count("create-Pod"), 1)
+        self.assertIn("annotate", self.r.calls)
+        self.assertNotIn("reboot", self.r.calls)
+
+    def test_transient_pull_retry_still_has_a_deadline_and_cleans_up(self):
+        self.r.fail_pull = self.r.transient_pull = True
+        with patch.object(MODULE.time, "monotonic", side_effect=[0, 11]):
+            with self.assertRaisesRegex(MODULE.ReconcileError, "Timed out"):
+                self.r.pull_probe()
+        self.assertIn("delete-pod", self.r.calls)
+        self.assertIn("delete-serviceaccount", self.r.calls)
+        self.assertNotIn("annotate", self.r.calls)
+
+    def test_authentication_failure_is_not_retried_as_a_timeout(self):
+        pod = {"status": {"containerStatuses": [{"state": {"waiting": {
+            "message": "unauthorized; previous request timeout"}}}]}}
+        self.assertFalse(self.r.transient_pull_failure(pod))
+
+    def test_backoff_uses_only_the_same_pods_timeout_events(self):
+        pod = {"metadata": {"uid": "probe-uid"}, "status": {"containerStatuses": [
+            {"state": {"waiting": {"message": "Back-off pulling image"}}}]}}
+        with patch.object(self.r, "command", return_value={"items": [{"message": "timeout awaiting response headers"}]}) as command:
+            self.assertTrue(self.r.transient_pull_failure(pod))
+        self.assertIn("involvedObject.uid=probe-uid", command.call_args.args[0])
 
     def test_no_auth_and_no_pending_change_does_nothing(self):
         self.r.file["spec"]["contents"] = '[plugins."io.containerd.cri.v1.images".registry]\n'

@@ -16,6 +16,21 @@ SPEC.loader.exec_module(RELEASES)
 
 
 class InfrastructureReleaseTest(unittest.TestCase):
+    def test_release_webhook_does_not_manage_null_server_timestamp(self):
+        document = {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingWebhookConfiguration",
+                    "metadata": {"name": "example", "creationTimestamp": None}, "webhooks": []}
+        RELEASES.workload_policy([document], [], "k8s-net")
+        self.assertNotIn("creationTimestamp", document["metadata"])
+
+    def test_empty_environment_value_survives_api_normalization(self):
+        original = next(d for d in RELEASES.yaml.safe_load_all((ROOT / "rook/manifests/operator.yaml").read_text())
+                        if d and d.get("kind") == "Deployment")
+        updated = RELEASES.copy.deepcopy(original)
+        container = updated["spec"]["template"]["spec"]["containers"][0]
+        container["env"] = [{"name": "WATCH_NAMESPACE", "value": ""}, {"name": "ENABLED", "value": "true"}]
+        RELEASES.workload_policy([updated], [original], "rook")
+        self.assertEqual(container["env"], [{"name": "WATCH_NAMESPACE"}, {"name": "ENABLED", "value": "true"}])
+
     def test_documented_probe_exceptions_survive_release_updates(self):
         baseline = next(d for d in RELEASES.yaml.safe_load_all((ROOT / "k8s-net/cert-manager.yaml").read_text())
                         if d and d.get("kind") == "Deployment" and d["metadata"]["name"] == "cert-manager-cainjector")

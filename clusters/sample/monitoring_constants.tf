@@ -95,10 +95,15 @@ locals {
   # Beyla auto-instruments only repository-managed oauth2-proxy containers.
   beyla_enabled        = true
   beyla_image_tag      = "3.39.1"
+  # Include explicitly selected OAuth2 proxies despite monitoring exclusions.
+  beyla_oauth2_proxy_discovery_enabled = true
+  # Selected proxy workloads run on workers, not on control-plane nodes.
+  beyla_workers_only = true
   beyla_cpu_request    = "100m"
   beyla_cpu_limit      = "500m"
-  beyla_mem_request    = "256Mi"
-  beyla_mem_limit      = "256Mi"
+  # Go binary inspection needs headroom when proxy discovery is enabled.
+  beyla_mem_request    = "1Gi"
+  beyla_mem_limit      = "1Gi"
   beyla_sampling_ratio = 0.10
 
   # Existing clusters without this setting remain on Promtail until they opt in.

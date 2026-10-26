@@ -26,6 +26,7 @@ locals {
   effective_ceph_name_prefix = try(local.ceph_name_prefix, "cluster")
   rook_version_value = try(regex("(?m)^\\s*rook_version\\s*=\\s*\"([^\"]+)\"\\s*(?:#.*)?$", file("${path.module}/ceph_constants.tf"))[0], "1.19.4")
   rook_csi_operator_enabled = try(tonumber(split(".", trimprefix(local.rook_version_value, "v"))[0]) > 1 || tonumber(split(".", trimprefix(local.rook_version_value, "v"))[1]) >= 20, false)
+  rook_csi_addons_enabled = try(tobool(regex("(?m)^\\s*ceph_csi_addons_enabled\\s*=\\s*(true|false)\\s*$", file("${path.module}/ceph_constants.tf"))[0]), false)
 
   effective_ceph_block_replicated = merge(
     {
@@ -383,6 +384,19 @@ locals {
     }
   }
 
+  # New CSI operators own pod labels, but their sidecars still need the same
+  # workload-level probe exceptions as the legacy CSI deployments.
+  rook_managed_probe_exception_targets = local.rook_csi_operator_enabled ? {
+    for workload in flatten([
+      for driver in ["cephfs", "rbd"] : [
+        for suffix in concat(["ctrlplugin", "nodeplugin"], local.rook_csi_addons_enabled ? ["nodeplugin-csi-addons"] : []) : {
+          kind = suffix == "ctrlplugin" ? "Deployment" : "DaemonSet"
+          name = format("%s.%s.csi.ceph.com-%s", local.effective_ceph_namespace, driver, suffix)
+        }
+      ]
+    ]) : format("%s/%s", lower(workload.kind), workload.name) => workload
+  } : local.rook_managed_workload_label_patches
+
   rook_managed_workload_label_patch = jsonencode({
     metadata = {
       labels = {
@@ -480,7 +494,7 @@ resource "null_resource" "rook_managed_workload_labels" {
 }
 
 resource "kubernetes_annotations" "rook_managed_workload_probe_exceptions" {
-  for_each = local.rook_managed_workload_label_patches
+  for_each = local.rook_managed_probe_exception_targets
 
   api_version = "apps/v1"
   kind        = each.value.kind
@@ -498,5 +512,5 @@ resource "kubernetes_annotations" "rook_managed_workload_probe_exceptions" {
   field_manager = "opentofu-rook-exceptions"
   force         = true
 
-  depends_on = [null_resource.rook_managed_workload_labels]
+  depends_on = [null_resource.rook_managed_workload_labels, kubernetes_manifest.rook_storageclass]
 }

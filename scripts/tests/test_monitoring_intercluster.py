@@ -6,6 +6,7 @@ import threading
 import textwrap
 import json
 import os
+import platform
 from pathlib import Path
 import re
 import shutil
@@ -166,7 +167,11 @@ run "reject_{flag}" {{
             (path / "ca.pem").write_text("test-public-ca")
             init = [TOFU, "init", "-backend=false", "-input=false", "-no-color"]
             providers = ROOT / "monitoring/.terraform/providers"
-            if (providers / "registry.opentofu.org/hashicorp/random").exists():
+            locked = re.search(r'provider "[^"]*/hashicorp/random" \{\s*version\s*=\s*"([^"]+)"',
+                               (ROOT / "monitoring/.terraform.lock.hcl").read_text())[1]
+            architecture = {"x86_64": "amd64", "aarch64": "arm64"}.get(platform.machine(), platform.machine())
+            package = providers / "registry.opentofu.org/hashicorp/random" / locked / (platform.system().lower() + "_" + architecture)
+            if any(p.is_file() for p in package.glob("terraform-provider-random*")):
                 init += [f"-plugin-dir={providers}"]
             for command in [init, [TOFU, "test", "-no-color"]]:
                 result = subprocess.run(command, cwd=path, capture_output=True, text=True)

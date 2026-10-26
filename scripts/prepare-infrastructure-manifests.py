@@ -81,6 +81,10 @@ def workload_policy(documents, baseline, section):
     previous = {resource_key(d): d for d in baseline}
     for document in documents:
         metadata = document.setdefault("metadata", {})
+        # Upstream exports sometimes include an unset, server-owned timestamp.
+        # Leaving it in the manifest makes the provider plan an update forever.
+        if metadata.get("creationTimestamp") is None:
+            metadata.pop("creationTimestamp", None)
         old = previous.get(resource_key(document), {})
         labels = metadata.setdefault("labels", {})
         labels.update({k: v for k, v in old.get("metadata", {}).get("labels", {}).items()
@@ -113,6 +117,10 @@ def workload_policy(documents, baseline, section):
                 spec[key] = copy.deepcopy(old_spec[key])
         old_containers = {c["name"]: c for c in old_spec.get("containers", [])}
         for container in spec.get("containers", []) + spec.get("initContainers", []):
+            # Kubernetes omits empty EnvVar.value fields in its API response.
+            for variable in container.get("env", []):
+                if variable.get("value") == "":
+                    variable.pop("value")
             previous_container = old_containers.get(container["name"], {})
             for key in ("resources", "ports", "readinessProbe", "livenessProbe", "startupProbe"):
                 if key in previous_container and (key == "resources" or key not in container):
@@ -130,6 +138,66 @@ def workload_policy(documents, baseline, section):
                         probe["httpGet"].setdefault("scheme", "HTTP")
             if container["name"] == "metrics-server":
                 container.setdefault("args", []).append("--kubelet-insecure-tls")
+
+
+
+def modern_metallb(documents, probe_image):
+    """0.16 secures metrics and binds health to loopback in distroless images."""
+    if not probe_image:
+        raise ValueError("MetalLB 0.16 requires an explicit metallb_probe_image in cluster constants.")
+    labels = {"app.kubernetes.io/name": "metallb", "app.kubernetes.io/instance": "metallb",
+              "app.kubernetes.io/part-of": "metallb", "app.kubernetes.io/component": "metrics-auth",
+              "app.kubernetes.io/managed-by": "infrastructure", "pve-k8s-talos/section": "k8s-net"}
+    for document in documents:
+        if document["kind"] not in ("Deployment", "DaemonSet"):
+            continue
+        template = document["spec"]["template"]
+        spec = template["spec"]
+        template["metadata"].setdefault("annotations", {}).update({
+            "prometheus.io/scrape": "true", "prometheus.io/path": "/metrics",
+            "prometheus.io/port": "9120", "prometheus.io/scheme": "https"})
+        spec.setdefault("volumes", []).append({"name": "metrics-tls", "secret": {
+            "secretName": "metallb-metrics-tls", "defaultMode": 288}})
+        for container in spec["containers"]:
+            if container["name"] not in ("controller", "speaker"):
+                continue
+            container.setdefault("args", []).append("--metrics-cert-dir=/etc/metallb/metrics-tls")
+            container.setdefault("volumeMounts", []).append({"name": "metrics-tls",
+                "mountPath": "/etc/metallb/metrics-tls", "readOnly": True})
+            if container["name"] != "controller":
+                continue
+            # The kubelet's HTTP probe runs from the host namespace; 127.0.0.1
+            # would hit the speaker instead of this non-hostNetwork controller.
+            security = spec.setdefault("securityContext", {})
+            uid = security.get("runAsUser", 65534)
+            gid = security.get("runAsGroup", uid)
+            security["fsGroup"] = gid
+            security.setdefault("seccompProfile", {"type": "RuntimeDefault"})
+            spec["volumes"].append({"name": "health-probe", "emptyDir": {"sizeLimit": "8Mi"}})
+            spec.setdefault("initContainers", []).append({
+                "name": "install-health-probe", "image": probe_image,
+                "command": ["/bin/busybox", "cp", "/bin/busybox", "/probe/busybox"],
+                "resources": {"requests": {"cpu": "10m", "memory": "8Mi"},
+                              "limits": {"cpu": "100m", "memory": "8Mi"}},
+                "securityContext": {"runAsNonRoot": True, "runAsUser": uid, "runAsGroup": gid,
+                    "readOnlyRootFilesystem": True, "allowPrivilegeEscalation": False,
+                    "capabilities": {"drop": ["ALL"]}},
+                "volumeMounts": [{"name": "health-probe", "mountPath": "/probe"}]})
+            container["volumeMounts"].append({"name": "health-probe", "mountPath": "/probe", "readOnly": True})
+            for name, path in [("startupProbe", "healthz"), ("livenessProbe", "healthz"), ("readinessProbe", "readyz")]:
+                container[name] = {"exec": {"command": ["/probe/busybox", "wget", "-q", "-O", "/dev/null",
+                    "http://127.0.0.1:17472/" + path]}, "periodSeconds": 2 if name == "startupProbe" else 10,
+                    "timeoutSeconds": 2, "successThreshold": 1, "failureThreshold": 60 if name == "startupProbe" else 3}
+    documents.extend([
+        {"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRole",
+         "metadata": {"name": "metallb-metrics-auth", "labels": labels}, "rules": [
+             {"apiGroups": ["authentication.k8s.io"], "resources": ["tokenreviews"], "verbs": ["create"]},
+             {"apiGroups": ["authorization.k8s.io"], "resources": ["subjectaccessreviews"], "verbs": ["create"]}]},
+        {"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRoleBinding",
+         "metadata": {"name": "metallb-metrics-auth", "labels": labels},
+         "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": "metallb-metrics-auth"},
+         "subjects": [{"kind": "ServiceAccount", "name": name, "namespace": "metallb-system"}
+                      for name in ["controller", "speaker"]]}])
 
 
 def dump(path, documents):
@@ -212,6 +280,8 @@ def prepare(section, constants, output, cache):
                     if d["kind"] == "Deployment" and d["metadata"]["name"] == "ceph-csi-controller-manager":
                         d["spec"]["template"]["spec"]["containers"][0]["resources"]["requests"]["memory"] = "128Mi"
             workload_policy(documents, baseline, "k8s-net" if section == "k8s-net" else "rook")
+            if key == "metallb_version":
+                modern_metallb(documents, setting(source, "metallb_probe_image", ""))
             dump(output / relative, documents)
 
 

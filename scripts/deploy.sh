@@ -2212,6 +2212,25 @@ rook_external_csi_configuration_sha256() {
     awk '{ print $1 }'
 }
 
+bootstrap_rook_operator_crds() {
+  local crd_names
+  local -a crds=()
+
+  # The manifest provider needs CRD schemas during planning, before depends_on
+  # can order creates. Rook releases with the CSI operator include such CRs.
+  run tofu -chdir="${cluster_rook_01_workspace}" apply -auto-approve \
+    -target=kubernetes_manifest.rook_crds \
+    -target=kubernetes_manifest.csi_addons_crds
+  crd_names="$(tofu -chdir="${cluster_rook_01_workspace}" show -json | jq -ce '
+    [.values.root_module.resources[]
+     | select(.type == "kubernetes_manifest" and (.name == "rook_crds" or .name == "csi_addons_crds"))
+     | .values.manifest.metadata.name]
+    | if length > 0 then . else error("No Rook bootstrap CRDs found in state") end
+  ')"
+  mapfile -t crds < <(jq -r '.[] | "crd/" + .' <<<"${crd_names}")
+  run kubectl wait --for=condition=Established --timeout=120s "${crds[@]}"
+}
+
 wait_for_metallb_available() {
   local timeout_seconds=300
   local deadline=$((SECONDS + timeout_seconds))
@@ -2476,6 +2495,7 @@ prepare_k8s_net_workspace() {
     link_into_workspace "${repo_root}/k8s-net/.terraform" "${workspace}/.terraform"
   fi
   link_into_workspace "${repo_root}/k8s-net/main.tf" "${workspace}/main.tf"
+  link_into_workspace "${repo_root}/k8s-net/metallb-metrics.tf" "${workspace}/metallb-metrics.tf"
   python3 "${script_dir}/prepare-infrastructure-manifests.py" \
     --section k8s-net --constants "${cluster_k8s_net_constants_path}" --output "${workspace}"
   link_into_workspace "${repo_root}/k8s-net/ingress-nginx-controller.yaml" "${workspace}/ingress-nginx-controller.yaml"
@@ -2503,6 +2523,7 @@ prepare_monitoring_workspace() {
     link_into_workspace "${repo_root}/monitoring/.terraform" "${workspace}/.terraform"
   fi
   link_into_workspace "${repo_root}/monitoring/main.tf" "${workspace}/main.tf"
+  link_into_workspace "${repo_root}/monitoring/metallb-metrics.tf" "${workspace}/metallb-metrics.tf"
   link_into_workspace "${repo_root}/monitoring/intercluster.tf" "${workspace}/intercluster.tf"
   link_into_workspace "${repo_root}/monitoring/query-api.conf" "${workspace}/query-api.conf"
   python3 "${script_dir}/prepare-monitoring-defaults.py" \
@@ -4294,6 +4315,7 @@ else
     message "Deploying Rook operator and CSI-Addons network-fencing components..."
     clear_rook_operator_restart_annotation
     run_tofu_init "${cluster_rook_01_workspace}"
+    bootstrap_rook_operator_crds
     run tofu -chdir="${cluster_rook_01_workspace}" apply -auto-approve
     wait_for_pods_ready "rook-ceph" "rook-ceph-operator" "180s"
     wait_for_resource_existence "csi-addons-system" "deploy/csi-addons-controller-manager" 180
@@ -4310,6 +4332,7 @@ else
     if [[ "${csi_addons_enabled:-false}" != "true" ]]; then
       clear_rook_operator_restart_annotation
       run_tofu_init "${cluster_rook_01_workspace}"
+      bootstrap_rook_operator_crds
       run tofu -chdir="${cluster_rook_01_workspace}" apply -auto-approve
       wait_for_pods_ready "rook-ceph" "rook-ceph-operator" "180s"
     fi

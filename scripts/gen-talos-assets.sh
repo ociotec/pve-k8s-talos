@@ -1948,6 +1948,11 @@ for path in "${patch_dir}"/hostname-*.yaml; do
   fi
 done
 
+python3 "${script_dir}/prepare-talos-patches.py" \
+  --version "${talos_version}" --patch-dir "${patch_dir}" \
+  --kubernetes-version "$(read_constant_map_value talos kubernetes_version)" \
+  --control-plane "${controlplane_names[@]}"
+
 primary_controlplane="${controlplane_names[0]}"
 if [[ -z "${primary_controlplane}" ]]; then
   echo "Error: unable to determine primary control plane VM." >&2

@@ -12,7 +12,7 @@ locals {
 # Reconcile only Talos's proxy; other modules retain ownership of DNS and RBAC.
 output "kube_proxy_configuration" {
   value = {
-    enabled = !try(local.kube_proxy_document.disabled, yamldecode(split("\n---\n", values(local.controlplane_machine_config)[0])[0]).cluster.proxy.disabled, false)
+    enabled = try(local.kube_proxy_document.enabled, !yamldecode(split("\n---\n", values(local.controlplane_machine_config)[0])[0]).cluster.proxy.disabled, true)
     image   = try(local.kube_proxy_document.image, yamldecode(split("\n---\n", values(local.controlplane_machine_config)[0])[0]).cluster.proxy.image, "")
   }
   sensitive = true

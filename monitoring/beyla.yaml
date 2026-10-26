@@ -61,10 +61,21 @@ data:
       kubernetes:
         enable: true
     discovery:
+%{ if beyla_oauth2_proxy_discovery_enabled ~}
+      # The explicit container selector is narrow enough to include monitoring
+      # without instrumenting the collectors excluded by Beyla's defaults.
+      default_exclude_services: []
+      default_exclude_instrument: []
+      instrument:
+        - k8s_container_name: oauth2-proxy
+          containers_only: true
+          exports: [traces]
+%{ else ~}
       instrument:
         - container_name: oauth2-proxy
           containers_only: true
           exports: [traces]
+%{ endif ~}
     ebpf:
       context_propagation: headers
       track_request_headers: true
@@ -104,6 +115,9 @@ spec:
         app.kubernetes.io/part-of: tempo
         app.kubernetes.io/managed-by: infrastructure
       annotations:
+%{ if beyla_oauth2_proxy_discovery_enabled ~}
+        checksum/config: ${beyla_config_hash}
+%{ endif ~}
         prometheus.io/scrape: "true"
         prometheus.io/port: "9090"
         prometheus.io/path: /metrics
@@ -111,6 +125,17 @@ spec:
       hostPID: true
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
+%{ if beyla_workers_only ~}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
+                  - key: node-role.kubernetes.io/master
+                    operator: DoesNotExist
+%{ endif ~}
       priorityClassName: infra-observability
       serviceAccountName: beyla
       tolerations:
@@ -161,6 +186,12 @@ spec:
             - name: kernel-security
               mountPath: /sys/kernel/security
               readOnly: true
+%{ if beyla_oauth2_proxy_discovery_enabled ~}
+            - name: bpf
+              mountPath: /sys/fs/bpf
+            - name: tracefs
+              mountPath: /sys/kernel/tracing
+%{ endif ~}
       volumes:
         - name: config
           configMap:
@@ -172,3 +203,13 @@ spec:
           hostPath:
             path: /sys/kernel/security
             type: DirectoryOrCreate
+%{ if beyla_oauth2_proxy_discovery_enabled ~}
+        - name: bpf
+          hostPath:
+            path: /sys/fs/bpf
+            type: Directory
+        - name: tracefs
+          hostPath:
+            path: /sys/kernel/tracing
+            type: Directory
+%{ endif ~}

@@ -302,7 +302,7 @@ locals {
     for m in local.cert_manager : m
     if try(m.kind, "") != "CustomResourceDefinition" && try(m.kind, "") != "Namespace"
   ]
-  metallb_native = [
+  metallb_native_documents = [
     for doc in split("\n---\n", templatefile("${path.module}/metallb-native.yaml", {
       metallb_controller_cpu_request = local.metallb_controller_cpu_request
       metallb_controller_cpu_limit   = local.metallb_controller_cpu_limit
@@ -315,6 +315,19 @@ locals {
     })) :
     yamldecode(doc)
     if length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
+  ]
+  metallb_native = [
+    for m in local.metallb_native_documents : merge(m, local.metallb_secure_metrics && contains(["Deployment", "DaemonSet"], m.kind) ? {
+      spec = merge(m.spec, {
+        template = merge(m.spec.template, {
+          metadata = merge(m.spec.template.metadata, {
+            annotations = merge(try(m.spec.template.metadata.annotations, {}), {
+              "checksum/metrics-tls" = sha256(local.metallb_metrics_certificate)
+            })
+          })
+        })
+      })
+    } : {})
   ]
   metallb_native_crds = [
     for m in local.metallb_native : m
@@ -902,6 +915,7 @@ resource "kubernetes_manifest" "metallb_native" {
   }
   depends_on = [
     kubernetes_manifest.metallb_native_namespace,
+    kubernetes_secret_v1.metallb_metrics_tls,
     kubernetes_manifest.infrastructure_priority_classes,
   ]
 }

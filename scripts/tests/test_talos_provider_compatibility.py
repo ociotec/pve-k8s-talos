@@ -32,7 +32,12 @@ locals {
   image_unpack_sync_fs_supported = true
   image_unpack_sync_fs_patch = ""
   controlplane_vms = { cp = { ip = "192.0.2.10" } }
-  network_interface_patches = { for name in ["cp", "worker"] : name => yamlencode({ cluster = { proxy = { disabled = var.proxy_disabled } } }) }
+  network_interface_patches = { for name in ["cp", "worker"] : name => (
+    tonumber(split(".", trimprefix(var.constants["talos"]["version"], "v"))[1]) >= 14 ?
+    yamlencode({apiVersion="v1alpha1",kind="KubeProxyConfig",enabled=!var.proxy_disabled}) :
+    yamlencode({cluster={proxy={disabled=var.proxy_disabled}}})
+  ) }
+
 }
 '''
         for role, name in (("controlplane", "cp"), ("worker", "worker")):

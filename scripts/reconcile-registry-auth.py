@@ -255,6 +255,20 @@ class Reconciler:
                 raise ReconcileError("Workloads did not recover: " + ", ".join(unready))
             time.sleep(10)
 
+    def transient_pull_failure(self, pod):
+        messages = [s.get("state", {}).get("waiting", {}).get("message", "")
+                    for s in pod.get("status", {}).get("containerStatuses", [])]
+        # BackOff can replace ErrImagePull before the next poll. Events retain
+        # the underlying error; restrict the query to this probe's exact UID.
+        uid = pod.get("metadata", {}).get("uid")
+        if uid:
+            events = self.command(self.kube + ["get", "events", "-n", "kube-system",
+                                  "--field-selector", "involvedObject.uid=" + uid, "-o", "json"])
+            messages.extend(event.get("message", "") for event in events.get("items", []))
+        detail = "\n".join(messages)
+        fatal = re.search(r"unauthorized|authentication required|no basic auth credentials|forbidden|x509:|manifest unknown|not found", detail, re.I)
+        return not fatal and bool(re.search(r"DeadlineExceeded|timeout|timed out|context deadline exceeded", detail, re.I))
+
     def pull_probe(self):
         labels = {
             "app.kubernetes.io/name": "registry-auth-check",
@@ -309,9 +323,10 @@ class Reconciler:
                 if any(s.get("ready") and "running" in s.get("state", {}) for s in statuses):
                     return
                 reasons = [s.get("state", {}).get("waiting", {}).get("reason") for s in statuses]
-                if pod.get("status", {}).get("phase") == "Failed" or any(
-                        r in {"ImagePullBackOff", "ErrImagePull", "InvalidImageName", "CreateContainerConfigError"}
-                        for r in reasons):
+                pull_failed = any(r in {"ImagePullBackOff", "ErrImagePull"} for r in reasons)
+                if (pod.get("status", {}).get("phase") == "Failed"
+                        or any(r in {"InvalidImageName", "CreateContainerConfigError"} for r in reasons)
+                        or (pull_failed and not self.transient_pull_failure(pod))):
                     raise ReconcileError("Kubelet registry pull probe failed: " + ", ".join(r for r in reasons if r))
                 if time.monotonic() >= deadline:
                     raise ReconcileError("Timed out waiting for the kubelet registry pull probe.")

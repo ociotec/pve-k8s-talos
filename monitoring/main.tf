@@ -200,6 +200,9 @@ locals {
   beyla_enabled_value = can(regex("(?m)^\\s*beyla_enabled\\s*=\\s*(true|false)\\s*$", local.monitoring_constants_source)[0]) ? (
     tobool(regex("(?m)^\\s*beyla_enabled\\s*=\\s*(true|false)\\s*$", local.monitoring_constants_source)[0])
   ) : true
+  # Opt in to Kubernetes proxy selection without changing existing deployments.
+  beyla_oauth2_proxy_discovery_enabled_value = try(tobool(regex("(?m)^\\s*beyla_oauth2_proxy_discovery_enabled\\s*=\\s*(true|false)\\s*(?:#.*)?$", local.monitoring_constants_source)[0]), false)
+  beyla_workers_only_value = try(tobool(regex("(?m)^\\s*beyla_workers_only\\s*=\\s*(true|false)\\s*(?:#.*)?$", local.monitoring_constants_source)[0]), false)
   # Empty preserves the selected Tempo release's default for existing clusters.
   tempo_block_version_value = try(regex("(?m)^\\s*tempo_block_version\\s*=\\s*\"([^\"]*)\"\\s*(?:#.*)?$", local.monitoring_constants_source)[0], "")
   policy_reporter_chart_version_value = try(regex("(?m)^\\s*policy_reporter_chart_version\\s*=\\s*\"([^\"]+)\"\\s*(?:#.*)?$", local.monitoring_constants_source)[0], "3.8.1")
@@ -806,6 +809,9 @@ locals {
   prometheus_manifests = [
     for doc in split("\n---\n", templatefile("${path.module}/prometheus.yaml", {
       storage_class                              = local.prometheus_storage_class_value
+      metallb_secure_metrics                    = local.metallb_secure_metrics
+      metallb_metrics_server_name               = local.metallb_metrics_server_name
+      metallb_metrics_config_hash               = local.metallb_metrics_config_hash
       prometheus_storage_size                    = local.prometheus_storage_size_value
       prometheus_retention                       = local.prometheus_retention
       prometheus_retention_size                  = local.prometheus_retention_size
@@ -1020,6 +1026,9 @@ locals {
       beyla_mem_request    = local.beyla_mem_request_value
       beyla_mem_limit      = local.beyla_mem_limit_value
       beyla_sampling_ratio = local.beyla_sampling_ratio_value
+      beyla_oauth2_proxy_discovery_enabled = local.beyla_oauth2_proxy_discovery_enabled_value
+      beyla_workers_only = local.beyla_workers_only_value
+      beyla_config_hash = sha256(jsonencode([filesha256("${path.module}/beyla.yaml"), local.beyla_sampling_ratio_value, local.beyla_oauth2_proxy_discovery_enabled_value]))
     })) :
     yamldecode(doc)
     if local.beyla_enabled_value && length(regexall("(?m)^\\s*[^#\\s]", doc)) > 0
@@ -1646,6 +1655,7 @@ resource "kubernetes_manifest" "monitoring_other" {
   }
   depends_on = [
     kubernetes_manifest.monitoring_namespace,
+    kubernetes_config_map_v1.metallb_metrics_ca,
     kubernetes_manifest.extra_namespaces,
     kubernetes_secret_v1.grafana_admin,
     kubernetes_secret_v1.grafana_db,

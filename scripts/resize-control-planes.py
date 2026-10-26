@@ -26,6 +26,22 @@ VM = 'proxmox_virtual_environment_vm.create_pve_vms'
 MAINTENANCE = 'pve-k8s-talos/control-plane-resize'
 COMPONENTS = {'apiServer': 'kube-apiserver', 'controllerManager': 'kube-controller-manager', 'scheduler': 'kube-scheduler'}
 CONSTANTS = {'apiServer': 'api_server', 'controllerManager': 'controller_manager', 'scheduler': 'scheduler'}
+DOCUMENTS = {'apiServer': 'KubeAPIServerConfig', 'controllerManager': 'KubeControllerManagerConfig', 'scheduler': 'KubeSchedulerConfig'}
+
+
+def resource_patch(configuration, patch):
+    """Match the active node's format, including nodes upgraded with an old contract."""
+    kinds = set(re.findall(r'(?m)^kind:\s*([A-Za-z0-9]+)\s*$', configuration))
+    legacy, documents = {}, []
+    for field, value in patch['cluster'].items():
+        kind = DOCUMENTS[field]
+        if kind in kinds:
+            documents.append({'apiVersion': 'v1alpha1', 'kind': kind, **value})
+        else:
+            legacy[field] = value
+    if legacy:
+        documents.insert(0, {'cluster': legacy})
+    return '\n---\n'.join(json.dumps(document) for document in documents)
 
 
 def resize_candidates(plan):
@@ -267,7 +283,11 @@ class Resizer:
         self.node_health(excluded=name)
         if entry['phase'] == 'prepared':
             self.message(f'{name}: staging component resources and draining (PDBs enforced).')
-            self.talos(name, 'patch', 'machineconfig', '--mode=staged', '--patch', json.dumps(entry['desired']['patch']))
+            configs = decode_stream(self.talos(name, 'get', 'machineconfig', '-o', 'json'))
+            active = [c['spec'] for c in configs if c['metadata']['id'] == 'v1alpha1']
+            if len(active) != 1 or not isinstance(active[0], str):
+                raise ResizeError('Cannot determine active Talos configuration before staging resources.')
+            self.talos(name, 'patch', 'machineconfig', '--mode=staged', '--patch', resource_patch(active[0], entry['desired']['patch']))
             self.command(self.kube + ['--server', f'https://{self.endpoint}:6443', 'annotate', 'node', name, MAINTENANCE + '=true', '--overwrite'])
             self.command(self.kube + ['--server', f'https://{self.endpoint}:6443', 'taint', 'node', name, MAINTENANCE + '=true:NoSchedule', '--overwrite'])
             self.command(self.kube + ['--server', f'https://{self.endpoint}:6443', 'drain', name, '--ignore-daemonsets', '--delete-emptydir-data', '--timeout=300s'], timeout=330)

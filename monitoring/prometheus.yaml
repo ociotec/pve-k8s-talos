@@ -158,6 +158,50 @@ data:
       - job_name: prometheus
         static_configs:
           - targets: ["localhost:9090"]
+%{ if metallb_secure_metrics ~}
+
+      # MetalLB 0.16 authenticates metrics separately from its local health endpoint.
+      - job_name: metallb-https
+        scheme: https
+        authorization:
+          credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        tls_config:
+          ca_file: /etc/metallb-metrics/ca.crt
+          server_name: ${metallb_metrics_server_name}
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - action: keep
+            source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_pod_container_port_name]
+            regex: metallb-system;metricshttps
+          - action: drop
+            source_labels: [__meta_kubernetes_pod_container_init]
+            regex: "true"
+          - target_label: job
+            replacement: kubernetes-pods
+          - target_label: app
+            replacement: metallb
+          - target_label: section
+            replacement: k8s-net
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
+          - source_labels: [__meta_kubernetes_pod_container_name]
+            target_label: container
+          - source_labels: [__meta_kubernetes_pod_container_name]
+            target_label: component
+          - source_labels: [__meta_kubernetes_pod_controller_name]
+            target_label: workload
+          - source_labels: [__meta_kubernetes_pod_controller_kind]
+            target_label: workload_type
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: pod_ip
+          - source_labels: [__meta_kubernetes_pod_host_ip]
+            target_label: host_ip
+%{ endif ~}
 %{ if length(ceph_prometheus_targets) > 0 ~}
 
       - job_name: ceph-mgr
@@ -205,6 +249,11 @@ data:
         kubernetes_sd_configs:
           - role: pod
         relabel_configs:
+%{ if metallb_secure_metrics ~}
+          - action: drop
+            source_labels: [__meta_kubernetes_namespace]
+            regex: metallb-system
+%{ endif ~}
           - action: keep
             source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
             regex: "\\d+"
@@ -747,6 +796,10 @@ spec:
       labels:
         app: prometheus
         app.kubernetes.io/part-of: prometheus
+%{ if metallb_secure_metrics ~}
+      annotations:
+        checksum/metallb-metrics: ${metallb_metrics_config_hash}
+%{ endif ~}
     spec:
       priorityClassName: infra-observability
       terminationGracePeriodSeconds: 120
@@ -828,6 +881,11 @@ spec:
               mountPath: /etc/prometheus
             - name: data
               mountPath: /prometheus
+%{ if metallb_secure_metrics ~}
+            - name: metallb-metrics-ca
+              mountPath: /etc/metallb-metrics
+              readOnly: true
+%{ endif ~}
       volumes:
         - name: config
           configMap:
@@ -835,6 +893,11 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: prometheus-data
+%{ if metallb_secure_metrics ~}
+        - name: metallb-metrics-ca
+          configMap:
+            name: prometheus-metallb-ca
+%{ endif ~}
 ---
 apiVersion: v1
 kind: Service

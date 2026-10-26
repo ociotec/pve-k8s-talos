@@ -20,6 +20,20 @@ def plan():
 
 
 class Decisions(unittest.TestCase):
+    def test_resource_patch_preserves_legacy_and_native_active_contracts(self):
+        patch = {'cluster': {field: {'resources': {'requests': {'cpu': '1', 'memory': '1Gi'}}} for field in M.COMPONENTS}}
+        self.assertEqual(json.loads(M.resource_patch('machine: {}\n', patch)), patch)
+        native = '\n---\n'.join('apiVersion: v1alpha1\nkind: ' + kind for kind in M.DOCUMENTS.values())
+        documents = [json.loads(doc) for doc in M.resource_patch(native, patch).split('\n---\n')]
+        self.assertEqual([doc['kind'] for doc in documents], list(M.DOCUMENTS.values()))
+        self.assertTrue(all(doc['resources']['requests']['cpu'] == '1' for doc in documents))
+
+    def test_resource_patch_handles_components_with_different_formats(self):
+        patch = {'cluster': {'apiServer': {'resources': {}}, 'scheduler': {'resources': {}}}}
+        documents = [json.loads(doc) for doc in M.resource_patch('kind: KubeAPIServerConfig\n', patch).split('\n---\n')]
+        self.assertEqual(documents[0], {'cluster': {'scheduler': {'resources': {}}}})
+        self.assertEqual(documents[1]['kind'], 'KubeAPIServerConfig')
+
     def test_all_existing_members_selected(self):
         self.assertEqual(M.resize_candidates(plan())[1],['cp-1','cp-2','cp-3'])
 
