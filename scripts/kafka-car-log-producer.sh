@@ -319,7 +319,7 @@ spec:
       labels:
         app: ${app_name}
       annotations:
-        car-log-producer.gcs.gmv.es/rollout-started-at: "${rollout_started_at}"
+        pve-k8s-talos/car-log-producer-rollout-started-at: "${rollout_started_at}"
     spec:
       terminationGracePeriodSeconds: 20
       containers:

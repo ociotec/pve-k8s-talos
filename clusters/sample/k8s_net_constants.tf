@@ -19,9 +19,9 @@ locals {
   root_ca_validity_hours = 876000 # 100 years
   root_ca_key            = "./certs/${local.domain}.key"
 
-  metallb_pool_start = "192.168.1.70"
-  metallb_pool_end   = "192.168.1.79"
-  ingress_lb_ip      = "192.168.1.70"
+  metallb_pool_start = "192.0.2.70"
+  metallb_pool_end   = "192.0.2.79"
+  ingress_lb_ip      = "192.0.2.70"
 
   # Kyverno is absent unless exactly one mode is enabled for a cluster.
   enable_kyverno_audit   = false

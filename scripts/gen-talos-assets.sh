@@ -721,7 +721,7 @@ if [[ -n "${extra_host_entries_raw}" ]]; then
     read -ra entry_parts <<< "${entry}"
     if [[ ${#entry_parts[@]} -lt 2 ]]; then
       echo "Error: network.extra_host_entries entry must be 'IP hostname [alias...]' (got ${entry})." >&2
-      echo "Fix: set entries like \"10.122.41.223 infra.beta.gcs.gmv.es\" separated by commas." >&2
+      echo "Fix: set entries like \"192.0.2.10 infra.example.com\" separated by commas." >&2
       exit 1
     fi
     host_ip="${entry_parts[0]}"

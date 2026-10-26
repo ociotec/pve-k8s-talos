@@ -13,7 +13,7 @@ constants = {
   }
   "network" = {
     "net_size"    = "24"
-    "gateway"     = "192.168.1.1"
+    "gateway"     = "192.0.2.1"
     "dns_servers" = "80.58.61.250,80.58.61.254"
     # Disable IPv6 at kernel level for Talos nodes. Set to "false" to keep IPv6 enabled.
     "disable_ipv6" = "true"
@@ -59,7 +59,7 @@ constants = {
     "cluster_name"       = "talos"
     # Shared Talos control-plane VIP for the Kubernetes API endpoint.
     # Keep it on the same L2/subnet as the control planes and outside the MetalLB pool.
-    "controlplane_vip" = "192.168.1.50"
+    "controlplane_vip" = "192.0.2.50"
     # Optional IPv4 PodCIDR prefix allocated to each node. Leave empty for Kubernetes default (/24).
     "node_cidr_mask_size" = ""
     # Optional resource profiles for Talos-managed static control-plane Pods. Set each
