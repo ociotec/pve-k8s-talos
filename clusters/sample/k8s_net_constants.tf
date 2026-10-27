@@ -36,8 +36,12 @@ locals {
   metallb_speaker_mem_request    = "128Mi"
   metallb_speaker_mem_limit      = "128Mi"
 
-  ingress_nginx_controller_cpu_request = "100m"
-  ingress_nginx_controller_cpu_limit   = "500m"
+  # Keep long-lived WebSockets away from periodic HPA scale-downs.
+  ingress_nginx_hpa_enabled  = false
+  ingress_nginx_min_replicas = 3
+
+  ingress_nginx_controller_cpu_request = "250m"
+  ingress_nginx_controller_cpu_limit   = "1"
   ingress_nginx_controller_mem_request = "512Mi"
   ingress_nginx_controller_mem_limit   = "512Mi"
   # Optional ingress settings below show platform defaults; override only as needed.
@@ -46,9 +50,7 @@ locals {
   # ingress_nginx_header_buffer_size = "64k"
   # Serialize reloads to avoid accumulating retiring NGINX workers during bulk installs.
   # ingress_nginx_serial_reloads = true
-  # Disable HPA to keep a fixed ingress_nginx_min_replicas count.
-  # ingress_nginx_hpa_enabled = true
-  # ingress_nginx_min_replicas = 3
+  # Optional HPA settings apply only when ingress_nginx_hpa_enabled is true.
   # ingress_nginx_max_replicas = 6
   # CPU utilization is relative to the controller CPU request, not its limit.
   # ingress_nginx_hpa_cpu_target_percentage = 70
