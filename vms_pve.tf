@@ -17,6 +17,7 @@ resource "proxmox_virtual_environment_vm" "create_pve_vms" {
   started         = true # Do or do not start VM after creation
   # deploy.sh shuts down and resizes existing CPs one at a time. Never let the
   # provider reboot several CPs during a bulk root apply, including network edits.
+  # Worker CPU/RAM increases also finish sequentially before the bulk apply.
   reboot_after_update = var.resources[each.value.type].k8s_node != "controlplane"
   pool_id         = var.constants["vm"]["pool"] != "" ? var.constants["vm"]["pool"] : null
   agent {

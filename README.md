@@ -213,22 +213,29 @@ direnv exec . ../../scripts/deploy-infra-vm.sh
 The infra VM flow expects a Debian cloud image, not an interactive Debian installer ISO. If the discovery service uses an internal CA, add that CA to each dependent cluster through `constants["network"]["cert_files"]` before generating Talos assets.
 Clusters configured with `talos.discovery_service_bootstrap_only = "true"` no longer depend on the Discovery Service after a successful initial root deployment, so the infra VM may be stopped once no other cluster is bootstrapping against it.
 
-### Resize existing control planes
+### Resize existing nodes
 
-Use `scripts/deploy.sh` when increasing control-plane VM CPU or RAM. For an
-existing cluster with at least three control planes, it drains and gracefully
-shuts down one member, applies that VM's hardware through OpenTofu, and waits
-for its new boot, guest capacity, component resources, API readiness and all
-etcd members to remain healthy for 30 seconds before continuing. Followers are
-processed before the current etcd leader. Component resource values are staged
-before shutdown so they activate during the same boot.
+Use `scripts/deploy.sh` when increasing control-plane or worker VM CPU or RAM.
+It drains one node respecting disruption budgets, gracefully shuts it down,
+applies that VM's hardware through OpenTofu, and waits for its new boot, guest
+capacity and cluster health to remain stable for 30 seconds. After uncordoning,
+workloads must recover to the deployment baseline before the next node starts.
+Single-replica services and node-local storage can still cause service interruptions.
+
+Control-plane resizing requires at least three members and also verifies
+component resources, API readiness and etcd health. Followers are processed
+before the current leader, followed by workers. Component resource values are
+staged before shutdown so they activate during the same boot.
 
 The Proxmox provider cannot automatically reboot control-plane VMs during a
 bulk apply. Shrinking, replacement and unrelated VM changes mixed with a resize
 are rejected. Other changes requiring an offline control plane need a separate
 maintenance procedure. A failure stops the sequence and leaves the current
-node protected; rerun the same deployment from the same PC to resume using
-`out/root/.control-plane-resize.json`. Keep that journal until recovery finishes.
+node's resize journal and workload baseline intact; rerun the same deployment
+from the same PC to resume using `out/root/.node-resize.json`. Keep that journal
+until recovery finishes. Existing `.control-plane-resize.json` journals are
+migrated automatically. Automatic node remediation is paused through bounded,
+renewed maintenance leases during the sequence.
 
 ### Generate Talos assets
 

@@ -969,6 +969,24 @@ root_apply_args() {
   fi
 }
 
+node_resize_pending() {
+  [[ -f "${cluster_root_workspace}/.node-resize.json" || -f "${cluster_root_workspace}/.control-plane-resize.json" ]]
+}
+
+prepare_root_workload_baseline() {
+  if node_resize_pending; then
+    # Recover the interrupted node against the original baseline, even if it
+    # is still stopped or drained. Never redefine degraded services as healthy.
+    if [[ ! -f "${root_workload_baseline}" ]]; then
+      error "Pending node resize has no workload baseline; recover it before continuing."
+      return 1
+    fi
+  else
+    python3 "${script_dir}/check-workload-health.py" --kubeconfig "${cluster_kubeconfig_path}" \
+      --baseline "${root_workload_baseline}" --capture
+  fi
+}
+
 collect_workers_with_secondary_network() {
   awk '
     function brace_delta(line,   raw, opens, closes) {
@@ -1870,7 +1888,10 @@ handle_deploy_exit() {
   trap - ERR EXIT
   set +e
 
-  if [[ -n "${node_maintenance_state:-}" && -f "${node_maintenance_state}" ]]; then
+  if node_resize_pending; then
+    error "Node resize is unfinished; preserving maintenance state and workload baseline. Resume this deployment from the same PC."
+    [[ "${exit_code}" -ne 0 ]] || exit_code=1
+  elif [[ -n "${node_maintenance_state:-}" && -f "${node_maintenance_state}" ]]; then
     python3 "${script_dir}/node-maintenance.py" finish --kubeconfig "${cluster_kubeconfig_path}" \
       --state "${node_maintenance_state}" --owner "${node_maintenance_owner}"
     if [[ "$?" -ne 0 ]]; then
@@ -4153,18 +4174,20 @@ else
     python3 "${script_dir}/node-maintenance.py" begin --kubeconfig "${cluster_kubeconfig_path}" \
       --state "${node_maintenance_state}" --owner "${node_maintenance_owner}" "${node_maintenance_args[@]}"
     root_workload_baseline="${cluster_git_dir}/pve-k8s-talos-node-workloads.json"
-    python3 "${script_dir}/check-workload-health.py" --kubeconfig "${cluster_kubeconfig_path}" \
-      --baseline "${root_workload_baseline}" --capture
+    prepare_root_workload_baseline
   fi
   run_gen_talos_assets
   run_tofu_init "${cluster_root_workspace}"
   migrate_legacy_talos_bootstrap_marker_state "${cluster_root_workspace}"
   mapfile -t root_apply_extra_args < <(root_apply_args)
   if [[ "${talos_bootstrap_marker_was_present}" == "true" ]]; then
-    python3 "${script_dir}/resize-control-planes.py" \
+    python3 "${script_dir}/resize-nodes.py" \
       --workspace "${cluster_root_workspace}" \
       --kubeconfig "${cluster_kubeconfig_path}" \
-      --talosconfig "${cluster_talosconfig_path}"
+      --talosconfig "${cluster_talosconfig_path}" \
+      --workload-baseline "${root_workload_baseline}" \
+      --maintenance-state "${node_maintenance_state}" \
+      --maintenance-owner "${node_maintenance_owner}"
   fi
   run tofu -chdir="${cluster_root_workspace}" apply -auto-approve "${root_apply_extra_args[@]}"
   restore_existing_talos_bootstrap_marker "${talos_bootstrap_marker_was_present}"

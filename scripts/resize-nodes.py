@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resize existing control-plane VMs sequentially before the root apply.
+"""Resize existing control-plane and worker VMs sequentially before the root apply.
 
 OpenTofu owns VM hardware. Talos owns graceful shutdown and staged resources.
 A private journal makes a stopped or partially recovered node resumable.
@@ -23,7 +23,8 @@ class ResizeError(RuntimeError):
 
 
 VM = 'proxmox_virtual_environment_vm.create_pve_vms'
-MAINTENANCE = 'pve-k8s-talos/control-plane-resize'
+MAINTENANCE = 'pve-k8s-talos/node-resize'
+LEGACY_MAINTENANCE = 'pve-k8s-talos/control-plane-resize'
 COMPONENTS = {'apiServer': 'kube-apiserver', 'controllerManager': 'kube-controller-manager', 'scheduler': 'kube-scheduler'}
 CONSTANTS = {'apiServer': 'api_server', 'controllerManager': 'controller_manager', 'scheduler': 'scheduler'}
 DOCUMENTS = {'apiServer': 'KubeAPIServerConfig', 'controllerManager': 'KubeControllerManagerConfig', 'scheduler': 'KubeSchedulerConfig'}
@@ -44,7 +45,7 @@ def resource_patch(configuration, patch):
     return '\n---\n'.join(json.dumps(document) for document in documents)
 
 
-def resize_candidates(plan):
+def resize_candidates(plan, journal=None):
     """Reject replacements, shrinking and mixed hardware changes before disruption."""
     variables = {k: v['value'] for k, v in plan['variables'].items()}
     nodes = []
@@ -52,16 +53,16 @@ def resize_candidates(plan):
         if change['type'] != 'proxmox_virtual_environment_vm' or change['name'] != 'create_pve_vms':
             continue
         name = change['index']
+        before, after = change['change'].get('before'), change['change'].get('after')
+        actions = change['change']['actions']
+        if before and 'delete' in actions:
+            raise ResizeError(f'{name}: refusing node removal/replacement.')
         vm = variables['vms'][name]
         profile = variables['resources'][vm['type']]
-        if profile['k8s_node'] != 'controlplane':
+        if profile['k8s_node'] not in ('controlplane', 'worker'):
             continue
-        before, after = change['change'].get('before'), change['change'].get('after')
         if not before:  # Initial bootstrap/scale-out is still owned by the normal apply.
             continue
-        actions = change['change']['actions']
-        if 'delete' in actions:
-            raise ResizeError(f'{name}: refusing control-plane removal/replacement.')
         if not after:
             continue
         old = (before['cpu'][0]['cores'], before['memory'][0]['dedicated'])
@@ -69,8 +70,13 @@ def resize_candidates(plan):
         if old == new:
             continue
         if any(n < o for o, n in zip(old, new)):
-            raise ResizeError(f'{name}: automatic control-plane shrinking is unsupported.')
+            raise ResizeError(f'{name}: automatic node shrinking is unsupported.')
         allowed = {'cpu', 'memory', 'reboot_after_update'}
+        # An interrupted graceful shutdown is an expected runtime difference,
+        # but only for the node owned by this journal.
+        if (journal and journal['node'] == name and journal['phase'] in ('staged', 'stopped')
+                and before.get('started') is False and after.get('started') is True):
+            allowed.add('started')
         other = [k for k in before.keys() | after.keys() if k not in allowed and before.get(k) != after.get(k)]
         cpu_other = {k for k in before['cpu'][0].keys() | after['cpu'][0].keys() if k != 'cores' and before['cpu'][0].get(k) != after['cpu'][0].get(k)}
         mem_other = {k for k in before['memory'][0].keys() | after['memory'][0].keys() if k != 'dedicated' and before['memory'][0].get(k) != after['memory'][0].get(k)}
@@ -117,15 +123,22 @@ class Resizer:
     def __init__(self, args):
         self.args = args
         self.workspace = Path(args.workspace).resolve()
-        self.journal = self.workspace / '.control-plane-resize.json'
-        self.log = self.workspace / '.control-plane-resize.log'
+        self.journal = self.workspace / '.node-resize.json'
+        legacy = self.workspace / '.control-plane-resize.json'
+        if legacy.exists():
+            if self.journal.exists():
+                raise ResizeError('Both legacy and current resize journals exist; resolve them before proceeding.')
+            legacy.rename(self.journal)
+        self.log = self.workspace / '.node-resize.log'
         self.kube = ['kubectl', '--kubeconfig', args.kubeconfig, '--request-timeout=15s']
         self.variables = {}
+        self.nodes = {}
         self.cps = {}
         self.endpoint = None
+        self.maintenance_renewed_at = None
 
     def message(self, text):
-        print(f'Control-plane resize: {text}', flush=True)
+        print(f'Node resize: {text}', flush=True)
 
     def command(self, command, timeout=60):
         try:
@@ -148,7 +161,7 @@ class Resizer:
 
     def talos(self, name, *args):
         return self.command(['talosctl', '--talosconfig', self.args.talosconfig,
-                             '--endpoints', self.endpoint, '--nodes', self.cps[name]['ip'], *args])
+                             '--endpoints', self.endpoint, '--nodes', self.nodes[name]['ip'], *args])
 
     def pve(self, node, suffix):
         base = os.environ.get('TF_VAR_proxmox_endpoint') or os.environ.get('PROXMOX_VE_ENDPOINT', '')
@@ -158,7 +171,7 @@ class Resizer:
         base = base.rstrip('/')
         if not base.endswith('/api2/json'):
             base += '/api2/json'
-        vm = self.cps[node]
+        vm = self.nodes[node]
         url = base + f"/nodes/{urllib.parse.quote(vm['node_name'], safe='')}/qemu/{vm['vm_id']}/{suffix}"
         insecure = (os.environ.get('TF_VAR_proxmox_insecure') or os.environ.get('PROXMOX_VE_INSECURE', '')).lower() == 'true'
         req = urllib.request.Request(url, headers={'Authorization': 'PVEAPIToken=' + token})
@@ -188,8 +201,24 @@ class Resizer:
         return {'cluster': patch}
 
     def desired(self, name):
-        profile = self.variables['resources'][self.cps[name]['type']]
-        return {'cores': profile['vcpus'], 'memory': profile['memory'], 'patch': self.patch()}
+        profile = self.variables['resources'][self.nodes[name]['type']]
+        wanted = {'cores': profile['vcpus'], 'memory': profile['memory']}
+        if name in self.cps:
+            wanted['patch'] = self.patch()
+        return wanted
+
+    def renew_maintenance(self):
+        if self.maintenance_renewed_at is None or time.monotonic() - self.maintenance_renewed_at >= 60:
+            self.command(['python3', str(Path(__file__).with_name('node-maintenance.py')), 'renew',
+                          '--kubeconfig', self.args.kubeconfig, '--state', self.args.maintenance_state,
+                          '--owner', self.args.maintenance_owner])
+            self.maintenance_renewed_at = time.monotonic()
+
+    def workloads(self):
+        self.renew_maintenance()
+        self.command(['python3', str(Path(__file__).with_name('check-workload-health.py')),
+                      '--kubeconfig', self.args.kubeconfig, '--baseline', self.args.workload_baseline,
+                      '--timeout', str(self.args.timeout)], timeout=self.args.timeout + 60)
 
     def save(self, entry):
         fd = os.open(str(self.journal) + '.tmp', os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -215,7 +244,8 @@ class Resizer:
         for name in self.cps:
             if name != excluded:
                 rows += etcd_rows(self.talos(name, 'etcd', 'status'))
-        validate_etcd(rows, len(self.cps) - bool(excluded), full=not excluded)
+        excluded_cp = excluded in self.cps
+        validate_etcd(rows, len(self.cps) - excluded_cp, full=not excluded_cp)
         pods = self.kube_json('-n', 'kube-system', 'get', 'pods', '-o', 'json')['items']
         for name in self.cps:
             if name == excluded:
@@ -236,12 +266,15 @@ class Resizer:
         if int(capacity['cpu']) != wanted['cores'] or not re.fullmatch(r'\d+Ki', capacity['memory']):
             raise ResizeError('Waiting for the desired guest CPU/memory capacity.')
         memory = int(capacity['memory'][:-2]) * 1024
-        if not (wanted['memory'] - 512) * 1024**2 <= memory <= wanted['memory'] * 1024**2:
-            raise ResizeError('Guest memory does not match the resized VM (allowing 512MiB system overhead).')
+        # Kernel reservations grow with RAM; larger workers can lose more than
+        # 512MiB between configured VM memory and Kubernetes node capacity.
+        overhead = max(512, wanted['memory'] * 0.03)
+        if not (wanted['memory'] - overhead) * 1024**2 <= memory <= wanted['memory'] * 1024**2:
+            raise ResizeError('Guest memory does not match the resized VM (allowing kernel reservations).')
         config = self.pve(name, 'config')
         if int(config.get('cores', 0)) * int(config.get('sockets', 1)) != wanted['cores'] or int(config.get('memory', 0)) != wanted['memory']:
             raise ResizeError('Proxmox hardware does not match the desired capacity.')
-        for field, component in COMPONENTS.items():
+        for field, component in (COMPONENTS.items() if name in self.cps else []):
             pod = next(p for p in pods if p['metadata']['name'] == component + '-' + name)
             resources = next(c['resources'] for c in pod['spec']['containers'] if c['name'] == component)
             if resources != wanted['patch']['cluster'][field]['resources']:
@@ -252,6 +285,7 @@ class Resizer:
         since = None
         last = ''
         while time.monotonic() < deadline:
+            self.renew_maintenance()
             try:
                 check()
                 since = since or time.monotonic()
@@ -265,9 +299,11 @@ class Resizer:
 
     def resize(self, name):
         self.select_endpoint(excluded=name)
+        self.renew_maintenance()
         entry = json.loads(self.journal.read_text()) if self.journal.exists() else None
         if not entry:
             self.node_health()
+            self.workloads()
             node = self.kube_json('get', 'node', name, '-o', 'json')
             if node.get('spec', {}).get('unschedulable'):
                 raise ResizeError(f'{name}: already cordoned by another operator.')
@@ -282,18 +318,20 @@ class Resizer:
             raise ResizeError('Pending resize journal does not match the current configuration.')
         self.node_health(excluded=name)
         if entry['phase'] == 'prepared':
-            self.message(f'{name}: staging component resources and draining (PDBs enforced).')
-            configs = decode_stream(self.talos(name, 'get', 'machineconfig', '-o', 'json'))
-            active = [c['spec'] for c in configs if c['metadata']['id'] == 'v1alpha1']
-            if len(active) != 1 or not isinstance(active[0], str):
-                raise ResizeError('Cannot determine active Talos configuration before staging resources.')
-            self.talos(name, 'patch', 'machineconfig', '--mode=staged', '--patch', resource_patch(active[0], entry['desired']['patch']))
+            self.message(f'{name}: draining (PDBs enforced).')
+            if name in self.cps:
+                configs = decode_stream(self.talos(name, 'get', 'machineconfig', '-o', 'json'))
+                active = [c['spec'] for c in configs if c['metadata']['id'] == 'v1alpha1']
+                if len(active) != 1 or not isinstance(active[0], str):
+                    raise ResizeError('Cannot determine active Talos configuration before staging resources.')
+                self.talos(name, 'patch', 'machineconfig', '--mode=staged', '--patch', resource_patch(active[0], entry['desired']['patch']))
             self.command(self.kube + ['--server', f'https://{self.endpoint}:6443', 'annotate', 'node', name, MAINTENANCE + '=true', '--overwrite'])
             self.command(self.kube + ['--server', f'https://{self.endpoint}:6443', 'taint', 'node', name, MAINTENANCE + '=true:NoSchedule', '--overwrite'])
             self.command(self.kube + ['--server', f'https://{self.endpoint}:6443', 'drain', name, '--ignore-daemonsets', '--delete-emptydir-data', '--timeout=300s'], timeout=330)
             entry['phase'] = 'staged'
             self.save(entry)
         if entry['phase'] == 'staged':
+            self.renew_maintenance()
             if self.pve(name, 'status/current')['status'] != 'stopped':
                 self.message(f'{name}: gracefully shutting down Talos.')
                 self.talos(name, 'shutdown', '--wait=false')
@@ -301,17 +339,19 @@ class Resizer:
             entry['phase'] = 'stopped'
             self.save(entry)
         if entry['phase'] == 'stopped':
+            self.renew_maintenance()
             self.message(f'{name}: applying VM hardware with OpenTofu and starting it.')
-            # Only this VM is targeted. The full root apply follows after all CPs recover.
+            # Only this VM is targeted. The full root apply follows after all resized nodes recover.
             self.tofu('apply', '-input=false', '-auto-approve', '-parallelism=1', '-target=' + VM + '[' + json.dumps(name) + ']')
             entry['phase'] = 'applied'
             self.save(entry)
-        self.message(f'{name}: waiting for CPU/RAM, static Pods, API and all etcd members; stable {self.args.stable_seconds}s.')
+        self.message(f'{name}: waiting for CPU/RAM and cluster health; stable {self.args.stable_seconds}s.')
         self.wait(lambda: self.recovered(entry), name + ' recovery', stable=self.args.stable_seconds)
         self.release(name)
+        self.workloads()
         self.node_health()
         self.journal.unlink()
-        self.message(f'{name}: recovered; safe to proceed to the next control plane.')
+        self.message(f'{name}: recovered; safe to proceed to the next node.')
 
     def release(self, name):
         # A previous attempt may have exited between cleanup and deleting the
@@ -319,42 +359,48 @@ class Resizer:
         node = self.kube_json('get', 'node', name, '-o', 'json')
         command = self.kube + ['--server', f'https://{self.endpoint}:6443']
         self.command(command + ['uncordon', name])
-        if any(t['key'] == MAINTENANCE and t['effect'] == 'NoSchedule' for t in node.get('spec', {}).get('taints', [])):
-            self.command(command + ['taint', 'node', name, MAINTENANCE + ':NoSchedule-'])
-        if MAINTENANCE in node['metadata'].get('annotations', {}):
-            self.command(command + ['annotate', 'node', name, MAINTENANCE + '-'])
+        for key in (MAINTENANCE, LEGACY_MAINTENANCE):
+            if any(t['key'] == key and t['effect'] == 'NoSchedule' for t in node.get('spec', {}).get('taints', [])):
+                self.command(command + ['taint', 'node', name, key + ':NoSchedule-'])
+            if key in node['metadata'].get('annotations', {}):
+                self.command(command + ['annotate', 'node', name, key + '-'])
 
     def assert_stopped(self, name):
         if self.pve(name, 'status/current')['status'] != 'stopped':
             raise ResizeError('VM has not stopped.')
 
     def run(self):
-        with tempfile.TemporaryDirectory(prefix='.control-plane-plan-', dir=self.workspace) as tmp:
+        self.renew_maintenance()
+        with tempfile.TemporaryDirectory(prefix='.node-resize-plan-', dir=self.workspace) as tmp:
             plan = str(Path(tmp) / 'resize.plan')
             self.tofu('plan', '-input=false', '-out=' + plan)
             data = json.loads(self.tofu('show', '-json', plan))
-        self.variables, pending = resize_candidates(data)
+        journal = json.loads(self.journal.read_text()) if self.journal.exists() else None
+        self.variables, pending = resize_candidates(data, journal)
         self.cps = {n: v for n, v in self.variables['vms'].items() if self.variables['resources'][v['type']]['k8s_node'] == 'controlplane'}
-        if self.journal.exists():
-            name = json.loads(self.journal.read_text())['node']
-            if name not in self.cps:
+        self.nodes = {n: v for n, v in self.variables['vms'].items() if self.variables['resources'][v['type']]['k8s_node'] in ('controlplane', 'worker')}
+        if journal:
+            name = journal['node']
+            if name not in self.nodes:
                 raise ResizeError('Pending resize node no longer exists in configuration.')
             pending = [name] + [n for n in pending if n != name]
         if not pending:
-            self.message('no existing control-plane CPU/memory changes.')
+            self.message('no existing node CPU/memory changes.')
             return
-        if len(self.cps) < 3:
-            raise ResizeError('Rolling resize requires at least three control-plane members.')
+        if any(n in self.cps for n in pending) and len(self.cps) < 3:
+            raise ResizeError('Rolling control-plane resize requires at least three control-plane members.')
         if not self.journal.exists():
             self.select_endpoint()
             self.node_health()
             # Followers first: avoid the current leader until the other members recover.
             leaders = []
             for name in pending:
+                if name not in self.cps:
+                    continue
                 row = etcd_rows(self.talos(name, 'etcd', 'status'))[0]
                 if row['member'] == row['leader']:
                     leaders.append(name)
-            pending = sorted(set(pending) - set(leaders)) + leaders
+            pending = sorted(n for n in pending if n in self.cps and n not in leaders) + leaders + sorted(n for n in pending if n not in self.cps)
         for name in pending:
             self.resize(name)
 
@@ -364,6 +410,9 @@ def main():
     p.add_argument('--workspace', required=True)
     p.add_argument('--kubeconfig', required=True)
     p.add_argument('--talosconfig', required=True)
+    p.add_argument('--workload-baseline', required=True)
+    p.add_argument('--maintenance-state', required=True)
+    p.add_argument('--maintenance-owner', required=True)
     p.add_argument('--timeout', type=int, default=900)
     p.add_argument('--stable-seconds', type=int, default=30)
     args = p.parse_args()
@@ -371,7 +420,7 @@ def main():
     try:
         Resizer(args).run()
     except Exception as exc:
-        print(f'Error: control-plane resize stopped before touching another node: {exc}', file=sys.stderr)
+        print(f'Error: node resize stopped before touching another node: {exc}', file=sys.stderr)
         return 1
     return 0
 

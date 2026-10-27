@@ -99,7 +99,7 @@ class TalosPatchFormatTest(unittest.TestCase):
 
     @unittest.skipUnless(os.environ.get('TALOS_CONFIG_VALIDATOR'), 'Set TALOS_CONFIG_VALIDATOR for official CLI validation')
     def test_control_plane_resize_payload_validates_in_both_formats(self):
-        spec = importlib.util.spec_from_file_location('resize_contract', ROOT / 'scripts/resize-control-planes.py')
+        spec = importlib.util.spec_from_file_location('resize_contract', ROOT / 'scripts/resize-nodes.py')
         resize = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(resize)
         resources = {'requests': {'cpu': '1', 'memory': '1Gi'}, 'limits': {'cpu': '1', 'memory': '1Gi'}}
