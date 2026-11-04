@@ -132,6 +132,7 @@ class Resizer:
         self.log = self.workspace / '.node-resize.log'
         self.kube = ['kubectl', '--kubeconfig', args.kubeconfig, '--request-timeout=15s']
         self.variables = {}
+        self.component_resources = {}
         self.nodes = {}
         self.cps = {}
         self.endpoint = None
@@ -194,9 +195,11 @@ class Resizer:
         talos = self.variables['constants']['talos']
         patch = {}
         for field, prefix in CONSTANTS.items():
-            cpu, memory = talos.get(prefix + '_cpu'), talos.get(prefix + '_memory')
+            resources = self.component_resources.get(prefix, {})
+            cpu = resources.get('cpu', talos.get(prefix + '_cpu'))
+            memory = resources.get('memory', talos.get(prefix + '_memory'))
             if not cpu or not memory:
-                raise ResizeError('Explicit CPU and memory values are required for all control-plane components.')
+                raise ResizeError('Calculated or explicit CPU and memory values are required for all control-plane components.')
             patch[field] = {'resources': {'requests': {'cpu': cpu, 'memory': memory}, 'limits': {'cpu': cpu, 'memory': memory}}}
         return {'cluster': patch}
 
@@ -377,6 +380,8 @@ class Resizer:
             data = json.loads(self.tofu('show', '-json', plan))
         journal = json.loads(self.journal.read_text()) if self.journal.exists() else None
         self.variables, pending = resize_candidates(data, journal)
+        sizing = data.get('planned_values', {}).get('outputs', {}).get('control_plane_sizing', {}).get('value', {})
+        self.component_resources = sizing.get('components', {})
         self.cps = {n: v for n, v in self.variables['vms'].items() if self.variables['resources'][v['type']]['k8s_node'] == 'controlplane'}
         self.nodes = {n: v for n, v in self.variables['vms'].items() if self.variables['resources'][v['type']]['k8s_node'] in ('controlplane', 'worker')}
         if journal:

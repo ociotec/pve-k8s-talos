@@ -213,6 +213,87 @@ direnv exec . ../../scripts/deploy-infra-vm.sh
 The infra VM flow expects a Debian cloud image, not an interactive Debian installer ISO. If the discovery service uses an internal CA, add that CA to each dependent cluster through `constants["network"]["cert_files"]` before generating Talos assets.
 Clusters configured with `talos.discovery_service_bootstrap_only = "true"` no longer depend on the Discovery Service after a successful initial root deployment, so the infra VM may be stopped once no other cluster is bootstrapping against it.
 
+### Control-plane sizing and capacity gate
+
+Deployments that apply Talos/Kubernetes evaluate the final worker fleet before
+changing credentials, VMs or Kubernetes workloads. CP VM sizes stay declared in
+`resources.auto.tfvars`; the repository calculates API server, controller-manager
+and scheduler resources and checks that each CP VM can hold them. `--destroy`
+must pass before any VMs are destroyed. `--services-only` and `--destroy-only`
+skip the sizing gate. Urgent service updates therefore do not require adopting
+automatic CP sizing or overriding its capacity check; keep the usual service
+skip flags to constrain the update. Existing Git synchronization, source
+cleanliness and service-specific safety checks still apply.
+
+The provisioning factor is the maximum of 1, worker count / 10, total worker pod
+slots / 1100, and the smaller of worker vCPU / 328 and worker RAM GiB / 420.
+Pod slots use `talos.max_pods` (110 when unset). The CPU/RAM reference is shared
+with monitoring sizing; it is a heuristic, not a measured control-plane capacity
+guarantee. More workers, higher pod density or greater usable worker capacity
+increase requirements. Adding CP replicas does not reduce per-member budgets:
+controller-manager and scheduler can concentrate work on one member.
+
+| Component or budget | Baseline CPU | Baseline RAM | Scaling |
+| --- | --- | --- | --- |
+| API server | 1 | 3Gi | Factor |
+| Controller-manager | 500m | 1Gi | Factor |
+| Scheduler | 250m | 512Mi | Factor |
+| Etcd reserve | 500m | 512Mi | Factor |
+| Talos, kubelet and runtime reserve | 500m | 1Gi | Fixed |
+| Node agents, networking and exporters reserve | 250m | 512Mi | Fixed |
+
+Scaled component values round up to 250m CPU and 128Mi RAM. VM sizing uses two
+thresholds **per CP**, both rounded up to whole vCPUs and 1GiB (1024MiB) steps:
+
+- **Mandatory minimum:** effective component requests (equal to limits, counted
+  once) plus etcd, OS and node-agent reserves. No percentage headroom is added.
+  Missing either CPU or RAM aborts deployment unless explicitly overridden.
+- **Recommended upper size:** the same unrounded sum divided by the available
+  fraction after reserving free headroom (20% by default, so divide by 0.8).
+  Exceeding either rounded CPU or RAM threshold emits a warning and continues.
+  Sizes between the minimum and upper threshold pass without a sizing warning.
+
+The baseline sum is 3000m CPU / 6656Mi RAM, giving a minimum of 3 vCPU / 7GiB and
+an upper recommendation of 4 vCPU / 9GiB. The sample uses 4 vCPU / 8GiB VMs.
+`talos.control_plane_recommended_headroom_percent` optionally changes the upper
+threshold's free margin (integer 0–99); it never changes the mandatory minimum.
+These checks only report capacity: they do not resize, shrink or cap VM sizes.
+Etcd and host service figures are accounting reserves, not Talos resource limits.
+Additional workloads scheduled on CPs must be covered by an increased reserve;
+this offline check does not inspect live pods, throughput, storage IOPS or etcd
+database size. Validate the estimates against the control-plane health dashboard.
+
+When a CPU/RAM pair is absent or empty, sizing is automatic. Existing explicit
+`talos.<api_server|controller_manager|scheduler>_cpu/_memory` pairs remain overrides,
+including values below the estimate; clear both values to adopt automatic sizing.
+Optional `<etcd|system|node_agents>_reserve_cpu/_memory` pairs override accounting
+reserves. Pairs must be complete and use canonical Kubernetes quantities.
+Component requests and limits use the same effective values.
+
+Insufficient capacity aborts deployment with each affected CP's CPU/RAM deficit.
+Use `--force-control-plane-capacity` only to bypass this gate for one invocation.
+The warning remains visible and calculated resources stay unchanged; invalid
+inputs and other safety checks still fail. Oversizing warnings remain nonfatal
+and do not require an override. OpenTofu root plans also enforce the minimum
+(the corresponding explicit variable is `allow_control_plane_overcommit`) and
+warn about oversizing. The `control_plane_sizing` root output distinguishes
+component totals, service reserves, the combined sum, minimum, upper threshold,
+per-node deficits and possible oversizing.
+Asset generation alone remains available for undersized configurations, including
+destroy inputs; it does not bypass the deployment or root-plan gate.
+
+From `clusters/<cluster>`, a read-only capacity check is:
+
+```bash
+direnv exec . python3 ../../scripts/control-plane-sizing.py
+```
+
+To apply only the Talos/Kubernetes changes after reviewing the calculated sizing:
+
+```bash
+direnv exec . ../../scripts/deploy.sh --talos-only
+```
+
 ### Resize existing nodes
 
 Use `scripts/deploy.sh` when increasing control-plane or worker VM CPU or RAM.

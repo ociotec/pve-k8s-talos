@@ -1,8 +1,9 @@
 resources = {
   # These are example values, update them to match your environment
   "controlplane" = {
-    vcpus      = 2
-    memory     = 2048
+    # Between the baseline minimum (3 vCPU/7GiB) and upper recommendation (4/9).
+    vcpus      = 4
+    memory     = 8192
     k8s_node   = "controlplane"
     k8s_labels = {}
     disks = [

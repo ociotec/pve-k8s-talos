@@ -25,6 +25,9 @@ override.tf.json
 # Plan output
 *.tfplan
 
+# Local point-in-time audit and operational reports
+/reports/
+
 # Other files
 patches/hostname-*.yaml
 patches/machine-*.yaml

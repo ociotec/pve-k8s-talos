@@ -129,6 +129,36 @@ class Decisions(unittest.TestCase):
             with self.assertRaisesRegex(M.ResizeError,'recovery failed'):r.run()
             self.assertEqual(r.calls,['cp-1','cp-2'])
 
+    def test_resize_stages_the_automatic_resources_from_the_same_plan(self):
+        data = plan()
+        data['variables']['constants']['value']['talos'] = {}
+        components = {name: {'cpu': '500m', 'memory': '1536Mi'} for name in M.CONSTANTS.values()}
+        data['planned_values'] = {'outputs': {'control_plane_sizing': {'value': {'components': components}}}}
+
+        class Fake(OfflineResizer):
+            def tofu(self, *args):
+                return json.dumps(data) if args[0] == 'show' else ''
+            def select_endpoint(self, excluded=None):
+                pass
+            def node_health(self, excluded=None):
+                pass
+            def talos(self, name, *args):
+                member = name[-1]
+                return ('NODE  MEMBER  DB SIZE  IN USE  LEADER  RAFT INDEX  RAFT TERM  RAFT APPLIED INDEX  LEARNER  PROTOCOL  STORAGE\n'
+                        f'192.0.2.{member}  {member}  10 MB  4 MB (40%)  3  10  1  10  false  3.6  3.6')
+            def resize(self, name):
+                self.desired_nodes.append(self.desired(name))
+
+        with tempfile.TemporaryDirectory() as directory:
+            resizer = Fake(arguments(directory))
+            resizer.desired_nodes = []
+            resizer.run()
+            self.assertEqual(len(resizer.desired_nodes), 3)
+            for node in resizer.desired_nodes:
+                for component in node['patch']['cluster'].values():
+                    self.assertEqual(component['resources']['requests'], {'cpu': '500m', 'memory': '1536Mi'})
+                    self.assertEqual(component['resources']['limits'], component['resources']['requests'])
+
     def test_failed_recovery_keeps_journal_and_does_not_release_node(self):
         class Fake(OfflineResizer):
             def command(self, cmd, timeout=60):

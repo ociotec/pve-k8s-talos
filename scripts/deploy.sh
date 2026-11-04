@@ -43,8 +43,12 @@ Options:
       --reboot-for-registry-auth
                             Allow additional drained registry-only reboots for static
                             auth already changed outside staged root activation.
+      --force-control-plane-capacity
+                            Bypass only the CP CPU/RAM capacity gate; still show
+                            deficits and keep calculated component resources.
       --services-only       Skip Talos VM/root apply and deploy Kubernetes services only.
                             Requires existing out/kubeconfig and out/talosconfig.
+                            Skips the control-plane sizing gate.
       --development         Allow uncommitted platform and cluster source changes.
                             Never commits, pulls, or pushes source or runtime state.
       --consolidate-development
@@ -79,6 +83,7 @@ talos_only=false
 services_only=false
 development_mode=false
 consolidate_development=false
+force_control_plane_capacity=false
 gen_talos_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -146,6 +151,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --services-only)
       services_only=true
+      shift
+      ;;
+    --force-control-plane-capacity)
+      force_control_plane_capacity=true
       shift
       ;;
     --development)
@@ -232,8 +241,9 @@ fi
 setup_cluster_context "${script_dir}" ""
 require_cmd git
 require_cmd jq
-if [[ "${services_only}" != "true" && "${destroy_only}" != "true" ]]; then
+if [[ "${destroy_only}" != "true" ]]; then
   require_cmd python3
+  require_cmd tofu
 fi
 if [[ "${development_mode}" == "true" ]]; then
   require_cmd sha256sum
@@ -308,6 +318,19 @@ elif [[ "${consolidate_development}" == "true" ]]; then
 fi
 "${script_dir}/cluster-state-sync.sh" "${state_sync_preflight_args[@]}"
 state_sync_armed=true
+
+# Check the synchronized final inventory before credentials, destruction,
+# maintenance leases or VM operations. Services-only never applies the root
+# workspace, so an unrelated CP sizing change must not block service updates.
+# Destroy-only must also remain possible for undersized inventories.
+export TF_VAR_allow_control_plane_overcommit="${force_control_plane_capacity}"
+if [[ "${services_only}" != "true" && "${destroy_only}" != "true" ]]; then
+  control_plane_sizing_args=(--cluster-dir "${cluster_dir}")
+  if [[ "${force_control_plane_capacity}" == "true" ]]; then
+    control_plane_sizing_args+=(--force-control-plane-capacity)
+  fi
+  python3 "${script_dir}/control-plane-sizing.py" "${control_plane_sizing_args[@]}"
+fi
 
 deployment_status_enabled=false
 deployment_id=""

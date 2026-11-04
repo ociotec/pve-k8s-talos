@@ -10,6 +10,21 @@ locals {
 resource "proxmox_virtual_environment_vm" "create_pve_vms" {
   for_each = var.vms
 
+  lifecycle {
+    precondition {
+      condition     = length(local.cp_invalid_settings) == 0
+      error_message = "Invalid control-plane sizing settings: ${join(", ", local.cp_invalid_settings)}. max_pods must be an integer from 1 to 65535; control_plane_recommended_headroom_percent must be an integer from 0 to 99. Empty values select defaults."
+    }
+    precondition {
+      condition     = length(local.cp_invalid_resources) == 0
+      error_message = "Invalid control-plane resource pairs: ${join(", ", local.cp_invalid_resources)}. Set both CPU and memory or neither, using canonical Kubernetes quantities."
+    }
+    precondition {
+      condition     = var.allow_control_plane_overcommit || local.cp_capacity_fits
+      error_message = "Control-plane capacity is insufficient. Each CP needs at least ${local.cp_required_cpu_m / 1000} vCPU and ${local.cp_required_memory_mib / 1024}Gi RAM including service budgets, without percentage headroom. Review output control_plane_sizing; deploy.sh --force-control-plane-capacity bypasses only this gate."
+    }
+  }
+
   name            = each.key
   node_name       = each.value.node_name
   vm_id           = each.value.vm_id
