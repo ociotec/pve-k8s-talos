@@ -10,6 +10,7 @@ variable "services" {
 locals {
   vm        = var.constants["vm"]
   network   = var.constants["network"]
+  network2  = try(var.constants["network2"], {})
   os        = var.constants["os"]
   docker    = try(var.services["docker"], {})
   discovery = try(var.services["talos_discovery"], {})
@@ -145,6 +146,12 @@ locals {
   })
 }
 
+locals {
+  secondary_network_enabled = try(trimspace(local.network2["bridge_device"]) != "", false)
+  secondary_network_address = try("${local.network2["ip"]}/${local.network2["net_size"]}", "")
+  secondary_vlan_tag        = try(trimspace(local.network2["vlan_tag"]), "")
+}
+
 resource "proxmox_virtual_environment_file" "user_data_cloud_config" {
   content_type = "snippets"
   datastore_id = local.snippets_store
@@ -194,6 +201,15 @@ resource "proxmox_virtual_environment_vm" "infra_vm" {
     vlan_id = local.vlan_tag != "" ? tonumber(local.vlan_tag) : null
   }
 
+  dynamic "network_device" {
+    for_each = local.secondary_network_enabled ? [local.network2] : []
+    content {
+      bridge  = network_device.value["bridge_device"]
+      model   = "virtio"
+      vlan_id = local.secondary_vlan_tag != "" ? tonumber(local.secondary_vlan_tag) : null
+    }
+  }
+
   disk {
     datastore_id = local.vm["datastore_id"]
     file_id      = local.cloud_image_file_id
@@ -228,6 +244,15 @@ resource "proxmox_virtual_environment_vm" "infra_vm" {
       }
     }
 
+    dynamic "ip_config" {
+      for_each = local.secondary_network_enabled ? [local.secondary_network_address] : []
+      content {
+        ipv4 {
+          address = ip_config.value
+        }
+      }
+    }
+
     dns {
       domain = local.domain
       servers = [
@@ -239,6 +264,14 @@ resource "proxmox_virtual_environment_vm" "infra_vm" {
   }
 
   lifecycle {
+    precondition {
+      condition     = !local.secondary_network_enabled || can(cidrnetmask(local.secondary_network_address))
+      error_message = "Set network2.ip and network2.net_size to a valid static IPv4 address/prefix when network2.bridge_device is enabled."
+    }
+    precondition {
+      condition     = !local.secondary_network_enabled || try(local.network2["ip"] != local.network["ip"], false)
+      error_message = "network2.ip must differ from the primary network.ip address."
+    }
     precondition {
       condition     = local.cloud_image_file_id != null || local.cloud_image_import_from != null
       error_message = "Set either vm.cloud_image_file_id or vm.cloud_image_import_from to a Debian cloud image available to Proxmox."

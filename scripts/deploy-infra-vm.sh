@@ -404,7 +404,11 @@ prepare_workspace() {
   link_into_workspace "${current_dir}/certs" "${infra_vm_workspace}/certs"
   link_into_workspace "${current_dir}/secrets" "${infra_vm_workspace}/secrets"
   if [[ -r "${repo_root}/.terraform.lock.hcl" ]]; then
-    link_into_workspace "${repo_root}/.terraform.lock.hcl" "${infra_vm_workspace}/.terraform.lock.hcl"
+    # Infra uses a subset of root providers; init must not prune the shared lockfile.
+    if [[ -L "${infra_vm_workspace}/.terraform.lock.hcl" ]]; then
+      rm "${infra_vm_workspace}/.terraform.lock.hcl"
+    fi
+    cp "${repo_root}/.terraform.lock.hcl" "${infra_vm_workspace}/.terraform.lock.hcl"
   fi
 }
 

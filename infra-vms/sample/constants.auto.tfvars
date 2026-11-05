@@ -30,6 +30,15 @@ constants = {
     "vlan_tag"      = ""
   }
 
+  "network2" = {
+    # Optional second NIC. Set the bridge and static IPv4 address to enable it.
+    # No secondary default gateway is configured.
+    "ip"            = ""
+    "net_size"      = ""
+    "bridge_device" = ""
+    "vlan_tag"      = ""
+  }
+
   "os" = {
     # May be a short hostname or FQDN. The VM keeps the short hostname and cloud-init uses the FQDN.
     "hostname"                  = "bootstrap-example.example.com"

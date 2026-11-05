@@ -196,7 +196,11 @@ Then edit:
   - Proxmox VM placement (`vm.node_name`, `vm.vm_id`, pool, datastore IDs).
   - Debian cloud image file/import ID already available to Proxmox.
   - VM resources (`vm.vcpus`, `vm.memory`, `vm.disks`).
-  - Static network settings.
+  - Static primary network settings.
+  - Optional `network2` settings: `bridge_device`, static `ip`/`net_size`, and
+    `vlan_tag`. Leave `bridge_device` empty to retain one NIC. The second NIC
+    receives no default gateway; leave its VLAN tag empty when tagging is
+    handled by the bridge uplink.
   - OS provisioning settings, including username, optional fixed `user_uid`/`user_gid`, package update/upgrade, trusted CA files, mandatory reboot after provisioning, and extra packages.
 - `services.auto.tfvars`
   - Docker installation toggle/package list.
@@ -211,6 +215,9 @@ direnv exec . ../../scripts/deploy-infra-vm.sh
 ```
 
 The infra VM flow expects a Debian cloud image, not an interactive Debian installer ISO. If the discovery service uses an internal CA, add that CA to each dependent cluster through `constants["network"]["cert_files"]` before generating Talos assets.
+For an already provisioned VM, adding the NIC and its cloud-init network metadata
+does not establish that the guest has activated the new address. Verify guest
+network activation during deployment before relying on the secondary network.
 Clusters configured with `talos.discovery_service_bootstrap_only = "true"` no longer depend on the Discovery Service after a successful initial root deployment, so the infra VM may be stopped once no other cluster is bootstrapping against it.
 
 ### Control-plane sizing and capacity gate
