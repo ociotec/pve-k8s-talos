@@ -5,6 +5,7 @@ import threading
 from pathlib import Path
 import tempfile
 import unittest
+from urllib.parse import parse_qs, urlsplit
 
 def load(name,file):
     spec=importlib.util.spec_from_file_location(name,Path(__file__).resolve().parents[1]/file)
@@ -20,7 +21,24 @@ class TempoHealthTest(unittest.TestCase):
             return '{"trace":{"resourceSpans":[{"scopeSpans":[{"spans":[{"name":"platform-deployment-probe"}]}]}]}}'
         HEALTH.verify_trace('monitoring',execute,timeout=0)
         trace_id=json.loads(requests[0][1])['resourceSpans'][0]['scopeSpans'][0]['spans'][0]['traceId']
-        self.assertTrue(requests[1][0][-1].endswith('/api/traces/'+trace_id))
+        self.assertTrue(urlsplit(requests[1][0][-1]).path.endswith('/api/traces/'+trace_id))
+
+    def test_probe_finds_its_span_when_unbounded_history_lookups_time_out(self):
+        emitted={}
+        def execute(args,payload=None):
+            if args[0]=='post-json':
+                emitted.update(json.loads(payload)['resourceSpans'][0]['scopeSpans'][0]['spans'][0])
+                return '{}'
+            lookup=urlsplit(args[-1]);bounds=parse_qs(lookup.query)
+            if not {'start','end'}.issubset(bounds):
+                raise RuntimeError('Historical lookup exceeded the Kubernetes API timeout')
+            start,end=int(bounds['start'][0]),int(bounds['end'][0])
+            if not start<=int(emitted['startTimeUnixNano'])/1e9<=end or end-start>300:
+                raise RuntimeError('Lookup did not select the emitted span time range')
+            if not lookup.path.endswith('/api/traces/'+emitted['traceId']):
+                raise RuntimeError('Lookup selected a different trace')
+            return json.dumps({'trace':{'resourceSpans':[{'scopeSpans':[{'spans':[emitted]}]}]}})
+        HEALTH.verify_trace('monitoring',execute,timeout=0)
 
     def test_otlp_transport_sends_json_content_type_and_body(self):
         received=[]

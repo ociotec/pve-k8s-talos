@@ -65,6 +65,31 @@ Run from `clusters/<cluster>` with the cluster `.envrc` loaded.
    pod-template checksum. Such workloads will not reliably reload their new
    configuration just because the ConfigMap changes.
 
+## Tempo Checks Around Node Maintenance
+
+Follow the planned-restart safety rule in `AGENTS.md`. The local backend can
+leave empty or incomplete block files after a power-loss reset because pending
+filesystem writes may still be in guest RAM. Ceph health and a Ready Tempo Pod
+are separate from application metadata durability.
+
+Before and after an affected node intervention, check Tempo block/index errors
+and a historical query within retention, using a time range known to contain
+stored traces. Recent live-store queries alone do not validate backend history.
+Synthetic trace-by-ID probes should select the emitted span's time range; an
+unbounded history lookup can exceed the API timeout on a large backend even
+when ingestion works. `scripts/check-tempo-health.py --trace-probe` applies that
+window while retaining the block/index error gate.
+If an error appears, record block paths, sizes and modification times alongside
+the node lifecycle and Ceph timeline, then use the clone branch below. Healthy
+clusters can continue their approved rollout; unrelated application failures do
+not establish a Tempo persistence failure.
+
+For metadata analysis, use a dedicated helper with explicit CPU/memory budgets.
+Stream successful JSON checks and keep bounded error/progress output; do not
+accumulate the full inventory or run an unbounded scanner inside a CSI service
+container, where it shares the storage driver's memory limit. Report skipped
+files as incomplete validation. Preserve trace contents and credentials.
+
 ## Tempo Data-Safety Gate
 
 Apply this gate when Tempo changes major version, storage format, backend,
@@ -76,9 +101,17 @@ before the production migration whenever practical.
 2. Create and protect a point-in-time snapshot. Prefer a Kubernetes
    `VolumeSnapshot` only when the required CRDs and snapshot class exist. If
    they are unavailable, use the Rook Ceph RBD snapshot-and-clone path.
+   Record snapshot consistency: a hot RBD snapshot may capture an in-flight
+   block before cached writes reach storage. Compare clone-only malformed paths
+   with their active counterparts; a healthy active block must stay out of the
+   production repair plan. Take a fresh protected snapshot after graceful Tempo
+   shutdown and volume unmount before an authorised active repair.
 3. Mount the clone in a temporary, isolated workload. An ext4 volume may need
    a read-write mount to replay its journal; this is safe on the clone, never
    on a supposed read-only production mount.
+   Check that a static clone wrapper uses a volumeHandle supported by the
+   installed CSI controller detach path. Verify zero RBD watchers and no node
+   device/mount before cleaning any orphaned temporary attachment references.
 4. Parse every `*.json` file under the Tempo traces path. Record only invalid
    relative paths and parser errors; never print trace contents.
 5. Start the target Tempo image against the clone and check its blocklist
@@ -95,18 +128,25 @@ metadata files:
 2. On the clone, move each affected **whole block directory** to a dated
    `quarantine` directory outside the trace path. Do not delete individual
    files or infer replacement metadata.
-3. Restart Tempo against the repaired clone and require a successful blocklist
-   poll before proposing the production repair.
+3. Restart the same Tempo image against the repaired clone. Require clean
+   block/index polling and a positive historical query before proposing the
+   production repair. List active-volume paths separately from clone-only
+   in-flight snapshot artefacts.
 4. With explicit authorization, scale Tempo down, move the same whole block
    directories on the active PVC to the dated quarantine, then scale Tempo
    back to its previous replica count.
-5. Wait for readiness, a successful `blocklist poll complete`, and at least
-   one successful compaction when work exists. The isolated `no jobs found`
+5. Wait for readiness, clean blocklist polling, a positive historical query,
+   and at least one successful compaction when work exists. The global
+   `blocklist poll complete` log is also emitted after tenant polling errors;
+   pair it with the absence of block/index errors and no increase in the tenant
+   index error counter. The isolated `no jobs found`
    scheduler message is known background noise in Tempo 3 single-binary mode;
    do not treat it as data loss or a failed migration by itself.
 
-The failed blocks may make only their historical trace ranges unavailable. The
-quarantine and protected snapshot preserve a reversible recovery path.
+A malformed block can prevent the tenant index from refreshing and hide healthy
+historical traces too. Quarantine restores discovery of valid blocks; it does
+not reconstruct traces from empty files. The quarantine and protected snapshot
+preserve a reversible recovery path.
 
 ## OpenTelemetry and Prometheus Gate
 

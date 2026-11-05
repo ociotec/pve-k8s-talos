@@ -170,6 +170,7 @@ For any non-trivial change:
 
 ## Safety Rules
 
+- Use workload drain and graceful guest/node shutdown for planned restarts of persistent workloads. A forced VM/PVE reset is a power-loss event: writes still in guest RAM can be lost even when Ceph is healthy. Acceptance of downtime alone does not establish acceptance of that durability risk.
 - Never commit real secrets, private keys, kubeconfigs, Talos configs, or
   OpenTofu state to the shared `pve-k8s-talos` repository, `clusters/sample`, or
   `infra-vms/sample`.
@@ -221,6 +222,7 @@ For any non-trivial change:
 
 - When the user asks to audit or update pinned versions across the repository, follow `docs/agent-workflows/update-versions.md`.
 - When the user asks to migrate, upgrade, or deploy updated monitoring components in a real cluster, follow `docs/agent-workflows/monitoring-version-migration.md` in addition to the version-update workflow. Apply its preflight and post-deployment checks whenever the change includes Tempo, OpenTelemetry Collector, Prometheus, Loki, Grafana, PostgreSQL, exporters, or their monitoring configuration.
+- When VM/PVE/node maintenance affects Tempo, or Tempo reports block/index errors after an interruption, follow the Tempo maintenance and recovery sections in `docs/agent-workflows/monitoring-version-migration.md` before expanding the rollout to more nodes.
 - When the user asks to migrate an existing Grafana workload to Helm, enable
   Grafana Operator for an existing cluster, or complete both operations, follow
   `docs/agent-workflows/migrate-grafana-to-helm-operator.md` in addition to the

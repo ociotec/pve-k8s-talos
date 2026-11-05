@@ -10,6 +10,7 @@ import sys
 import time
 import uuid
 import urllib.error
+import urllib.parse
 import urllib.request
 
 POLL_COMPLETE = re.compile(r'blocklist poll(?:ing)? complete', re.I)
@@ -77,10 +78,13 @@ def verify_trace(namespace, execute, timeout=120):
     reply = json.loads(execute(['post-json', f'/api/v1/namespaces/{namespace}/services/http:otel-collector:4318/proxy/v1/traces'], json.dumps(payload)) or '{}')
     if int(reply.get('partialSuccess', {}).get('rejectedSpans', 0)):
         raise ValueError('OpenTelemetry rejected the deployment probe span.')
+    # Bound the lookup to the emitted span so large backends fit the API timeout.
+    probe_second = now // 1000000000
+    query = urllib.parse.urlencode({'start': max(0, probe_second - 60), 'end': probe_second + 60})
     deadline = time.monotonic() + timeout
     while True:
         try:
-            result = json.loads(execute(['get', '--raw', f'/api/v1/namespaces/{namespace}/services/http:tempo:3200/proxy/api/traces/{trace_id}']))
+            result = json.loads(execute(['get', '--raw', f'/api/v1/namespaces/{namespace}/services/http:tempo:3200/proxy/api/traces/{trace_id}?{query}']))
             if has_probe_span(result, name):
                 print('OpenTelemetry ingestion and Tempo trace-by-ID query verified.')
                 return
