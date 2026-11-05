@@ -531,6 +531,7 @@ locals {
     }
   })
 
+  # Allow headroom while startup synchronizes Services and EndpointSlices.
   kube_proxy_resources_patch = jsonencode({
     spec = {
       template = {
@@ -540,11 +541,11 @@ locals {
             resources = {
               requests = {
                 cpu    = "50m"
-                memory = "64Mi"
+                memory = "256Mi"
               }
               limits = {
-                cpu    = "200m"
-                memory = "64Mi"
+                cpu    = "1"
+                memory = "256Mi"
               }
             }
             readinessProbe = {
