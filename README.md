@@ -417,6 +417,13 @@ When the public discovery service is disabled, the generated root workspace appl
 
 Workers with an active secondary network apply compatible Talos configuration changes without a reboot when their network configuration is unchanged. Network changes, existing staged configurations, and changes Talos identifies as requiring a reboot retain sequential reboot reconciliation. Failed or unrecognized compatibility checks stop deployment.
 
+For dedicated external Ceph connectivity, follow the
+[worker network migration workflow](docs/agent-workflows/migrate-worker-ceph-network.md).
+`deploy.sh --bootstrap-secondary-network` adds worker NICs/IPs without reboot
+before normal maintenance gates, then publishes partial runtime state. Update
+Ceph clients and allow automatic recovery before full Talos reconciliation.
+The bootstrap deliberately does not claim a complete `k8s` deployment.
+
 To configure container registry mirrors for Talos, define `talos.registry` in `constants.auto.tfvars`. The generator renders `machine.registries.mirrors` from the `mirrors` map, applies the same `skipFallback`/`overridePath` values to every mirror, renders optional `username`/`password` auth for each unique mirror host, and renders `machine.registries.config.*.tls.insecureSkipVerify` from the global TLS flag.
 
 Each mirror value accepts either one URL or an ordered list of URLs. For example,
@@ -1127,6 +1134,8 @@ Run with `-h` or `--help` to see help documentation. Common options:
 --skip-monitoring Skip Prometheus/Loki/Grafana/Tempo stack.
 --skip-benchmark  Skip benchmark workloads.
 -t, --talos-only  Deploy and reconcile Talos/Kubernetes, then exit before all service sections.
+--bootstrap-secondary-network  Add worker secondary NICs/IPs without reboot; publish partial state only.
+--infrastructure-health-only  Exclude application availability from rolling gates; preserve infrastructure and storage guards.
 --services-only   Skip Talos VM/root apply and deploy Kubernetes services only.
 ```
 

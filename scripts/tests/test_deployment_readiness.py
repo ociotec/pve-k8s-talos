@@ -43,4 +43,25 @@ kubectl() {
         for payload in ('Forbidden','{}','{"groups": null}'):
             self.assertNotEqual(self.check(discovery=payload).returncode,0)
 
+
+class PrometheusReloadTest(unittest.TestCase):
+    def check(self,mounted=True):
+        function=re.search(r'^reconcile_prometheus_config\(\) \{\n.*?^\}',SOURCE,re.M|re.S)[0]
+        harness='''set -euo pipefail
+# A retry may start with the already-updated API hash, despite stale live config.
+monitoring_prometheus_config_changed=false
+wait_for_prometheus_config_hash() { [[ "$1" == desired && "$MOUNTED" == true ]]; }
+reload_prometheus_config() { echo live-config-reloaded; }
+'''
+        return subprocess.run(['bash','-c',harness+function+'\nreconcile_prometheus_config desired'],
+            env={**os.environ,'MOUNTED':str(mounted).lower()},capture_output=True,text=True)
+
+    def test_retry_reloads_even_when_the_api_configmap_hash_did_not_change(self):
+        result=self.check();self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('live-config-reloaded',result.stdout)
+
+    def test_unmounted_config_is_not_reloaded(self):
+        result=self.check(False);self.assertNotEqual(result.returncode,0)
+        self.assertNotIn('live-config-reloaded',result.stdout)
+
 if __name__=='__main__': unittest.main()

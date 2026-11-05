@@ -79,6 +79,13 @@ Synthetic trace-by-ID probes should select the emitted span's time range; an
 unbounded history lookup can exceed the API timeout on a large backend even
 when ingestion works. `scripts/check-tempo-health.py --trace-probe` applies that
 window while retaining the block/index error gate.
+For an unchanged Tempo configuration and identical ready Pod/container identities,
+deployment may reuse a successful poll in the last ten minutes instead of waiting
+for another five-minute cycle. A changed UID, container ID, restart count or start
+time requires a fresh poll; recent block/index errors still fail in either mode.
+Prometheus configuration reload is reconciled even when a prior partial apply
+already updated its ConfigMap before failing. For dedicated client network
+changes, also follow [migrate-worker-ceph-network.md](migrate-worker-ceph-network.md).
 If an error appears, record block paths, sizes and modification times alongside
 the node lifecycle and Ceph timeline, then use the clone branch below. Healthy
 clusters can continue their approved rollout; unrelated application failures do

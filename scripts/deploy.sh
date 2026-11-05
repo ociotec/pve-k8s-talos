@@ -40,6 +40,12 @@ Options:
   -t, --talos-only          Deploy and reconcile only Talos/Kubernetes, then exit before
                             all Kubernetes service sections. Skip flags only shape the
                             generated Talos no_proxy configuration in this mode.
+      --bootstrap-secondary-network
+                            Add worker NICs/IPs without reboot, before maintenance/recovery
+                            gates. Publish partial state; full Talos reconciliation remains required.
+      --infrastructure-health-only
+                            Gate rolling recovery on infrastructure health only; retain
+                            drains, PDBs, storage fencing and graceful restart checks.
       --reboot-for-registry-auth
                             Allow additional drained registry-only reboots for static
                             auth already changed outside staged root activation.
@@ -83,12 +89,16 @@ skip_monitoring=false
 skip_benchmark=false
 reboot_for_registry_auth=false
 talos_only=false
+bootstrap_secondary_network=false
+infrastructure_health_only=false
 services_only=false
 development_mode=false
 consolidate_development=false
 force_control_plane_capacity=false
 secondary_network_worker_order=ascending
 gen_talos_args=()
+# Only the guarded helper enables this inside its own OpenTofu subprocesses.
+export TF_VAR_bootstrap_secondary_network=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -149,6 +159,14 @@ while [[ $# -gt 0 ]]; do
       talos_only=true
       shift
       ;;
+    --bootstrap-secondary-network)
+      bootstrap_secondary_network=true
+      shift
+      ;;
+    --infrastructure-health-only)
+      infrastructure_health_only=true
+      shift
+      ;;
     --reboot-for-registry-auth)
       reboot_for_registry_auth=true
       shift
@@ -197,6 +215,20 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+workload_health_args=()
+if [[ "${infrastructure_health_only}" == "true" ]]; then
+  workload_health_args+=(--infrastructure-health-only)
+fi
+
+if [[ "${bootstrap_secondary_network}" == "true" \
+  && ("${services_only}" == "true" || "${talos_only}" == "true" \
+    || "${destroy_first}" == "true" || "${purge_external_ceph}" == "true" \
+    || "${purge_credentials}" == "true" || "${reboot_for_registry_auth}" == "true" \
+    || "${development_mode}" == "true" || "${consolidate_development}" == "true") ]]; then
+  error "--bootstrap-secondary-network cannot be combined with Talos-only, services-only, reboot, development or destruction flags." >&2
+  exit 1
+fi
 
 if [[ "${purge_external_ceph}" == "true" && "${destroy_first}" != "true" ]]; then
   error "--purge-external-ceph requires --destroy or --destroy-only." >&2
@@ -336,7 +368,7 @@ state_sync_armed=true
 # workspace, so an unrelated CP sizing change must not block service updates.
 # Destroy-only must also remain possible for undersized inventories.
 export TF_VAR_allow_control_plane_overcommit="${force_control_plane_capacity}"
-if [[ "${services_only}" != "true" && "${destroy_only}" != "true" ]]; then
+if [[ "${services_only}" != "true" && "${destroy_only}" != "true" && "${bootstrap_secondary_network}" != "true" ]]; then
   control_plane_sizing_args=(--cluster-dir "${cluster_dir}")
   if [[ "${force_control_plane_capacity}" == "true" ]]; then
     control_plane_sizing_args+=(--force-control-plane-capacity)
@@ -1018,7 +1050,7 @@ prepare_root_workload_baseline() {
     fi
   else
     python3 "${script_dir}/check-workload-health.py" --kubeconfig "${cluster_kubeconfig_path}" \
-      --baseline "${root_workload_baseline}" --capture
+      --baseline "${root_workload_baseline}" --capture "${workload_health_args[@]}"
   fi
 }
 
@@ -1212,6 +1244,7 @@ rook_csi_resource_names() {
   namespace="${namespace:-rook-ceph}"
   rook_csi_namespace="${namespace}"
   rook_csi_operator_enabled=false
+  rook_csi_configmap=rook-ceph-csi-config
   rook_csi_rbd_controller=csi-rbdplugin-provisioner
   rook_csi_cephfs_controller=csi-cephfsplugin-provisioner
   rook_csi_rbd_node=csi-rbdplugin
@@ -1222,6 +1255,7 @@ rook_csi_resource_names() {
     major="${BASH_REMATCH[1]}"; minor="${BASH_REMATCH[2]}"
     if (( major > 1 || (major == 1 && minor >= 20) )); then
       rook_csi_operator_enabled=true
+      rook_csi_configmap=ceph-csi-config
       rook_csi_rbd_controller="${namespace}.rbd.csi.ceph.com-ctrlplugin"
       rook_csi_cephfs_controller="${namespace}.cephfs.csi.ceph.com-ctrlplugin"
       rook_csi_rbd_node="${namespace}.rbd.csi.ceph.com-nodeplugin"
@@ -2258,6 +2292,7 @@ rook_external_csi_configuration_sha256() {
             .metadata.name == "rook-ceph-mon"
             or .metadata.name == "rook-ceph-mon-endpoints"
             or .metadata.name == "rook-ceph-csi-config"
+            or .metadata.name == "ceph-csi-config"
             or (.metadata.name | startswith("rook-csi-"))
           )
         | {
@@ -2270,6 +2305,30 @@ rook_external_csi_configuration_sha256() {
     ' |
     sha256sum |
     awk '{ print $1 }'
+}
+
+begin_external_csi_reconciliation() {
+  # Keep the pre-change hash across failed applies/rollout waits. Reading only
+  # live API state on retry loses evidence that existing connections need refresh.
+  local marker="${cluster_git_dir}/pve-k8s-talos-csi-rollout-pending"
+  local previous
+  if [[ -f "${marker}" ]]; then
+    previous="$(cat "${marker}")"
+  else
+    if ! previous="$(rook_external_csi_configuration_sha256)"; then
+      error "Cannot read the external CSI configuration; no pending rollout baseline was recorded." >&2
+      return 1
+    fi
+    if ! (umask 077; printf '%s\n' "${previous}" > "${marker}"); then
+      error "Cannot persist the pending CSI rollout baseline." >&2
+      return 1
+    fi
+  fi
+  if [[ "${previous}" != "absent" && ! "${previous}" =~ ^[0-9a-f]{64}$ ]]; then
+    error "Invalid pending CSI rollout marker; review the previous failed Ceph deployment." >&2
+    return 1
+  fi
+  printf '%s' "${previous}"
 }
 
 bootstrap_rook_operator_crds() {
@@ -2450,6 +2509,13 @@ reload_prometheus_config() {
   )"
   [[ -n "${pod}" ]] || die "No running Prometheus pod found for configuration reload."
   kubectl -n monitoring exec "${pod}" -- sh -ec 'kill -HUP 1' 1>/dev/null
+}
+
+reconcile_prometheus_config() {
+  # A previous partial apply may already have updated the ConfigMap, without
+  # reaching its reload step. Comparing two API hashes cannot detect that case.
+  wait_for_prometheus_config_hash "$1" 120 || return 1
+  reload_prometheus_config
 }
 
 reset_legacy_loki_storage() {
@@ -3501,6 +3567,7 @@ reconcile_talos_registry_auth() {
   local node_name node_ip node_role machineconfig_path primary_ip line
   local workers=() controlplanes=() primary=() registry_args=() prepare_args=()
   local workload_baseline
+  registry_args+=("${workload_health_args[@]}")
 
   # On first bootstrap CRI starts with the generated credentials and kubelet
   # pulls the control-plane images. The diagnostic PriorityClass is installed
@@ -3663,7 +3730,7 @@ reconcile_staged_talos_nodes() {
 
     if [[ -n "${root_workload_baseline:-}" ]]; then
       python3 "${script_dir}/check-workload-health.py" --kubeconfig "${cluster_kubeconfig_path}" \
-        --baseline "${root_workload_baseline}"
+        --baseline "${root_workload_baseline}" "${workload_health_args[@]}"
     fi
 
     if [[ -n "${node_maintenance_state:-}" && -f "${node_maintenance_state}" ]]; then
@@ -3713,7 +3780,7 @@ reconcile_staged_talos_nodes() {
     wait_for_all_kubernetes_nodes_ready 600
     if [[ -n "${root_workload_baseline:-}" ]]; then
       python3 "${script_dir}/check-workload-health.py" --kubeconfig "${cluster_kubeconfig_path}" \
-        --baseline "${root_workload_baseline}"
+        --baseline "${root_workload_baseline}" "${workload_health_args[@]}"
     fi
     wait_for_machineconfig_match \
       "${node_name}" "${node_ip}" "${machineconfig_path}" 180
@@ -4139,6 +4206,7 @@ if [[ "${purge_external_ceph}" == "true" ]]; then
 fi
 
 if [[ "${talos_only}" != "true" \
+  && "${bootstrap_secondary_network}" != "true" \
   && "${skip_k8s_net}" != "true" \
   && "${destroy_only}" != "true" ]]; then
   validate_node_remediation_proxmox_access
@@ -4204,6 +4272,18 @@ else
     run_ensure_credentials
   fi
 
+  if [[ "${bootstrap_secondary_network}" == "true" ]]; then
+    python3 "${script_dir}/bootstrap-secondary-network.py" \
+      --workspace "${cluster_root_workspace}" --talosconfig "${cluster_talosconfig_path}" \
+      --state-dir "${cluster_git_dir}" --order "${secondary_network_worker_order}"
+    finish_deploy_section "Talos/Kubernetes" "network-bootstrapped"
+    # This is deliberately not a full k8s deployment provenance record.
+    state_sync_finalized=true
+    persist_cluster_runtime_state "success"
+    message "Secondary network bootstrapped without reboot; complete normal Talos reconciliation after Ceph recovery."
+    exit 0
+  fi
+
   message "Deploying the Talos cluster ${cluster_name} (PVE VMs creation, Talos cluster initialization, k8s bootstrapping)..."
   talos_bootstrap_marker_was_present=false
   if [[ -f "${cluster_out_dir}/.talos-bootstrap-complete" ]]; then
@@ -4240,7 +4320,7 @@ else
       --talosconfig "${cluster_talosconfig_path}" \
       --workload-baseline "${root_workload_baseline}" \
       --maintenance-state "${node_maintenance_state}" \
-      --maintenance-owner "${node_maintenance_owner}"
+      --maintenance-owner "${node_maintenance_owner}" "${workload_health_args[@]}"
   fi
   run tofu -chdir="${cluster_root_workspace}" apply -auto-approve "${root_apply_extra_args[@]}"
   restore_existing_talos_bootstrap_marker "${talos_bootstrap_marker_was_present}"
@@ -4384,7 +4464,7 @@ else
   ceph_mode_value="$(ceph_mode_from_constants "${cluster_ceph_constants_path}")"
   external_csi_config_hash_before=""
   if [[ "${ceph_mode_value}" == "external" ]]; then
-    external_csi_config_hash_before="$(rook_external_csi_configuration_sha256)"
+    external_csi_config_hash_before="$(begin_external_csi_reconciliation)"
   fi
   csi_addons_enabled="$(tf_bool_value "${cluster_ceph_constants_path}" ceph_csi_addons_enabled)"
   if [[ "${csi_addons_enabled:-false}" == "true" ]]; then
@@ -4439,6 +4519,9 @@ else
       wait_for_resource_existence "${rook_csi_namespace}" "${rook_csi_workload}" 180
     done
 
+    python3 "${script_dir}/check-csi-monitors.py" --kubeconfig "${cluster_kubeconfig_path}" \
+      --namespace "${rook_csi_namespace}" --configmap "${rook_csi_configmap}" \
+      --cluster-id "${rook_csi_namespace}"
     external_csi_config_hash_after="$(rook_external_csi_configuration_sha256)"
     if kubernetes_resource_changed \
       "${external_csi_config_hash_before}" \
@@ -4454,6 +4537,14 @@ else
     for rook_csi_workload in "${rook_csi_workloads[@]}"; do
       wait_for_rollout_ready "${rook_csi_namespace}" "${rook_csi_workload}" "300s"
     done
+    if [[ "${csi_addons_enabled:-false}" == "true" \
+      && "${external_csi_config_hash_before}" != "absent" ]] \
+      && kubernetes_resource_changed "${external_csi_config_hash_before}" "${external_csi_config_hash_after}"; then
+      message "Refreshing CSI-Addons connections after the CSI monitor rollout..."
+      kubectl -n csi-addons-system rollout restart deploy/csi-addons-controller-manager 1>/dev/null
+      wait_for_rollout_ready csi-addons-system deploy/csi-addons-controller-manager "180s"
+    fi
+    rm -f "${cluster_git_dir}/pve-k8s-talos-csi-rollout-pending"
   fi
   kubectl -n rook-ceph get storageclasses.storage.k8s.io
   record_deployment_status "ceph"
@@ -4553,21 +4644,22 @@ else
     --constants "${cluster_monitoring_constants_path}" --kubeconfig "${cluster_kubeconfig_path}"
   migrate_grafana_workload_state_to_helm "${cluster_monitoring_workspace}"
   reset_legacy_loki_storage
-  monitoring_prometheus_config_hash_before=""
   monitoring_loki_config_hash_before=""
   monitoring_tempo_config_rv_before=""
   monitoring_grafana_datasources_rv_before=""
   monitoring_grafana_dashboard_provider_rv_before=""
+  monitoring_tempo_runtime_before="null"
   if kubectl get namespace monitoring >/dev/null 2>&1; then
-    monitoring_prometheus_config_hash_before="$(
-      kubernetes_configmap_key_sha256 "monitoring" "prometheus-config" "prometheus.yml"
-    )"
     monitoring_loki_config_hash_before="$(
       kubernetes_configmap_key_sha256 "monitoring" "loki-config" "loki.yaml"
     )"
     monitoring_tempo_config_rv_before="$(
       kubernetes_resource_version "monitoring" "configmap" "tempo-config"
     )"
+    if ! monitoring_tempo_runtime_before="$(python3 "${script_dir}/check-tempo-health.py" \
+      --kubeconfig "${cluster_kubeconfig_path}" --capture-runtime)"; then
+      monitoring_tempo_runtime_before="null"
+    fi
     monitoring_grafana_datasources_rv_before="$(
       kubernetes_resource_version "monitoring" "configmap" "grafana-datasources"
     )"
@@ -4595,13 +4687,9 @@ else
   monitoring_grafana_dashboard_provider_rv_after="$(
     kubernetes_resource_version "monitoring" "configmap" "grafana-dashboard-provider"
   )"
-  monitoring_prometheus_config_changed=false
   monitoring_loki_restart_needed=false
   monitoring_tempo_restart_needed=false
   monitoring_grafana_restart_needed=false
-  if kubernetes_resource_changed "${monitoring_prometheus_config_hash_before}" "${monitoring_prometheus_config_hash_after}"; then
-    monitoring_prometheus_config_changed=true
-  fi
   if kubernetes_resource_changed "${monitoring_loki_config_hash_before}" "${monitoring_loki_config_hash_after}" \
     && [[ "${loki_storage_recreated}" != "true" ]]; then
     monitoring_loki_restart_needed=true
@@ -4668,6 +4756,10 @@ else
   wait_for_daemonsets_ready "monitoring" "600s" "${monitoring_daemonsets[@]}"
   wait_for_service_endpoints "monitoring" "600" "${monitoring_services[@]}"
   tempo_health_args=()
+  if [[ "${monitoring_tempo_restart_needed}" == "false" \
+    && -n "${monitoring_tempo_config_rv_before}" ]]; then
+    tempo_health_args+=(--previous-runtime "${monitoring_tempo_runtime_before}")
+  fi
   if [[ "$(tf_bool_value "${cluster_monitoring_constants_path}" tempo_deployment_trace_probe_enabled)" == "true" ]]; then
     tempo_health_args+=(--trace-probe)
   fi
@@ -4704,11 +4796,8 @@ PYJOB
   else
     rm -f "${grafana_dashboard_sync_file}"
   fi
-  if [[ "${monitoring_prometheus_config_changed}" == "true" ]]; then
-    message "Reloading Prometheus scrape configuration..."
-    wait_for_prometheus_config_hash "${monitoring_prometheus_config_hash_after}" "120"
-    reload_prometheus_config
-  fi
+  message "Reconciling the live Prometheus scrape configuration..."
+  reconcile_prometheus_config "${monitoring_prometheus_config_hash_after}"
   grafana_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw grafana_url)"
   prometheus_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw prometheus_url)"
   prometheus_api_url="$(tofu -chdir="${cluster_monitoring_workspace}" output -raw prometheus_api_url)"

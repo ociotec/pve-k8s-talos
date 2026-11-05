@@ -102,3 +102,9 @@ variable "defer_node_config_activation" {
   default     = true
   description = "Stage steady-state node configuration for rolling activation; deploy.sh disables this during the initial bootstrap."
 }
+
+variable "bootstrap_secondary_network" {
+  type        = bool
+  default     = false
+  description = "Disable provider reboots for the strictly allowlisted network-only bootstrap plan."
+}

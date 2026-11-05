@@ -58,6 +58,12 @@ sections keep their previous status when one exists. `--services-only` never
 updates `k8s`. `-t`/`--talos-only` updates only `k8s` and leaves every service
 section at its previous recorded revision.
 
+`--bootstrap-secondary-network` publishes partial runtime state without advancing
+`k8s`: it applies only worker NICs and Talos network interfaces. Complete normal
+Talos reconciliation after Ceph/recovery convergence before claiming full source
+alignment. This mode requires clean, published source and cannot consolidate a
+development deployment.
+
 The Rook dashboard is a dependent Rook integration applied later in
 `scripts/deploy.sh`; the `ceph` revision is advanced after the main Rook Ceph
 section has completed successfully.

@@ -579,6 +579,11 @@ resource "kubernetes_manifest" "goldilocks_certificate" {
 resource "kubernetes_manifest" "goldilocks_oauth" {
   for_each = local.goldilocks_oauth_manifests
   manifest = each.value
+  # Operational rollouts must not make the provider reject its apply result.
+  computed_fields = try(each.value.kind, "") == "Deployment" ? [
+    "spec.template.metadata.annotations",
+    "object.spec.template.metadata.annotations",
+  ] : []
   depends_on = [
     kubernetes_secret_v1.goldilocks_oauth, kubernetes_secret_v1.goldilocks_oidc_ca,
     kubernetes_secret_v1.preissued_tls, kubernetes_manifest.goldilocks_certificate,

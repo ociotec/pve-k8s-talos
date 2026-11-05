@@ -14,9 +14,11 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--kubeconfig', required=True); p.add_argument('--baseline', required=True)
     p.add_argument('--capture', action='store_true'); p.add_argument('--timeout', type=int, default=900)
+    p.add_argument('--infrastructure-health-only', action='store_true')
     a = p.parse_args()
     args = argparse.Namespace(kubeconfig=a.kubeconfig, talosconfig='', node_address='',
-                              workload_baseline=a.baseline, timeout=a.timeout)
+                              workload_baseline=a.baseline, timeout=a.timeout,
+                              infrastructure_health_only=a.infrastructure_health_only)
     checker = MODULE.Reconciler(args)
     path = Path(a.baseline)
     if a.capture and not path.exists():

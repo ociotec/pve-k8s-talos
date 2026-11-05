@@ -219,9 +219,10 @@ class Resizer:
 
     def workloads(self):
         self.renew_maintenance()
+        scope = ['--infrastructure-health-only'] if getattr(self.args, 'infrastructure_health_only', False) else []
         self.command(['python3', str(Path(__file__).with_name('check-workload-health.py')),
                       '--kubeconfig', self.args.kubeconfig, '--baseline', self.args.workload_baseline,
-                      '--timeout', str(self.args.timeout)], timeout=self.args.timeout + 60)
+                      '--timeout', str(self.args.timeout), *scope], timeout=self.args.timeout + 60)
 
     def save(self, entry):
         fd = os.open(str(self.journal) + '.tmp', os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -420,6 +421,7 @@ def main():
     p.add_argument('--maintenance-owner', required=True)
     p.add_argument('--timeout', type=int, default=900)
     p.add_argument('--stable-seconds', type=int, default=30)
+    p.add_argument('--infrastructure-health-only', action='store_true')
     args = p.parse_args()
     os.umask(0o077)
     try:

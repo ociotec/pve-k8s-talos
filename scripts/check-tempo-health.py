@@ -17,6 +17,25 @@ POLL_COMPLETE = re.compile(r'blocklist poll(?:ing)? complete', re.I)
 POLL_ERROR = re.compile(r'failed reading unknown blocks|unexpected end of JSON input|failed to poll (?:or create index|tenant|block|index)', re.I)
 
 
+def active_pods(pods):
+    return [pod for pod in pods if not pod['metadata'].get('deletionTimestamp')
+            and pod.get('status', {}).get('phase') not in ('Failed', 'Succeeded')]
+
+
+def runtime_signature(pods):
+    result = []
+    for pod in active_pods(pods):
+        status = pod.get('status', {})
+        container = next((c for c in status.get('containerStatuses', []) if c['name'] == 'tempo'), {})
+        started = container.get('state', {}).get('running', {}).get('startedAt')
+        uid, identity = pod['metadata'].get('uid'), container.get('containerID')
+        if status.get('phase') != 'Running' or not container.get('ready') or not all((uid, identity, started)):
+            return None
+        result.append({'uid': uid, 'container_id': identity,
+                       'restarts': container.get('restartCount', 0), 'started_at': started})
+    return sorted(result, key=lambda item: item['uid']) or None
+
+
 def healthy_poll(logs):
     if POLL_ERROR.search(logs):
         raise ValueError('Tempo reports failed block/index reads. Preserve its volume and validate a snapshot/clone before any repair.')
@@ -99,6 +118,9 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--kubeconfig', required=True); p.add_argument('--namespace', default='monitoring')
     p.add_argument('--since-time'); p.add_argument('--timeout', type=int, default=660)
+    p.add_argument('--capture-runtime', action='store_true', help='Print the ready Tempo container identities as JSON, or null.')
+    p.add_argument('--previous-runtime', type=json.loads,
+                   help='Allow a recent poll only when this prior runtime and the configuration are unchanged.')
     p.add_argument('--trace-probe', action='store_true', help='Emit and query one synthetic trace through the repository collector.')
     a = p.parse_args()
     kube = ['kubectl', '--kubeconfig', a.kubeconfig, '--request-timeout=20s']
@@ -109,18 +131,24 @@ def main():
         r = subprocess.run(kube + args, input=payload, capture_output=True, text=True, timeout=40)
         if r.returncode: raise RuntimeError(f'Kubernetes {args[0]} failed while checking Tempo (exit {r.returncode}).')
         return r.stdout
+    def pods_now():
+        return active_pods(json.loads(run(['get', 'pods', '-n', a.namespace, '-l', 'app=tempo', '-o', 'json']))['items'])
+    if a.capture_runtime:
+        print(json.dumps(runtime_signature(pods_now())))
+        return 0
     deadline = time.monotonic() + a.timeout
     while True:
-        pods = json.loads(run(['get', 'pods', '-n', a.namespace, '-l', 'app=tempo', '-o', 'json']))['items']
-        # Retained terminal pods cannot report the current deployment's health.
-        pods = [pod for pod in pods if not pod['metadata'].get('deletionTimestamp')
-                and pod.get('status', {}).get('phase') not in ('Failed', 'Succeeded')]
+        pods = pods_now()
+        signature = runtime_signature(pods)
+        reuse_poll = signature is not None and a.previous_runtime == signature
         all_healthy = bool(pods)
         for pod in pods:
             args = ['logs', pod['metadata']['name'], '-n', a.namespace, '-c', 'tempo']
-            args += ['--since-time', a.since_time] if a.since_time else ['--since=10m']
+            args += ['--since-time', a.since_time] if a.since_time and not reuse_poll else ['--since=10m']
             logs = run(args)
             if not healthy_poll(logs): all_healthy = False
+        if all_healthy and reuse_poll and runtime_signature(pods_now()) != signature:
+            all_healthy = False  # A restart during log collection invalidates reuse.
         if all_healthy:
             print('Tempo blocklist polling verified without block/index errors.')
             if a.trace_probe: verify_trace(a.namespace, run)

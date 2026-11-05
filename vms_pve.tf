@@ -20,7 +20,8 @@ resource "proxmox_virtual_environment_vm" "create_pve_vms" {
       error_message = "Invalid control-plane resource pairs: ${join(", ", local.cp_invalid_resources)}. Set both CPU and memory or neither, using canonical Kubernetes quantities."
     }
     precondition {
-      condition     = var.allow_control_plane_overcommit || local.cp_capacity_fits
+      # The guarded bootstrap rejects all CPU/RAM edits before applying its plan.
+      condition     = var.bootstrap_secondary_network || var.allow_control_plane_overcommit || local.cp_capacity_fits
       error_message = "Control-plane capacity is insufficient. Each CP needs at least ${local.cp_required_cpu_m / 1000} vCPU and ${local.cp_required_memory_mib / 1024}Gi RAM including service budgets, without percentage headroom. Review output control_plane_sizing; deploy.sh --force-control-plane-capacity bypasses only this gate."
     }
   }
@@ -33,7 +34,7 @@ resource "proxmox_virtual_environment_vm" "create_pve_vms" {
   # deploy.sh shuts down and resizes existing CPs one at a time. Never let the
   # provider reboot several CPs during a bulk root apply, including network edits.
   # Worker CPU/RAM increases also finish sequentially before the bulk apply.
-  reboot_after_update = var.resources[each.value.type].k8s_node != "controlplane"
+  reboot_after_update = !var.bootstrap_secondary_network && var.resources[each.value.type].k8s_node != "controlplane"
   pool_id         = var.constants["vm"]["pool"] != "" ? var.constants["vm"]["pool"] : null
   agent {
     enabled = true

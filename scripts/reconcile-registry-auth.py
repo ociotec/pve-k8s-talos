@@ -180,7 +180,8 @@ class Reconciler:
         namespace = meta.get("namespace", "")
         return (meta.get("labels", {}).get("app.kubernetes.io/managed-by") == "infrastructure"
                 or namespace in {"kube-system", "monitoring", "cert-manager", "metallb-system",
-                                 "kyverno", "ingress-nginx", "longhorn-system"}
+                                 "kyverno", "ingress-nginx", "longhorn-system", "csi-addons-system",
+                                 "identity", "s3", "kafka"}
                 or namespace.startswith(("cattle-", "fleet-", "rook-")))
 
     @staticmethod
@@ -201,6 +202,8 @@ class Reconciler:
         baseline = {}
         objects = self.command(self.kube + ["get", "deployments,statefulsets,daemonsets", "-A", "-o", "json"])["items"]
         for obj in objects:
+            if getattr(self.args, 'infrastructure_health_only', False) and not self.infrastructure(obj):
+                continue
             health = self.workload_health(obj)
             if not self.infrastructure(obj) and (health["deficit"] or health["unobserved"]):
                 key = obj["kind"] + "/" + obj["metadata"].get("namespace", "") + "/" + obj["metadata"]["name"]
@@ -217,6 +220,8 @@ class Reconciler:
             baseline = json.loads(Path(path).read_text()) if path else {}
             unready = []
             for obj in objects:
+                if getattr(self.args, 'infrastructure_health_only', False) and not self.infrastructure(obj):
+                    continue
                 health = self.workload_health(obj)
                 if not health["deficit"] and not health["unobserved"]:
                     continue
@@ -421,6 +426,7 @@ def main():
     parser.add_argument("--allow-node-reboot", action="store_true")
     parser.add_argument("--prepare-node", action="append", default=[])
     parser.add_argument("--workload-baseline", help="Application health snapshot shared by this deployment's node checks")
+    parser.add_argument("--infrastructure-health-only", action="store_true")
     args = parser.parse_args()
     if args.timeout <= 0:
         parser.error("--timeout must be positive")

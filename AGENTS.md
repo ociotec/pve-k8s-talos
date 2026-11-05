@@ -220,6 +220,7 @@ For any non-trivial change:
 
 ## Repo-Specific Agent Workflows
 
+- When adding worker secondary NICs/IPs or migrating external Ceph client endpoints, follow `docs/agent-workflows/migrate-worker-ceph-network.md`.
 - When the user asks to audit or update pinned versions across the repository, follow `docs/agent-workflows/update-versions.md`.
 - When the user asks to migrate, upgrade, or deploy updated monitoring components in a real cluster, follow `docs/agent-workflows/monitoring-version-migration.md` in addition to the version-update workflow. Apply its preflight and post-deployment checks whenever the change includes Tempo, OpenTelemetry Collector, Prometheus, Loki, Grafana, PostgreSQL, exporters, or their monitoring configuration.
 - When VM/PVE/node maintenance affects Tempo, or Tempo reports block/index errors after an interruption, follow the Tempo maintenance and recovery sections in `docs/agent-workflows/monitoring-version-migration.md` before expanding the rollout to more nodes.

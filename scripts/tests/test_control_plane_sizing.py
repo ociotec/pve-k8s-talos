@@ -236,7 +236,7 @@ class ControlPlaneSizingTest(unittest.TestCase):
             result = subprocess.run(['bash', '-c', script], capture_output=True, text=True,
                                     env={**os.environ, 'cluster_dir': str(self.cluster), 'script_dir': str(ROOT / 'scripts'),
                                          'force_control_plane_capacity': force, 'destroy_only': destroy,
-                                         'services_only': services})
+                                         'services_only': services, 'bootstrap_secondary_network': 'false'})
             self.assertEqual(result.returncode == 0, succeeds, result.stderr)
             self.assertEqual('NEXT_ACTION' in result.stdout, succeeds)
             if services == 'true' or destroy == 'true':

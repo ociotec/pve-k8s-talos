@@ -14,15 +14,73 @@ def load(name,file):
 HEALTH=load('tempo_health','check-tempo-health.py');DATA=load('tempo_data','validate-tempo-data.py')
 
 class TempoHealthTest(unittest.TestCase):
-    def run_pod_check(self, pods, logs):
+    def run_pod_check(self, pods, logs, extra_args=()):
         def kubectl(args, **kwargs):
             command=args[args.index('--request-timeout=20s')+1:]
-            output=json.dumps({'items':pods}) if command[0]=='get' else logs[command[1]]
+            output=json.dumps({'items':pods}) if command[0]=='get' else (logs(command) if callable(logs) else logs[command[1]])
             return HEALTH.subprocess.CompletedProcess(args,0,stdout=output)
-        with patch.object(HEALTH.sys,'argv',['check-tempo-health.py','--kubeconfig','unused','--timeout','0']), \
+        with patch.object(HEALTH.sys,'argv',['check-tempo-health.py','--kubeconfig','unused','--timeout','0',*extra_args]), \
              patch.object(HEALTH.subprocess,'run',side_effect=kubectl), \
              patch.object(HEALTH.time,'monotonic',return_value=0):
             return HEALTH.main()
+
+    @staticmethod
+    def running_pod():
+        return {'metadata':{'name':'tempo-current','uid':'pod-uid'},'status':{'phase':'Running',
+            'containerStatuses':[{'name':'tempo','ready':True,'containerID':'containerd://one',
+                'restartCount':0,'state':{'running':{'startedAt':'2026-01-01T00:00:00Z'}}}]}}
+
+    def test_unchanged_runtime_reuses_recent_poll_without_waiting_for_next_cycle(self):
+        pod=self.running_pod()
+        previous=[{'uid':'pod-uid','container_id':'containerd://one','restarts':0,
+                   'started_at':'2026-01-01T00:00:00Z'}]
+        def logs(args):return 'blocklist poll complete' if '--since=10m' in args else 'server ready'
+        self.assertEqual(self.run_pod_check([pod],logs,('--since-time','2026-01-01T01:00:00Z',
+            '--previous-runtime',json.dumps(previous))),0)
+
+    def test_restarted_container_cannot_reuse_a_poll_from_before_this_deployment(self):
+        pod=self.running_pod();pod['status']['containerStatuses'][0]['restartCount']=1
+        previous=[{'uid':'pod-uid','container_id':'containerd://one','restarts':0,
+                   'started_at':'2026-01-01T00:00:00Z'}]
+        def logs(args):return 'blocklist poll complete' if '--since=10m' in args else 'server ready'
+        with self.assertRaisesRegex(ValueError,'No successful Tempo blocklist poll'):
+            self.run_pod_check([pod],logs,('--since-time','2026-01-01T01:00:00Z',
+                '--previous-runtime',json.dumps(previous)))
+
+    def test_recent_poll_reuse_still_rejects_real_block_errors(self):
+        pod=self.running_pod();previous=HEALTH.runtime_signature([pod])
+        with self.assertRaisesRegex(ValueError,'Preserve its volume'):
+            self.run_pod_check([pod],{'tempo-current':'failed reading unknown blocks\nblocklist poll complete'},
+                ('--since-time','2026-01-01T01:00:00Z','--previous-runtime',json.dumps(previous)))
+
+    def test_uid_container_identity_and_start_time_changes_require_a_fresh_poll(self):
+        original=self.running_pod();previous=HEALTH.runtime_signature([original])
+        for change in ['uid','containerID','startedAt']:
+            pod=self.running_pod()
+            if change=='uid':pod['metadata']['uid']='replacement'
+            elif change=='containerID':pod['status']['containerStatuses'][0]['containerID']='containerd://replacement'
+            else:pod['status']['containerStatuses'][0]['state']['running']['startedAt']='2026-01-01T01:00:01Z'
+            def logs(args):return 'blocklist poll complete' if '--since=10m' in args else 'server ready'
+            with self.subTest(change=change),self.assertRaisesRegex(ValueError,'No successful'):
+                self.run_pod_check([pod],logs,('--since-time','2026-01-01T01:00:00Z',
+                    '--previous-runtime',json.dumps(previous)))
+
+    def test_a_restart_while_reading_logs_invalidates_reuse(self):
+        pod=self.running_pod();previous=HEALTH.runtime_signature([pod])
+        def logs(args):
+            pod['status']['containerStatuses'][0]['containerID']='containerd://replacement'
+            return 'blocklist poll complete'
+        with self.assertRaisesRegex(ValueError,'No successful'):
+            self.run_pod_check([pod],logs,('--since-time','2026-01-01T01:00:00Z',
+                '--previous-runtime',json.dumps(previous)))
+
+    def test_runtime_capture_is_unavailable_for_unready_or_missing_containers(self):
+        for change in ['ready','containerID','running']:
+            pod=self.running_pod();container=pod['status']['containerStatuses'][0]
+            if change=='ready':container['ready']=False
+            elif change=='containerID':del container['containerID']
+            else:container['state']={'waiting':{}}
+            with self.subTest(change=change):self.assertIsNone(HEALTH.runtime_signature([pod]))
 
     def test_terminal_pods_do_not_block_a_healthy_replacement(self):
         for phase in ('Failed','Succeeded'):
