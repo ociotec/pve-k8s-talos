@@ -112,7 +112,9 @@ def main():
     deadline = time.monotonic() + a.timeout
     while True:
         pods = json.loads(run(['get', 'pods', '-n', a.namespace, '-l', 'app=tempo', '-o', 'json']))['items']
-        pods = [pod for pod in pods if not pod['metadata'].get('deletionTimestamp')]
+        # Retained terminal pods cannot report the current deployment's health.
+        pods = [pod for pod in pods if not pod['metadata'].get('deletionTimestamp')
+                and pod.get('status', {}).get('phase') not in ('Failed', 'Succeeded')]
         all_healthy = bool(pods)
         for pod in pods:
             args = ['logs', pod['metadata']['name'], '-n', a.namespace, '-c', 'tempo']

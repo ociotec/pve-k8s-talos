@@ -5,6 +5,7 @@ import threading
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 def load(name,file):
@@ -13,6 +14,39 @@ def load(name,file):
 HEALTH=load('tempo_health','check-tempo-health.py');DATA=load('tempo_data','validate-tempo-data.py')
 
 class TempoHealthTest(unittest.TestCase):
+    def run_pod_check(self, pods, logs):
+        def kubectl(args, **kwargs):
+            command=args[args.index('--request-timeout=20s')+1:]
+            output=json.dumps({'items':pods}) if command[0]=='get' else logs[command[1]]
+            return HEALTH.subprocess.CompletedProcess(args,0,stdout=output)
+        with patch.object(HEALTH.sys,'argv',['check-tempo-health.py','--kubeconfig','unused','--timeout','0']), \
+             patch.object(HEALTH.subprocess,'run',side_effect=kubectl), \
+             patch.object(HEALTH.time,'monotonic',return_value=0):
+            return HEALTH.main()
+
+    def test_terminal_pods_do_not_block_a_healthy_replacement(self):
+        for phase in ('Failed','Succeeded'):
+            with self.subTest(phase=phase):
+                pods=[{'metadata':{'name':'old'},'status':{'phase':phase}},
+                      {'metadata':{'name':'current'},'status':{'phase':'Running'}}]
+                self.assertEqual(self.run_pod_check(pods,{'old':'','current':'blocklist poll complete'}),0)
+
+    def test_terminal_pods_alone_do_not_pass_the_check(self):
+        pods=[{'metadata':{'name':phase.lower()},'status':{'phase':phase}}
+              for phase in ('Failed','Succeeded')]
+        with self.assertRaisesRegex(ValueError,'No successful Tempo blocklist poll'):
+            self.run_pod_check(pods,{p['metadata']['name']:'blocklist poll complete' for p in pods})
+
+    def test_running_pod_block_errors_still_fail_the_check(self):
+        pods=[{'metadata':{'name':'current'},'status':{'phase':'Running'}}]
+        with self.assertRaisesRegex(ValueError,'Preserve its volume'):
+            self.run_pod_check(pods,{'current':'failed reading unknown blocks\nblocklist poll complete'})
+
+    def test_running_pod_without_a_successful_poll_still_times_out(self):
+        pods=[{'metadata':{'name':'current'},'status':{'phase':'Running'}}]
+        with self.assertRaisesRegex(ValueError,'No successful Tempo blocklist poll'):
+            self.run_pod_check(pods,{'current':'server ready'})
+
     def test_synthetic_probe_queries_the_trace_id_it_sent(self):
         requests=[]
         def execute(args,payload=None):
