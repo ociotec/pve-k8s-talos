@@ -3568,6 +3568,8 @@ reconcile_talos_registry_auth() {
 reconcile_staged_talos_nodes() {
   local node_lines=()
   local unsorted_node_lines=()
+  local controlplane_lines=()
+  local worker_lines=()
   local line
   local node_name
   local node_ip
@@ -3626,6 +3628,18 @@ reconcile_staged_talos_nodes() {
     printf '%s\n' "${unsorted_node_lines[@]}" |
       sort -t'|' -k1,1n -k2,2
   )
+  # This reconciler runs before the secondary-network-specific one, so it must
+  # honour the same worker order while retaining the control-plane priorities.
+  if [[ "${secondary_network_worker_order:-ascending}" == "descending" ]]; then
+    for line in "${node_lines[@]}"; do
+      if [[ "${line##*|}" == "worker" ]]; then
+        worker_lines=("${line}" "${worker_lines[@]}")
+      else
+        controlplane_lines+=("${line}")
+      fi
+    done
+    node_lines=("${controlplane_lines[@]}" "${worker_lines[@]}")
+  fi
 
   message "Reconciling staged Talos configs sequentially..."
   for line in "${node_lines[@]}"; do

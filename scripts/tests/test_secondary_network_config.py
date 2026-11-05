@@ -58,6 +58,59 @@ class WorkerOrderTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("requires ascending or descending", result.stderr)
 
+    def test_general_staged_activation_honours_order_and_controlplane_priorities(self):
+        for order in ["ascending", "descending"]:
+            with self.subTest(order=order), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                root.joinpath(".talos-bootstrap-complete").touch()
+                for role, numbers in [("cp", range(1, 4)), ("worker", range(1, 9))]:
+                    for i in numbers:
+                        root.joinpath(f"machineconfig-{role}-{i:02}.yaml").write_text(
+                            "machine:\n  type: " + ("controlplane" if role == "cp" else "worker") + "\n")
+                harness = r'''
+set -euo pipefail
+cluster_out_dir="$FIXTURES"
+cluster_root_workspace="$FIXTURES"
+cluster_talosconfig_path=unused
+cluster_kubeconfig_path=unused
+error() { echo "$*" >&2; }
+message() { :; }
+require_cmd() { :; }
+first_controlplane_ip() { echo 192.0.2.11; }
+cluster_node_name_ip_pairs() {
+  for i in 1 2 3; do printf 'cp-%02d|192.0.2.%d\n' "$i" "$((10+i))"; done
+  for i in 1 2 3 4 5 6 7 8; do printf 'worker-%02d|192.0.2.%d\n' "$i" "$((20+i))"; done
+}
+node_has_staged_machineconfig() { [[ ! -f "$FIXTURES/$1.active" ]]; }
+node_machineconfig_matches_file() { return 0; }
+wait_for_all_kubernetes_nodes_ready() { :; }
+wait_for_node_ready() { :; }
+wait_for_controlplane_etcd_ready() { :; }
+wait_for_machineconfig_match() { :; }
+tf_map_string_value() { echo false; }
+kubectl() { :; }
+talosctl() {
+  local node
+  while [[ $# -gt 0 ]]; do
+    case "$1" in -n) node="$2"; shift 2 ;; *) shift ;; esac
+  done
+  echo "$node" >> "$FIXTURES/reboots"
+  touch "$FIXTURES/$node.active"
+}
+'''
+                result = subprocess.run(
+                    ["bash", "-c", harness + function("reconcile_staged_talos_nodes")
+                     + "\nreconcile_staged_talos_nodes"],
+                    env={**os.environ, "FIXTURES": directory,
+                         "secondary_network_worker_order": order},
+                    capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                workers = range(8, 0, -1) if order == "descending" else range(1, 9)
+                expected = ["192.0.2.12", "192.0.2.13", "192.0.2.11"]
+                expected += [f"192.0.2.{20+i}" for i in workers]
+                self.assertEqual(root.joinpath("reboots").read_text().splitlines(), expected)
+
 
 class WorkerConfigTest(unittest.TestCase):
     def run_worker(self, **settings):
