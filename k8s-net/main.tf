@@ -532,6 +532,9 @@ locals {
   })
 
   # Allow headroom while startup synchronizes Services and EndpointSlices.
+  kube_proxy_memory_value = jsondecode(try(trimspace(regex(
+    "(?m)^\\s*kube_proxy_memory\\s*=\\s*([^#\\n]+)", local.constants_source
+  )[0]), "\"256Mi\""))
   kube_proxy_resources_patch = jsonencode({
     spec = {
       template = {
@@ -541,11 +544,11 @@ locals {
             resources = {
               requests = {
                 cpu    = "50m"
-                memory = "256Mi"
+                memory = local.kube_proxy_memory_value
               }
               limits = {
                 cpu    = "1"
-                memory = "256Mi"
+                memory = local.kube_proxy_memory_value
               }
             }
             readinessProbe = {
@@ -1239,6 +1242,13 @@ resource "null_resource" "kube_system_resource_requirements" {
     kube_proxy_resources_sha   = sha256(local.kube_proxy_resources_patch)
   }
 
+  lifecycle {
+    precondition {
+      condition     = can(regex("^[1-9][0-9]*(Mi|Gi)$", local.kube_proxy_memory_value))
+      error_message = "kube_proxy_memory must be a positive whole-Mi or whole-Gi quantity, such as 256Mi, 512Mi, or 1Gi."
+    }
+  }
+
   provisioner "local-exec" {
     interpreter = ["/bin/bash", "-c"]
     command     = <<-EOT
@@ -1251,7 +1261,8 @@ resource "null_resource" "kube_system_resource_requirements" {
 
       KUBECONFIG="$kubeconfig" kubectl -n kube-system rollout status deployment/coredns --timeout=180s
       KUBECONFIG="$kubeconfig" kubectl -n kube-system rollout status daemonset/kube-flannel --timeout=180s
-      KUBECONFIG="$kubeconfig" kubectl -n kube-system rollout status daemonset/kube-proxy --timeout=180s
+      # Allow sequential DaemonSet updates and memory scheduling to finish.
+      KUBECONFIG="$kubeconfig" kubectl -n kube-system rollout status daemonset/kube-proxy --timeout=600s
     EOT
   }
 

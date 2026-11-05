@@ -36,6 +36,9 @@ locals {
   metallb_speaker_mem_request    = "128Mi"
   metallb_speaker_mem_limit      = "128Mi"
 
+  # Optional: increase kube-proxy memory for large inventories/nftables startup; default 256Mi.
+  # kube_proxy_memory = "512Mi"
+
   # Keep long-lived WebSockets away from periodic HPA scale-downs.
   ingress_nginx_hpa_enabled  = false
   ingress_nginx_min_replicas = 3
