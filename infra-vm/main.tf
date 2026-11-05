@@ -332,6 +332,10 @@ output "infra_vm_ip" {
   value = local.network["ip"]
 }
 
+output "infra_vm_secondary_cidr" {
+  value = local.secondary_network_enabled ? local.secondary_network_address : ""
+}
+
 output "talos_discovery_endpoint" {
   value = local.discovery_enabled ? "https://${try(local.discovery["server_name"], local.fqdn)}:${try(local.discovery["public_port"], 443)}" : null
 }

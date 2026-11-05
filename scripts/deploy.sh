@@ -43,6 +43,9 @@ Options:
       --reboot-for-registry-auth
                             Allow additional drained registry-only reboots for static
                             auth already changed outside staged root activation.
+      --secondary-network-worker-order <ascending|descending>
+                            Order worker staging and activation by name (default: ascending).
+                            Use descending when shifting secondary addresses upwards.
       --force-control-plane-capacity
                             Bypass only the CP CPU/RAM capacity gate; still show
                             deficits and keep calculated component resources.
@@ -84,6 +87,7 @@ services_only=false
 development_mode=false
 consolidate_development=false
 force_control_plane_capacity=false
+secondary_network_worker_order=ascending
 gen_talos_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -148,6 +152,14 @@ while [[ $# -gt 0 ]]; do
     --reboot-for-registry-auth)
       reboot_for_registry_auth=true
       shift
+      ;;
+    --secondary-network-worker-order)
+      if [[ $# -lt 2 || ( "$2" != "ascending" && "$2" != "descending" ) ]]; then
+        error "--secondary-network-worker-order requires ascending or descending." >&2
+        exit 1
+      fi
+      secondary_network_worker_order="$2"
+      shift 2
       ;;
     --services-only)
       services_only=true
@@ -1011,6 +1023,10 @@ prepare_root_workload_baseline() {
 }
 
 collect_workers_with_secondary_network() {
+  local sort_args=()
+  if [[ "${secondary_network_worker_order:-ascending}" == "descending" ]]; then
+    sort_args=(-r)
+  fi
   awk '
     function brace_delta(line,   raw, opens, closes) {
       raw = line
@@ -1084,7 +1100,7 @@ collect_workers_with_secondary_network() {
         block_depth = 0
       }
     }
-  ' "${cluster_vms_path}" | sort
+  ' "${cluster_vms_path}" | sort "${sort_args[@]}"
 }
 
 collect_worker_vm_targets() {

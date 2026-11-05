@@ -131,6 +131,7 @@ infra_vm_hostname=""
 infra_vm_domain=""
 infra_vm_ip=""
 infra_vm_reboot_after_provisioning=""
+infra_vm_existing_boot_id=""
 docker_enabled=""
 discovery_enabled=""
 discovery_server_name=""
@@ -331,6 +332,7 @@ verify_infra_vm_ready() {
   local service_names=(qemu-guest-agent)
   local ca_arg=()
   local discovery_url
+  local secondary_cidr
 
   verify_start="$(start_timer)"
   reset_infra_vm_known_host
@@ -341,8 +343,39 @@ verify_infra_vm_ready() {
   message "Waiting for cloud-init to finish on ${infra_vm_ip}..."
   ssh_infra_vm 'sudo cloud-init status --wait'
 
-  wait_for_infra_vm_reboot_if_needed "${before_boot_id}" 600
+  # Existing guests may already have rebooted during the provider update.
+  # The mandatory cloud-init provisioning reboot applies only to a new guest.
+  if [[ -z "${infra_vm_existing_boot_id}" ]]; then
+    wait_for_infra_vm_reboot_if_needed "${before_boot_id}" 600
+  fi
   wait_for_infra_vm_ssh 300
+
+  secondary_cidr="$(tofu -chdir="${infra_vm_workspace}" output -raw infra_vm_secondary_cidr)"
+  if [[ -n "${secondary_cidr}" ]]; then
+    message "Verifying the infra VM secondary address and primary default route..."
+    ssh_infra_vm "python3 - '${secondary_cidr}' '${infra_vm_ip}'" <<'PY'
+import json
+import subprocess
+import sys
+
+expected_cidr, primary_ip = sys.argv[1:]
+addresses = json.loads(subprocess.check_output(["ip", "-j", "-4", "addr"], text=True))
+routes = json.loads(subprocess.check_output(["ip", "-j", "-4", "route"], text=True))
+primary_links = {
+    link["ifname"] for link in addresses
+    if any(addr.get("local") == primary_ip for addr in link["addr_info"])
+}
+secondary_links = {
+    link["ifname"] for link in addresses
+    if any(f'{addr.get("local")}/{addr["prefixlen"]}' == expected_cidr for addr in link["addr_info"])
+}
+defaults = [route for route in routes if route.get("dst") == "default"]
+if not secondary_links or secondary_links & primary_links:
+    raise SystemExit("Configured secondary IPv4 address is not active on a separate guest NIC.")
+if not defaults or any(route.get("dev") not in primary_links for route in defaults):
+    raise SystemExit("Infra VM default routing is not confined to its primary interface.")
+PY
+  fi
 
   message "Checking infra VM services..."
   if [[ "${docker_enabled}" == "true" ]]; then
@@ -458,6 +491,7 @@ if [[ "${plan_only}" == "true" ]]; then
 fi
 
 message "Applying infra VM ${infra_vm_name}..."
+infra_vm_existing_boot_id="$(ssh_infra_vm 'cat /proc/sys/kernel/random/boot_id' 2>/dev/null || true)"
 run tofu -chdir="${infra_vm_workspace}" apply -auto-approve
 verify_infra_vm_ready
 message "Infra VM ${infra_vm_name} deployment finished in $(render_elapsed "${script_start}")."

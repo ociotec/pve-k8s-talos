@@ -18,6 +18,47 @@ def function(name):
     return re.search(r"^" + name + r"\(\) \{\n.*?^\}", SOURCE, re.M | re.S)[0]
 
 
+class WorkerOrderTest(unittest.TestCase):
+    def workers(self, order="ascending"):
+        with tempfile.TemporaryDirectory() as directory:
+            inventory = Path(directory, "vms.tfvars")
+            blocks = [f'''  "worker-{i:02}" = {{
+    node_name = "pve01"
+    vm_id = {100 + i}
+    type = "worker"
+    ip = "192.0.2.{i}"
+    ip2 = "198.51.100.{i + 1}"
+  }}''' for i in range(1, 9)]
+            inventory.write_text("vms = {\n" + "\n".join(blocks) + "\n}\n")
+            result = subprocess.run(
+                ["bash", "-c", function("collect_workers_with_secondary_network")
+                 + '\ncollect_workers_with_secondary_network'],
+                env={**os.environ, "cluster_vms_path": str(inventory),
+                     "secondary_network_worker_order": order},
+                capture_output=True, text=True, check=True,
+            )
+            return [line.split("|") for line in result.stdout.splitlines()]
+
+    def test_default_order_remains_ascending(self):
+        self.assertEqual([row[0] for row in self.workers()],
+                         [f"worker-{i:02}" for i in range(1, 9)])
+
+    def test_descending_renumbering_never_reuses_an_active_address(self):
+        owners = {f"198.51.100.{i}": f"worker-{i:02}" for i in range(1, 9)}
+        for name, _, _, _, destination in self.workers("descending"):
+            self.assertNotIn(destination, owners)
+            original = next(ip for ip, owner in owners.items() if owner == name)
+            del owners[original]
+            owners[destination] = name
+        self.assertEqual(set(owners), {f"198.51.100.{i}" for i in range(2, 10)})
+
+    def test_invalid_cli_order_is_rejected_before_deployment(self):
+        result = subprocess.run(["bash", str(SCRIPT), "--secondary-network-worker-order", "invalid"],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires ascending or descending", result.stderr)
+
+
 class WorkerConfigTest(unittest.TestCase):
     def run_worker(self, **settings):
         with tempfile.TemporaryDirectory() as directory:

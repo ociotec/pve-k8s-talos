@@ -218,7 +218,17 @@ The infra VM flow expects a Debian cloud image, not an interactive Debian instal
 For an already provisioned VM, adding the NIC and its cloud-init network metadata
 does not establish that the guest has activated the new address. Verify guest
 network activation during deployment before relying on the secondary network.
+The infra deployment verifies the secondary address on a separate guest NIC and
+checks that default routing stays on the primary interface. Existing guests are
+not required to perform another first-provisioning reboot after a provider update.
 Clusters configured with `talos.discovery_service_bootstrap_only = "true"` no longer depend on the Discovery Service after a successful initial root deployment, so the infra VM may be stopped once no other cluster is bootstrapping against it.
+
+For secondary worker address shifts that would otherwise temporarily duplicate a
+neighbour's address, select the appropriate rollout order with
+`scripts/deploy.sh --talos-only --secondary-network-worker-order descending`.
+This orders both staging and activation by worker name; verify that the selected
+order frees each destination address before its next assignment. The default
+order remains ascending.
 
 ### Control-plane sizing and capacity gate
 
