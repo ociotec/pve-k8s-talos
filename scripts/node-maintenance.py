@@ -13,6 +13,7 @@ UNTIL = 'pve-k8s-talos/maintenance-until'
 OWNER = 'pve-k8s-talos/maintenance-owner'
 STATE = 'remediation.pve-k8s-talos/state'
 PROTOCOL = 'pve-k8s-talos/maintenance-protocol'
+PATCH_ATTEMPTS = 20
 
 
 class ResourceConflict(RuntimeError):
@@ -60,13 +61,15 @@ class Kubernetes:
         # maintainer, recovery transition or cordon. Every retry retains CAS.
         original = node
         guards = (OWNER, UNTIL, STATE)
-        for attempt in range(5):
+        for attempt in range(PATCH_ATTEMPTS):
             payload = {'metadata': {'resourceVersion': node['metadata']['resourceVersion'], 'annotations': values}}
             try:
                 self.run(['patch', 'node', node['metadata']['name'], '--type=merge', '-p', json.dumps(payload)])
                 return
             except ResourceConflict:
-                if attempt == 4: raise
+                if attempt == PATCH_ATTEMPTS - 1: raise
+                # Read after backoff so status writes during sleep cannot age CAS.
+                time.sleep(min(0.1 * (attempt + 1), 1.0))
                 node = self.get(['node', node['metadata']['name']])
                 old = original['metadata'].get('annotations', {})
                 current = node['metadata'].get('annotations', {})
@@ -75,7 +78,6 @@ class Kubernetes:
                     raise ValueError('Node maintenance/recovery ownership or cordon changed during update.')
                 if OWNER in values and values[OWNER] != old.get(OWNER) and not ready(node):
                     raise ValueError('Cannot change maintenance ownership while the node is unready.')
-                time.sleep(0.1 * (attempt + 1))
 
     def verify_controller(self):
         deployment = self.get(['deployment', 'node-remediation-controller', '-n', 'kube-system', '--ignore-not-found'])
