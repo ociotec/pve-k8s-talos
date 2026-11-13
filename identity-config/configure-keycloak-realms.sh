@@ -418,6 +418,23 @@ ensure_master_admin_user() {
   assign_user_realm_role master "${user_id_value}" admin
 }
 
+# Realm updates replace the attributes map, so retain unrelated existing attributes.
+api_put_realm_settings() {
+  local path="$1"
+  local payload="$2"
+  local current_file merged_file
+  current_file="$(mktemp)"
+  merged_file="$(mktemp)"
+  api GET "${path}" > "${current_file}"
+  if ! json_contains_desired "${current_file}" "${payload}"; then
+    jq --slurpfile current "${current_file}" \
+      '.attributes = (($current[0].attributes // {}) + .attributes)' \
+      "${payload}" > "${merged_file}"
+    api PUT "${path}" "${merged_file}" >/dev/null
+  fi
+  rm -f "${current_file}" "${merged_file}"
+}
+
 configure_master_realm_settings() {
   local payload
   if [[ -z "${KEYCLOAK_MASTER_REALM_SETTINGS_JSON:-}" || "${KEYCLOAK_MASTER_REALM_SETTINGS_JSON}" == "null" ]]; then
@@ -429,11 +446,13 @@ configure_master_realm_settings() {
   jq -n --argjson settings "${KEYCLOAK_MASTER_REALM_SETTINGS_JSON}" '{
     realm: "master",
     enabled: true,
+    eventsExpiration: ($settings.events_retention_seconds // 7776000),
+    attributes: {adminEventsExpiration: (($settings.events_retention_seconds // 7776000) | tostring)},
     eventsEnabled: ($settings.save_user_events // false),
     adminEventsEnabled: ($settings.save_admin_events // false),
     adminEventsDetailsEnabled: ($settings.save_admin_event_details // ($settings.save_admin_events // false))
   }' > "${payload}"
-  api_put_if_changed "realms/master" "${payload}"
+  api_put_realm_settings "realms/master" "${payload}"
 }
 
 upsert_realm() {
@@ -446,13 +465,15 @@ upsert_realm() {
   jq '{
     realm: .name,
     enabled: true,
+    eventsExpiration: (.settings.events_retention_seconds // 7776000),
+    attributes: {adminEventsExpiration: ((.settings.events_retention_seconds // 7776000) | tostring)},
     eventsEnabled: .settings.save_user_events,
     adminEventsEnabled: .settings.save_admin_events,
     adminEventsDetailsEnabled: .settings.save_admin_events
   }' "${realm_json}" > "${payload}"
 
   if realm_exists "${realm}"; then
-    api_put_if_changed "realms/$(urlencode "${realm}")" "${payload}"
+    api_put_realm_settings "realms/$(urlencode "${realm}")" "${payload}"
   else
     api POST "realms" "${payload}" >/dev/null
   fi

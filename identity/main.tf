@@ -52,12 +52,16 @@ locals {
   keycloak_tracing_sampler_ratio_value = can(regex("(?m)^\\s*keycloak_tracing_sampler_ratio\\s*=\\s*([0-9.]+)\\s*$", local.identity_constants_source)[0]) ? (
     tonumber(regex("(?m)^\\s*keycloak_tracing_sampler_ratio\\s*=\\s*([0-9.]+)\\s*$", local.identity_constants_source)[0])
   ) : 1
+  # Optional in existing cluster constants; both event stores use the same retention.
+  keycloak_events_retention_days_value = try(tonumber(regex("(?m)^[[:blank:]]*keycloak_events_retention_days[[:blank:]]*=[[:blank:]]*([0-9]+)", local.identity_constants_source)[0]), 90)
+  keycloak_events_retention_seconds = local.keycloak_events_retention_days_value * 86400
   identity_credentials             = try(local.cluster_credentials.identity, {})
   identity_oidc_client_secrets     = try(local.identity_credentials.oidc_client_secrets, {})
   identity_postgres_password       = try(local.identity_credentials.postgres_password, "")
   identity_keycloak_admin_password = try(local.identity_credentials.keycloak_admin_password, "")
   configured_keycloak_realms       = try(local.keycloak_realms, [])
   keycloak_master_realm_settings = {
+    events_retention_seconds = local.keycloak_events_retention_seconds
     save_user_events         = try(local.keycloak_master_realm_config.save_user_events, false)
     save_admin_events        = try(local.keycloak_master_realm_config.save_admin_events, false)
     save_admin_event_details = try(local.keycloak_master_realm_config.save_admin_event_details, try(local.keycloak_master_realm_config.save_admin_events, false))
@@ -66,6 +70,7 @@ locals {
     for realm in local.configured_keycloak_realms : {
       name = realm.name
       settings = {
+        events_retention_seconds = local.keycloak_events_retention_seconds
         save_user_events  = try(realm.settings.save_user_events, false)
         save_admin_events = try(realm.settings.save_admin_events, false)
       }
@@ -480,6 +485,12 @@ resource "kubernetes_manifest" "identity_other" {
     "spec.template.metadata.annotations",
   ]
   lifecycle {
+    precondition {
+      condition = !can(regex("(?m)^[[:blank:]]*keycloak_events_retention_days[[:blank:]]*=", local.identity_constants_source)) || (
+        can(regex("(?m)^[[:blank:]]*keycloak_events_retention_days[[:blank:]]*=[[:blank:]]*[1-9][0-9]*[[:blank:]]*(?:#[^\\r\\n]*|//[^\\r\\n]*)?$", local.identity_constants_source))
+      )
+      error_message = "keycloak_events_retention_days must be a positive integer literal (days)."
+    }
     precondition {
       condition = local.keycloak_extra_args_is_literal && alltrue([
         for arg in local.keycloak_extra_args_value :

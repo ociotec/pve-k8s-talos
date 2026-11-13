@@ -28,6 +28,9 @@ locals {
   keycloak_admin_username        = "admin"
   keycloak_admin_password_length = 24
 
+  # Retention for user and admin events in every managed realm, including master (default: 90 days).
+  # keycloak_events_retention_days = 90
+
   keycloak_master_realm_config = {
     save_user_events         = true
     save_admin_events        = true
