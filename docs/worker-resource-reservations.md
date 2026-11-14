@@ -1,8 +1,8 @@
 # Automatic worker resource reservations
 
-Status: Reservations and per-node maintenance deployed in development. Sequential
-leases verified; maintenance during changed configuration or VM sizing awaits a
-live rollout.
+Status: Reservations and per-node maintenance deployed and consolidated.
+Sequential leases verified; maintenance during changed configuration or VM
+sizing awaits a live rollout.
 
 ## Delivery status
 
@@ -13,7 +13,7 @@ live rollout.
 | Initial rollout | Four workers updated sequentially without VM reboots; reservations, Allocatable and workload recovery verified |
 | Maintenance suppression scoped to the active node | Deployed in development; four workers and three control planes observed sequentially, with at most one active lease |
 | Maintenance during changed configuration, reboot or VM resize | Automated tests passed; live validation pending |
-| Source and runtime-state consolidation | Pending |
+| Source and runtime-state consolidation | Completed; runtime state published and development mode cleared |
 | Medium-environment rollout and historical sizing review | Pending |
 
 The initial rollout used a deployment-wide maintenance lease. A follow-up
