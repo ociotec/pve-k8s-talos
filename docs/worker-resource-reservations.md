@@ -1,28 +1,8 @@
 # Automatic worker resource reservations
 
-Status: Reservations and per-node maintenance deployed and consolidated.
-Sequential leases verified; maintenance during changed configuration or VM
-sizing awaits a live rollout.
-
-## Delivery status
-
-| Item | Status |
-| --- | --- |
-| Automatic formulas, preserved defaults and optional sample overrides | Implemented |
-| Talos integration and sequential worker recovery gates | Deployed and validated in development |
-| Initial rollout | Four workers updated sequentially without VM reboots; reservations, Allocatable and workload recovery verified |
-| Maintenance suppression scoped to the active node | Deployed in development; four workers and three control planes observed sequentially, with at most one active lease |
-| Maintenance during changed configuration, reboot or VM resize | Automated tests passed; live validation pending |
-| Source and runtime-state consolidation | Completed; runtime state published and development mode cleared |
-| Medium-environment rollout and historical sizing review | Pending |
-
-The initial rollout used a deployment-wide maintenance lease. A follow-up
-development deployment verified per-node lease acquisition and release during
-registry reconciliation, with no overlaps or remaining leases. All seven nodes
-remained Ready and boot IDs were unchanged. Existing configuration already
-matched the desired state, so this run did not exercise config activation,
-drain, reboot or VM resize. Short leases can fall between monitoring scrapes;
-direct Kubernetes observation confirmed the sequence.
+Status: Implemented. Live hot activation and sequential per-node maintenance
+validated. Reboot and VM resize paths have automated coverage; live validation
+and historical sizing review remain pending.
 
 Protect Talos and Kubernetes node services by calculating worker reservations
 from declared VM memory and configured pod density. Existing deployments adopt
