@@ -132,7 +132,7 @@ locals {
   redpanda_broker_cpu_limit_value           = try(local.redpanda_broker_cpu_limit_millicores % 1000 == 0 ? tostring(local.redpanda_broker_cpu_limit_millicores / 1000) : format("%dm", local.redpanda_broker_cpu_limit_millicores), "")
   redpanda_broker_mem_request_value         = local.redpanda_broker_memory_value
   redpanda_broker_mem_limit_value           = local.redpanda_broker_memory_value
-  redpanda_broker_priority_class_name_value = "infra-critical"
+  redpanda_broker_priority_class_name_value = "infra-services"
   redpanda_broker_pdb_min_available_value   = 2
   redpanda_constants_content                = try(file("${path.root}/constants.tf"), "")
   redpanda_legacy_resource_constants = compact([
@@ -240,7 +240,7 @@ locals {
   redpanda_console_cpu_limit_value                        = try(local.redpanda_console_cpu_limit, "500m")
   redpanda_console_mem_request_value                      = try(local.redpanda_console_mem_request, "512Mi")
   redpanda_console_mem_limit_value                        = try(local.redpanda_console_mem_limit, "512Mi")
-  redpanda_console_priority_class_name_value              = "infra-observability"
+  redpanda_console_priority_class_name_value              = "infra-monitoring"
   redpanda_console_oauth2_proxy_priority_class_name_value = local.redpanda_console_priority_class_name_value
   tls_source_value                                        = try(local.tls_source, "ca_issuer")
 

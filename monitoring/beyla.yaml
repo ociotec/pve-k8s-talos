@@ -136,7 +136,7 @@ spec:
                   - key: node-role.kubernetes.io/master
                     operator: DoesNotExist
 %{ endif ~}
-      priorityClassName: infra-observability
+      priorityClassName: infra-monitoring
       serviceAccountName: beyla
       tolerations:
         - operator: Exists

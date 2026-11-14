@@ -109,9 +109,7 @@ def workload_policy(documents, baseline, section):
                 {k: v for k, v in annotations.items() if k.startswith("prometheus.io/")})
         spec = template["spec"]
         old_spec = old.get("spec", {}).get("template", {}).get("spec", {})
-        spec["priorityClassName"] = old_spec.get("priorityClassName", "infra-high")
-        if spec["priorityClassName"] in ("system-node-critical", "system-cluster-critical"):
-            spec["priorityClassName"] = "infra-high"
+        spec["priorityClassName"] = "infra-ceph" if section == "rook" else "infra-k8s"
         for key in ("tolerations", "securityContext"):
             if key in old_spec:
                 spec[key] = copy.deepcopy(old_spec[key])
@@ -219,7 +217,7 @@ def modern_rook(documents, baseline, addons_version):
             defaults = document["spec"]["driverSpecDefaults"]
             defaults["deployCsiAddons"] = "${csi_addons_enabled}"
             for plugin in ("nodePlugin", "controllerPlugin"):
-                defaults[plugin]["priorityClassName"] = "infra-high"
+                defaults[plugin]["priorityClassName"] = "infra-ceph"
                 defaults[plugin]["labels"] = {
                     "app.kubernetes.io/part-of": "rook-ceph",
                     "app.kubernetes.io/managed-by": "infrastructure",

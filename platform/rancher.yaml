@@ -1,5 +1,5 @@
 ---
-# Source: rancher/templates/priorityClass.yaml
+# Compatibility slot for legacy platform_other indices; excluded from deployment.
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
@@ -37,7 +37,7 @@ metadata:
     release: rancher
     app.kubernetes.io/part-of: "rancher"
 data:
-  priorityClassName:  rancher-critical
+  priorityClassName:  infra-monitoring
 ---
 # Source: rancher/templates/clusterRoleBinding.yaml
 kind: ClusterRoleBinding
@@ -109,7 +109,6 @@ kind: Deployment
 apiVersion: apps/v1
 metadata:
   name: rancher
-  annotations:
   labels:
     app: rancher
     chart: rancher-${rancher_version}
@@ -133,7 +132,7 @@ spec:
         app.kubernetes.io/part-of: rancher
         release: rancher
     spec:
-      priorityClassName: rancher-critical
+      priorityClassName: infra-monitoring
       serviceAccountName: rancher
       automountServiceAccountToken: true
       enableServiceLinks: true

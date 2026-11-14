@@ -98,7 +98,7 @@ spec:
         prometheus.io/port: "3100"
         prometheus.io/path: /metrics
     spec:
-      priorityClassName: infra-observability
+      priorityClassName: infra-monitoring
       securityContext:
         runAsUser: 10001
         runAsGroup: 10001

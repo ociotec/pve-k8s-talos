@@ -98,7 +98,7 @@ locals {
     hostname          = local.rancher_hostname_value
     replicas          = local.rancher_replicas_value
     privateCA         = local.rancher_private_ca_value
-    priorityClassName = "infra-observability"
+    priorityClassName = "infra-monitoring"
     ingress = {
       ingressClassName = "nginx"
       tls = {
@@ -125,7 +125,7 @@ locals {
     # With two replicas the default RollingUpdate 25% rounds maxUnavailable to 0.
     webhook = {
       replicaCount        = 2
-      priorityClassName   = "infra-high"
+      priorityClassName   = "infra-monitoring"
       podDisruptionBudget = { enabled = true, minAvailable = 1 }
       resources           = jsondecode(local.rancher_managed_resource_patches["cattle-system/rancher-webhook"].patch).spec.template.spec.containers[0].resources
     }

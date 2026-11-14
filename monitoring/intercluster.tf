@@ -114,7 +114,7 @@ locals {
             annotations = { "checksum/config" = filesha256("${path.module}/query-api.conf") }
           }
           spec = {
-            priorityClassName = "infra-observability"
+            priorityClassName = "infra-monitoring"
             containers = [{
               name = "nginx"
               # Official multi-architecture image, pinned independently of the moving tag.

@@ -68,7 +68,7 @@ locals {
               })
             })
             spec = merge(manifest.spec.template.spec, {
-              priorityClassName = "infra-high"
+              priorityClassName = "infra-ceph"
               containers = [
                 for container in manifest.spec.template.spec.containers : merge(container, {
                   resources = {

@@ -437,7 +437,7 @@ spec:
         app.kubernetes.io/part-of: ingress-nginx
         app.kubernetes.io/version: 1.15.1
     spec:
-      priorityClassName: infra-high
+      priorityClassName: infra-k8s
       automountServiceAccountToken: true
       containers:
       - args:
@@ -558,7 +558,7 @@ spec:
         app.kubernetes.io/version: 1.15.1
       name: ingress-nginx-admission-create
     spec:
-      priorityClassName: infra-high
+      priorityClassName: infra-k8s
       automountServiceAccountToken: true
       containers:
       - args:
@@ -620,7 +620,7 @@ spec:
         app.kubernetes.io/version: 1.15.1
       name: ingress-nginx-admission-patch
     spec:
-      priorityClassName: infra-high
+      priorityClassName: infra-k8s
       automountServiceAccountToken: true
       containers:
       - args:

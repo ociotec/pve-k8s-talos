@@ -91,7 +91,7 @@ spec:
         pve-k8s-talos/section: k8s-net
     spec:
       serviceAccountName: node-remediation-controller
-      priorityClassName: infra-high
+      priorityClassName: infra-k8s
       nodeSelector:
         node-role.kubernetes.io/control-plane: ""
       tolerations:

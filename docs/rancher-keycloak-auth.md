@@ -148,7 +148,7 @@ an automatic migration step.
 pinned SHA-256, and prepares `.generated-rancher-chart.tgz` in the workspace.
 It makes two narrow template adjustments because Helm excludes hooks from
 post-rendering: omit the bootstrap Secret hook (OpenTofu owns that Secret),
-and add CPU/memory resources plus `infra-observability` priority to the
+and add CPU/memory resources plus `infra-monitoring` priority to the
 pre-upgrade Job. The upstream pre-upgrade validation remains enabled. New chart
 versions require a digest update and a compatibility review of these patches.
 The Rancher container explicitly reads `CATTLE_BOOTSTRAP_PASSWORD` through the
@@ -191,7 +191,7 @@ webhook. This exercises the API server's actual admission path without storing
 a Secret. Ready replicas and EndpointSlices alone cannot prove this path works.
 
 The official Rancher chart's `webhook` values configure two webhook replicas,
-resources, `infra-high` priority, and a PodDisruptionBudget with `minAvailable: 1`
+resources, `infra-monitoring` priority, and a PodDisruptionBudget with `minAvailable: 1`
 from its first installation. With two replicas Kubernetes' default rolling
 strategy permits zero unavailable replicas. Before upgrading an existing
 installation, the platform applies the availability patch and waits for two
@@ -217,7 +217,7 @@ Sources: [Rancher config template](https://github.com/rancher/rancher/blob/v2.15
 [Rancher operation/container status handling](https://github.com/rancher/rancher/blob/v2.15.2/pkg/controllers/dashboard/helm/operations.go).
 
 The post-renderer uses Python 3/PyYAML, adds ownership labels, and removes the
-chart's private PriorityClass in favor of the shared `infra-observability`
+chart's private PriorityClass in favor of the shared `infra-monitoring`
 class. CPU/memory values, Go runtime limits, hostname, TLS secret and private CA
 remain cluster-configured. The chart's post-delete namespace cleanup is disabled,
 including during a failed atomic install. TLS Secrets and cert-manager
@@ -227,9 +227,9 @@ when the selected deployment mode or version changes.
 Rancher 2.15 uses the Turtles controller in `cattle-turtles-system`; the platform
 patch set no longer waits for the legacy provisioning CAPI controller or the
 separate local `api-extension` Deployment. Turtles retains the chart's 600Mi
-memory ceiling with an equal reservation and uses `infra-high` priority. Its
+memory ceiling with an equal reservation and uses `infra-monitoring` priority. Its
 CAPI controller in `cattle-capi-system` receives explicit CPU/memory resources
-(100m/500m CPU and 256Mi reserved/limited memory) and `infra-high` priority. Older
+(100m/500m CPU and 256Mi reserved/limited memory) and `infra-monitoring` priority. Older
 Rancher versions retain their existing controller patch sets.
 The local Fleet agent receives the same resource envelope and priority, plus an
 explicit probe exception because its managed Deployment configures no health

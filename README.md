@@ -125,16 +125,26 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
     finished Jobs after five minutes. Run the script with `--dry-run` to preview
     eligible pods without deleting them.
   - Certificate catalog (`available_certificates`) and default certificate entry.
-  - The `k8s-net` deployment also creates shared non-default `PriorityClass`
-    objects for repository-managed infrastructure:
-    `infra-critical` (`900000000`), `infra-high` (`800000000`), and
-    `infra-observability` (`700000000`). These sit below Kubernetes
-    `system-*` and Rancher priorities, and above normal application pods.
-  - Repository workloads use these priorities directly in shared manifests:
-    Garage, Keycloak, and Redpanda brokers use `infra-critical`; cert-manager,
-    MetalLB, ingress-nginx, and the Rook operator use `infra-high`;
-    Grafana, Prometheus, Loki, exporters, Portainer, S3 Console,
-    Redpanda Console, and operational tool pods use `infra-observability`.
+  - The `k8s-net` deployment creates shared non-default `PriorityClass` objects:
+    `infra-k8s` (1000000), `infra-ceph` (900000), `infra-services` (800000),
+    `infra-headroom` (700000), and `infra-monitoring` (600000).
+    Native Kubernetes `system-*` priorities remain above these classes.
+    Talos-managed DNS, CNI, and kube-proxy keep their native priorities.
+  - Networking, ingress, cert-manager, metrics-server, Kyverno admission, and node
+    remediation use `infra-k8s`. Rook, Ceph, CSI, and CSI Addons use `infra-ceph`.
+    Garage, Keycloak/PostgreSQL, and Redpanda brokers use `infra-services`.
+    Monitoring, Rancher/Fleet, operational UIs, Kyverno reports, VPA/Goldilocks,
+    and toolbox pods use `infra-monitoring`.
+  - `infra-headroom` is created without a workload: it reserves no CPU or memory.
+    Ordinary pods without an explicit priority normally use 0; benchmarks use
+    `infra-benchmark` (-100000) with `preemptionPolicy: Never`.
+  - New class names update pod templates without rollout-marker annotations.
+    Native Kubernetes priorities remain unchanged. Retired classes are preserved
+    during migration and removed once their consumers have moved; see
+    [priority migration](docs/agent-workflows/migrate-infrastructure-priorities.md).
+    Apply all affected service sections; workload interruption is possible, but
+    VM reboots are not required by this priority change.
+
 - `identity_constants.tf`
   - Keycloak hostname, TLS secret, PostgreSQL sizing/image, bootstrap admin settings, realm groups, and optional OIDC clients for consumers such as Rancher, Portainer, and Grafana.
   - Set `keycloak_image_repository` (without tag) and `keycloak_image_tag` separately. The repository defaults to `quay.io/keycloak/keycloak` when omitted; custom images must support the existing Keycloak startup arguments, environment variables, and health endpoints.
@@ -153,11 +163,11 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
 - `kafka_constants.tf`
   - Redpanda namespace, resource names, broker label key, local data path, Console hostname/TLS secret, optional Keycloak ingress authentication, images, and CPU/memory sizing.
   - Broker placement comes from `vms.auto.tfvars` labels; local PV capacity comes from the matching mounted disk in `resources.auto.tfvars`.
-  - Brokers use `infra-critical` priority plus a PodDisruptionBudget by
+  - Brokers use `infra-services` priority plus a PodDisruptionBudget by
     default. This does not dedicate nodes to Kafka, but allows Kubernetes to
     preempt lower-priority application pods on the same shared nodes when a
     broker must be scheduled. Redpanda Console and its oauth2-proxy use
-    `infra-observability`.
+    `infra-monitoring`.
 - `benchmark_constants.tf`
   - Optional scalable benchmark workloads in the dedicated `benchmark` namespace.
   - CPU and memory benchmarks are Deployments; disk benchmarks are StatefulSets with one PVC per replica.
@@ -962,7 +972,7 @@ which uses that flag only for the first reviewed takeover deployment.
 
 Set `grafana_operator_enabled = true` to install Grafana Operator and its CRDs
 from the pinned Helm chart. The operator watches Grafana custom resources in
-all namespaces and runs with `infra-observability` priority. Set
+all namespaces and runs with `infra-monitoring` priority. Set
 `grafana_operator_register_existing_instance = true` to add the existing
 Grafana as the external `Grafana/grafana-primary` instance selected by the
 `grafana/instance: primary` label. Registration references the existing

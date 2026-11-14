@@ -141,9 +141,13 @@ It complements `README.md` and focuses on execution behavior, change safety, and
 
 - Repository-managed infrastructure workloads should set `priorityClassName` in the pod template instead of relying on the Kubernetes default priority.
 - Use the shared non-default classes created by `k8s-net/main.tf`:
-  - `infra-critical` for core cluster services whose absence breaks dependent workloads, such as identity data plane and Kafka brokers.
-  - `infra-high` for cluster plumbing and controllers, such as ingress, certificate management, load balancing, and storage operators.
-  - `infra-observability` for monitoring, logging, dashboards, operational UIs, oauth2-proxy sidecars, and toolbox/debug service pods.
+  - `infra-services` (800000) for core cluster services whose absence breaks dependent workloads, such as identity data plane and Kafka brokers.
+  - `infra-k8s` (1000000) for networking, ingress, certificates, metrics-server, admission, and node remediation.
+  - `infra-ceph` (900000) for Rook, Ceph, CSI, and storage fencing controllers; exclude toolbox/debug pods.
+  - `infra-headroom` (700000) is reserved for future shared headroom; do not assign ordinary infrastructure workloads to it.
+  - `infra-monitoring` (600000) for Rancher/Fleet, reporting, recommendations, monitoring, logging, dashboards, operational UIs, oauth2-proxy sidecars, and toolbox/debug service pods.
+- Benchmark workloads use `infra-benchmark` (-100000), created by `benchmark/main.tf`, with `preemptionPolicy: Never`.
+- Automatic Helm lifecycle hooks must use the priority appropriate to their service. Pods created only by `helm test` are excluded from priority coverage.
 - Do not use Kubernetes `system-node-critical` or `system-cluster-critical` for repository application manifests unless the component is truly part of the Kubernetes node/control-plane runtime. Do not reuse Rancher-managed priority classes for non-Rancher workloads.
 
 ## Kubernetes Probe Requirements
@@ -220,6 +224,7 @@ For any non-trivial change:
 
 ## Repo-Specific Agent Workflows
 
+- When deploying the renamed infrastructure priority hierarchy for the first time, follow `docs/agent-workflows/migrate-infrastructure-priorities.md` before applying and before deleting retired classes.
 - When adding worker secondary NICs/IPs or migrating external Ceph client endpoints, follow `docs/agent-workflows/migrate-worker-ceph-network.md`.
 - When the user asks to audit or update pinned versions across the repository, follow `docs/agent-workflows/update-versions.md`.
 - When the user asks to migrate, upgrade, or deploy updated monitoring components in a real cluster, follow `docs/agent-workflows/monitoring-version-migration.md` in addition to the version-update workflow. Apply its preflight and post-deployment checks whenever the change includes Tempo, OpenTelemetry Collector, Prometheus, Loki, Grafana, PostgreSQL, exporters, or their monitoring configuration.

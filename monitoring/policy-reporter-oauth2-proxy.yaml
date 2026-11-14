@@ -26,7 +26,7 @@ spec:
         app.kubernetes.io/managed-by: infrastructure
         pve-k8s-talos/section: monitoring
     spec:
-      priorityClassName: infra-observability
+      priorityClassName: infra-monitoring
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532

@@ -734,7 +734,7 @@ resource "kubernetes_manifest" "statefulset" {
           serviceAccountName            = local.garage_name_value
           automountServiceAccountToken  = true
           terminationGracePeriodSeconds = 60
-          priorityClassName             = "infra-critical"
+          priorityClassName             = "infra-services"
           securityContext = {
             fsGroup             = 1000
             fsGroupChangePolicy = "OnRootMismatch"
@@ -1176,7 +1176,7 @@ resource "kubernetes_manifest" "console_deployment" {
         }
         spec = {
           automountServiceAccountToken = false
-          priorityClassName            = "infra-observability"
+          priorityClassName            = "infra-monitoring"
           securityContext = {
             seccompProfile = {
               type = "RuntimeDefault"
@@ -1326,7 +1326,7 @@ resource "kubernetes_manifest" "console_oauth2_proxy_deployment" {
         }
         spec = {
           automountServiceAccountToken = false
-          priorityClassName            = "infra-observability"
+          priorityClassName            = "infra-monitoring"
           securityContext = {
             seccompProfile = {
               type = "RuntimeDefault"

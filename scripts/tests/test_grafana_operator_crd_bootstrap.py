@@ -11,6 +11,21 @@ def definition():
     return {'apiVersion':'apiextensions.k8s.io/v1','kind':'CustomResourceDefinition','metadata':{'name':'grafanas.grafana.integreatly.org'},'spec':{'names':{'kind':'Grafana'},'versions':[{'name':'v1beta1','served':True}]}}
 
 class CrdBootstrapTest(unittest.TestCase):
+    def test_helm_oci_progress_output_never_becomes_a_manifest(self):
+        def run(args, payload=None):
+            output = Path(args[args.index('--output-dir') + 1]) / 'grafana-operator' / 'crds'
+            output.mkdir(parents=True)
+            (output / 'grafana.yaml').write_text(json.dumps(definition()))
+            (output / 'NOTES.txt').write_text('Chart installation notes')
+            return '{"Pulled":"example.com/chart:5.25.0","Digest":"sha256:example"}\n'
+        rendered = module.render_chart('5.25.0', execute=run)
+        self.assertEqual(json.loads(rendered), definition())
+        self.assertNotIn('Pulled', rendered)
+
+    def test_missing_manifest_files_abort_before_kubernetes_is_called(self):
+        with self.assertRaisesRegex(ValueError, 'no manifest files'):
+            module.render_chart('5.25.0', execute=lambda *_: 'pull metadata only')
+
     def test_old_and_new_kubectl_json_encodings_are_supported(self):
         a=definition();b={'kind':'ServiceAccount','metadata':{'name':'operator'}}
         for text in (json.dumps({'kind':'List','items':[a,b]}),json.dumps(a)+'\n'+json.dumps(b)):

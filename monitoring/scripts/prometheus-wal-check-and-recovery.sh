@@ -81,7 +81,7 @@ metadata:
     app.kubernetes.io/managed-by: infrastructure
     pve-k8s-talos/section: monitoring
 spec:
-  priorityClassName: infra-observability
+  priorityClassName: infra-monitoring
   restartPolicy: Never
   securityContext:
     fsGroup: 65534

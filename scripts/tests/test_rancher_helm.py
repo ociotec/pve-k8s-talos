@@ -363,7 +363,7 @@ class RenderedChartTest(unittest.TestCase):
     def test_chart_hooks_and_workloads_meet_repository_contract(self):
         values = {
             "hostname": "rancher.example.com", "replicas": 1, "privateCA": True,
-            "priorityClassName": "infra-observability",
+            "priorityClassName": "infra-monitoring",
             "ingress": {"ingressClassName": "nginx", "tls": {"source": "secret", "secretName": "tls-rancher-ingress"}},
             "resources": {"requests": {"cpu": "1", "memory": "4Gi"},
                           "limits": {"cpu": "4", "memory": "4Gi"}},
@@ -397,7 +397,7 @@ class RenderedChartTest(unittest.TestCase):
             if d["kind"] not in {"Deployment", "Job"}:
                 continue
             pod = d["spec"]["template"]["spec"]
-            self.assertEqual(pod["priorityClassName"], "infra-observability")
+            self.assertEqual(pod["priorityClassName"], "infra-monitoring")
             for container in pod["containers"] + pod.get("initContainers", []):
                 resources = container["resources"]
                 for key in ["requests", "limits"]:

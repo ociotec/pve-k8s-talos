@@ -113,18 +113,25 @@ explicit. Policy Reporter must not be a dependency of Kyverno admission.
 
 ## Controller placement and sizing
 
+Automatic Kyverno upgrade and deletion hooks use `infra-k8s`. The deployment
+prepares the selected checksum-pinned chart locally because Helm does not
+post-render hooks and these templates expose no priority setting. Upstream
+hook commands, RBAC, ordering, and cleanup policies are preserved. Hook memory
+requests equal their limits. Pods created only by `helm test` remain upstream
+and are outside the deployment priority policy.
+
 The admission controller runs only on workers: it has no control-plane
 tolerations or control-plane affinity. It uses at least two replicas spread by node
-hostname, `priorityClassName: infra-high`, explicit resources, health probes,
+hostname, `priorityClassName: infra-k8s`, explicit resources, health probes,
 and a PodDisruptionBudget.
 
-`infra-high` is appropriate for an infrastructure controller. In fail-closed
+`infra-k8s` is appropriate for an infrastructure controller. In fail-closed
 mode, its unavailability can block matching API changes, but it does not
-interrupt workloads already running. `infra-critical` remains reserved for
+interrupt workloads already running. `infra-services` remains reserved for
 data-plane services whose absence directly breaks their dependents.
 
 The reports controller is not in the admission path. It may run as one initial
-replica with `priorityClassName: infra-observability`. The first
+replica with `priorityClassName: infra-monitoring`. The first
 implementation uses only the admission and reports controllers; it disables the
 background and cleanup controllers because validation-only policies do not
 require them.
@@ -150,7 +157,7 @@ protects admission latency and availability; the rule evaluation itself is not
 expected to be materially more expensive than audit mode.
 
 Policy Reporter is not in the admission path. Its implementation must define
-CPU and memory requests/limits, probes, `infra-observability` priority, and a
+CPU and memory requests/limits, probes, `infra-monitoring` priority, and a
 PodDisruptionBudget for every enabled component. Size it separately from
 Kyverno after observing report volume and UI/API use.
 

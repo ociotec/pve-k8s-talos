@@ -274,7 +274,25 @@ class Reconciler:
         fatal = re.search(r"unauthorized|authentication required|no basic auth credentials|forbidden|x509:|manifest unknown|not found", detail, re.I)
         return not fatal and bool(re.search(r"DeadlineExceeded|timeout|timed out|context deadline exceeded", detail, re.I))
 
+    def diagnostic_priority_class(self):
+        classes = self.command(self.kube + [
+            "get", "priorityclasses", "-l", "app.kubernetes.io/managed-by=infrastructure", "-o", "json",
+        ])["items"]
+        candidates = [item for item in classes
+                      if item["metadata"]["name"].startswith("infra-")
+                      and item["metadata"]["name"] != "infra-headroom"
+                      and item.get("value", 0) > 0]
+        for item in candidates:
+            if item["metadata"]["name"] == "infra-monitoring":
+                return "infra-monitoring"
+        # Talos reconciliation precedes k8s-net during the first hierarchy migration.
+        # Use the lowest existing infrastructure tier until the new class is installed.
+        if candidates:
+            return min(candidates, key=lambda item: item["value"])["metadata"]["name"]
+        raise ReconcileError("No infrastructure PriorityClass is available for the registry diagnostic; deploy k8s-net first.")
+
     def pull_probe(self):
+        priority_class = self.diagnostic_priority_class()
         labels = {
             "app.kubernetes.io/name": "registry-auth-check",
             "app.kubernetes.io/instance": "talos-registry-auth",
@@ -302,7 +320,7 @@ class Reconciler:
                     "automountServiceAccountToken": False, "imagePullSecrets": [],
                     "restartPolicy": "Never", "terminationGracePeriodSeconds": 0,
                     "activeDeadlineSeconds": self.args.timeout + 30,
-                    "priorityClassName": "infra-observability", "tolerations": [{"operator": "Exists"}],
+                    "priorityClassName": priority_class, "tolerations": [{"operator": "Exists"}],
                     "securityContext": {"runAsNonRoot": True, "runAsUser": 65534,
                                         "seccompProfile": {"type": "RuntimeDefault"}},
                     "containers": [{

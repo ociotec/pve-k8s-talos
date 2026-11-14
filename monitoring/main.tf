@@ -1799,7 +1799,7 @@ resource "helm_release" "policy_reporter" {
   atomic     = true
 
   values = [yamlencode(merge({
-    priorityClassName = "infra-observability"
+    priorityClassName = "infra-monitoring"
     resources = {
       requests = { cpu = "100m", memory = "256Mi" }
       limits   = { cpu = "500m", memory = "256Mi" }
@@ -1817,7 +1817,7 @@ resource "helm_release" "policy_reporter" {
     ui = {
       enabled           = true
       replicaCount      = 1
-      priorityClassName = "infra-observability"
+      priorityClassName = "infra-monitoring"
       resources = {
         requests = { cpu = "100m", memory = "256Mi" }
         limits   = { cpu = "500m", memory = "256Mi" }
@@ -1842,7 +1842,7 @@ resource "helm_release" "policy_reporter" {
     plugin = { kyverno = {
       enabled           = true
       replicaCount      = 1
-      priorityClassName = "infra-observability"
+      priorityClassName = "infra-monitoring"
       resources = {
         requests = { cpu = "100m", memory = "256Mi" }
         limits   = { cpu = "500m", memory = "256Mi" }
@@ -1905,7 +1905,7 @@ resource "helm_release" "grafana" {
       "prometheus.io/path"   = "/metrics"
     }
     podPortName       = "monitoring"
-    priorityClassName = "infra-observability"
+    priorityClassName = "infra-monitoring"
     rbac = {
       create = false
     }
@@ -2164,7 +2164,7 @@ resource "helm_release" "grafana_operator" {
       "prometheus.io/port"   = "9090"
       "prometheus.io/path"   = "/metrics"
     }
-    priorityClassName = "infra-observability"
+    priorityClassName = "infra-monitoring"
     resources = {
       requests = {
         cpu    = local.grafana_operator_cpu_request_value

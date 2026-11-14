@@ -26,7 +26,8 @@ locals {
   # the Kafka section, but this module cannot read locals from another module.
   benchmark_kafka_image_value     = try(regex("(?m)^\\s*benchmark_kafka_image\\s*=\\s*\"([^\"]+)\"\\s*(?:#.*)?$", file("${path.module}/constants.tf"))[0], "docker.redpanda.com/redpandadata/redpanda:v26.1.6")
   benchmark_kafka_bootstrap_value = "redpanda-0.redpanda.kafka.svc.cluster.local:9092,redpanda-1.redpanda.kafka.svc.cluster.local:9092,redpanda-2.redpanda.kafka.svc.cluster.local:9092"
-  benchmark_priority_class_name   = "benchmark-low"
+  benchmark_priority_class_name   = "infra-benchmark"
+  benchmark_priority_class_value  = -100000
 
   benchmark_cpu_vcpus_value    = try(local.benchmark_cpu_vcpus, 2)
   benchmark_cpu_memory_value   = try(local.benchmark_cpu_memory, "256Mi")
@@ -150,20 +151,24 @@ resource "kubernetes_manifest" "namespace" {
   }
 }
 
-resource "kubernetes_manifest" "priority_class" {
-  manifest = {
-    apiVersion = "scheduling.k8s.io/v1"
-    kind       = "PriorityClass"
-    metadata = {
-      name = local.benchmark_priority_class_name
-      labels = {
-        "app.kubernetes.io/managed-by" = "infrastructure"
-      }
-    }
-    value            = -1000
-    preemptionPolicy = "Never"
-    description      = "Low-priority benchmark workloads that should run below normal application pods."
+# Preserve the old class for one-time cleanup after workload migration.
+removed {
+  from = kubernetes_manifest.priority_class
+  lifecycle {
+    destroy = false
   }
+}
+
+resource "kubernetes_priority_class_v1" "infrastructure" {
+  metadata {
+    name = local.benchmark_priority_class_name
+    labels = {
+      "app.kubernetes.io/managed-by" = "infrastructure"
+    }
+  }
+  value             = local.benchmark_priority_class_value
+  preemption_policy = "Never"
+  description       = "Low-priority benchmark workloads that should run below normal application pods."
 }
 
 resource "kubernetes_manifest" "cpu_deployment" {
@@ -234,7 +239,7 @@ resource "kubernetes_manifest" "cpu_deployment" {
 
   depends_on = [
     kubernetes_manifest.namespace,
-    kubernetes_manifest.priority_class,
+    kubernetes_priority_class_v1.infrastructure,
   ]
 }
 
@@ -307,7 +312,7 @@ resource "kubernetes_manifest" "memory_deployment" {
 
   depends_on = [
     kubernetes_manifest.namespace,
-    kubernetes_manifest.priority_class,
+    kubernetes_priority_class_v1.infrastructure,
   ]
 }
 
@@ -659,7 +664,7 @@ EOF
 
   depends_on = [
     kubernetes_manifest.namespace,
-    kubernetes_manifest.priority_class,
+    kubernetes_priority_class_v1.infrastructure,
   ]
 }
 
@@ -803,7 +808,7 @@ resource "kubernetes_manifest" "disk_statefulset" {
 
   depends_on = [
     kubernetes_manifest.namespace,
-    kubernetes_manifest.priority_class,
+    kubernetes_priority_class_v1.infrastructure,
     kubernetes_manifest.disk_headless_service,
   ]
 }

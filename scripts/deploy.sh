@@ -2645,6 +2645,8 @@ prepare_k8s_net_workspace() {
   link_into_workspace "${repo_root}/k8s-net/metallb-metrics.tf" "${workspace}/metallb-metrics.tf"
   python3 "${script_dir}/prepare-infrastructure-manifests.py" \
     --section k8s-net --constants "${cluster_k8s_net_constants_path}" --output "${workspace}"
+  python3 "${script_dir}/prepare-kyverno-chart.py" \
+    --constants "${cluster_k8s_net_constants_path}" --output "${workspace}/.generated-kyverno-chart.tgz"
   link_into_workspace "${repo_root}/k8s-net/ingress-nginx-controller.yaml" "${workspace}/ingress-nginx-controller.yaml"
   link_into_workspace "${repo_root}/k8s-net/ingress-nginx-pod-cleanup.py" "${workspace}/ingress-nginx-pod-cleanup.py"
   link_into_workspace "${repo_root}/k8s-net/metallb-pool.yaml" "${workspace}/metallb-pool.yaml"

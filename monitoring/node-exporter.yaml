@@ -15,7 +15,7 @@ spec:
         app: node-exporter
         app.kubernetes.io/part-of: node-exporter
     spec:
-      priorityClassName: infra-observability
+      priorityClassName: infra-monitoring
       hostNetwork: true
       hostPID: true
       dnsPolicy: ClusterFirstWithHostNet

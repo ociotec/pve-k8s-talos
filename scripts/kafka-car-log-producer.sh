@@ -321,6 +321,7 @@ spec:
       annotations:
         pve-k8s-talos/car-log-producer-rollout-started-at: "${rollout_started_at}"
     spec:
+      priorityClassName: infra-monitoring
       terminationGracePeriodSeconds: 20
       containers:
         - name: producer
@@ -351,7 +352,7 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 128Mi
+              memory: 256Mi
             limits:
               cpu: 500m
               memory: 256Mi

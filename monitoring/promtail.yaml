@@ -104,7 +104,7 @@ spec:
         prometheus.io/path: /metrics
         checksum/config: ${promtail_config_hash}
     spec:
-      priorityClassName: infra-observability
+      priorityClassName: infra-monitoring
       serviceAccountName: promtail
       containers:
         - name: promtail

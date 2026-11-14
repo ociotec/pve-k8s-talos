@@ -48,7 +48,7 @@ spec:
         prometheus.io/port: "9187"
         prometheus.io/path: /metrics
     spec:
-      priorityClassName: infra-critical
+      priorityClassName: infra-services
       containers:
         - name: postgres
           image: postgres:${postgres_image_tag}
@@ -214,7 +214,7 @@ spec:
         prometheus.io/port: "9000"
         prometheus.io/path: /metrics
     spec:
-      priorityClassName: infra-critical
+      priorityClassName: infra-services
       initContainers:
         - name: wait-for-postgres
           image: postgres:${postgres_image_tag}

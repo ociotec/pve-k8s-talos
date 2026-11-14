@@ -47,6 +47,7 @@ spec:
         app.kubernetes.io/name: csi-addons
         control-plane: controller-manager
     spec:
+      priorityClassName: infra-ceph
       containers:
       - args:
         - --namespace=$(POD_NAMESPACE)

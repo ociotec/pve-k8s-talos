@@ -36,7 +36,7 @@ def render(documents):
             labels.update(LABELS)
             labels["app.kubernetes.io/component"] = "server" if kind == "Deployment" else "upgrade"
             pod = template["spec"]
-            pod["priorityClassName"] = "infra-observability"
+            pod["priorityClassName"] = "infra-monitoring"
             if kind == "Job":
                 # The official pre-upgrade hook has no resource values.
                 for container in pod.get("containers", []) + pod.get("initContainers", []):

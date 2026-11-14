@@ -22,7 +22,7 @@ spec:
         app: rook-ceph-tools
         app.kubernetes.io/part-of: rook-ceph
     spec:
-      priorityClassName: infra-observability
+      priorityClassName: infra-monitoring
       dnsPolicy: ClusterFirstWithHostNet
       serviceAccountName: rook-ceph-default
       containers:

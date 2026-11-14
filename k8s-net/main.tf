@@ -102,17 +102,25 @@ provider "proxmox" {
 
 locals {
   infrastructure_priority_classes = {
-    infra-critical = {
-      value       = 900000000
-      description = "Critical repository-managed infrastructure services that should preempt normal application workloads."
+    infra-k8s = {
+      value       = 1000000
+      description = "Essential cluster networking, certificates, admission, metrics API, and node recovery services."
     }
-    infra-high = {
-      value       = 800000000
-      description = "High-priority repository-managed infrastructure services such as ingress, certificates, and network controllers."
+    infra-ceph = {
+      value       = 900000
+      description = "Ceph storage services, Rook operators, CSI drivers, and storage fencing controllers."
     }
-    infra-observability = {
-      value       = 700000000
-      description = "Repository-managed observability and operational UI services."
+    infra-services = {
+      value       = 800000
+      description = "Critical identity, object storage, and messaging services above ordinary application workloads."
+    }
+    infra-headroom = {
+      value       = 700000
+      description = "Reserved priority for future shared memory headroom; no reservation workload is deployed."
+    }
+    infra-monitoring = {
+      value       = 600000
+      description = "Monitoring, recommendations, reports, operational UIs, and diagnostic tools."
     }
   }
 
@@ -759,28 +767,32 @@ resource "kubernetes_manifest" "node_remediation" {
   manifest = each.value
 
   depends_on = [
-    kubernetes_manifest.infrastructure_priority_classes,
+    kubernetes_priority_class_v1.infrastructure,
     kubernetes_manifest.node_remediation_config,
     kubernetes_secret_v1.node_remediation_proxmox,
   ]
 }
 
-resource "kubernetes_manifest" "infrastructure_priority_classes" {
+# Preserve old classes until all sections have migrated their consumers.
+removed {
+  from = kubernetes_manifest.infrastructure_priority_classes
+  lifecycle {
+    destroy = false
+  }
+}
+
+resource "kubernetes_priority_class_v1" "infrastructure" {
   for_each = local.infrastructure_priority_classes
 
-  manifest = {
-    apiVersion = "scheduling.k8s.io/v1"
-    kind       = "PriorityClass"
-    metadata = {
-      name = each.key
-      labels = {
-        "app.kubernetes.io/managed-by" = "infrastructure"
-      }
+  metadata {
+    name = each.key
+    labels = {
+      "app.kubernetes.io/managed-by" = "infrastructure"
     }
-    value            = each.value.value
-    preemptionPolicy = "PreemptLowerPriority"
-    description      = each.value.description
   }
+  value             = each.value.value
+  preemption_policy = "PreemptLowerPriority"
+  description       = each.value.description
 }
 
 resource "helm_release" "kyverno" {
@@ -789,8 +801,8 @@ resource "helm_release" "kyverno" {
   name             = "kyverno"
   namespace        = "kyverno"
   create_namespace = true
-  repository       = "oci://ghcr.io/kyverno/charts"
-  chart            = "kyverno"
+  # Prepared from the pinned upstream archive; Helm does not post-render hooks.
+  chart            = "${path.module}/.generated-kyverno-chart.tgz"
   version          = local.kyverno_chart_version_value
   wait             = true
   timeout          = 600
@@ -801,9 +813,23 @@ resource "helm_release" "kyverno" {
     image = {
       registry = "ghcr.io"
     }
+    crds = {
+      migration = {
+        podResources = {
+          requests = { cpu = "10m", memory = "256Mi" }
+          limits   = { cpu = "100m", memory = "256Mi" }
+        }
+      }
+    }
+    webhooksCleanup = {
+      resources = {
+        requests = { cpu = "10m", memory = "256Mi" }
+        limits   = { cpu = "100m", memory = "256Mi" }
+      }
+    }
     admissionController = {
       replicas          = 2
-      priorityClassName = "infra-high"
+      priorityClassName = "infra-k8s"
       initContainer = {
         image = {
           registry = "ghcr.io"
@@ -827,7 +853,7 @@ resource "helm_release" "kyverno" {
     }
     reportsController = {
       replicas          = 1
-      priorityClassName = "infra-high"
+      priorityClassName = "infra-monitoring"
       image = {
         registry = "ghcr.io"
       }
@@ -849,7 +875,7 @@ resource "helm_release" "kyverno" {
     cleanupController    = { enabled = false }
   })]
 
-  depends_on = [kubernetes_manifest.infrastructure_priority_classes]
+  depends_on = [kubernetes_priority_class_v1.infrastructure]
 }
 
 resource "local_file" "kyverno_policies" {
@@ -886,7 +912,7 @@ resource "kubernetes_manifest" "cert_manager" {
   manifest = each.value
   depends_on = [
     kubernetes_manifest.cert_manager_namespace,
-    kubernetes_manifest.infrastructure_priority_classes,
+    kubernetes_priority_class_v1.infrastructure,
   ]
 }
 
@@ -907,11 +933,15 @@ resource "kubernetes_manifest" "metallb_native" {
   computed_fields = [
     "metadata.annotations",
     "metadata.annotations[\"deprecated.daemonset.template.generation\"]",
+    "object.metadata.annotations",
+    "object.metadata.annotations[\"deprecated.daemonset.template.generation\"]",
   ]
   lifecycle {
     ignore_changes = [
       manifest.metadata.annotations,
       manifest.metadata.annotations["deprecated.daemonset.template.generation"],
+      object.metadata.annotations,
+      object.metadata.annotations["deprecated.daemonset.template.generation"],
     ]
   }
   field_manager {
@@ -920,7 +950,7 @@ resource "kubernetes_manifest" "metallb_native" {
   depends_on = [
     kubernetes_manifest.metallb_native_namespace,
     kubernetes_secret_v1.metallb_metrics_tls,
-    kubernetes_manifest.infrastructure_priority_classes,
+    kubernetes_priority_class_v1.infrastructure,
   ]
 }
 
@@ -949,7 +979,7 @@ resource "kubernetes_manifest" "ingress_nginx" {
     kubernetes_horizontal_pod_autoscaler_v2.ingress_nginx,
     kubernetes_manifest.metallb_pool,
     kubernetes_manifest.ingress_nginx_namespace,
-    kubernetes_manifest.infrastructure_priority_classes,
+    kubernetes_priority_class_v1.infrastructure,
   ]
   field_manager {
     force_conflicts = true
@@ -1135,7 +1165,7 @@ resource "kubernetes_cron_job_v1" "ingress_nginx_pod_cleanup" {
             service_account_name            = kubernetes_service_account_v1.ingress_nginx_pod_cleanup[0].metadata[0].name
             automount_service_account_token = true
             restart_policy                  = "Never"
-            priority_class_name             = "infra-observability"
+            priority_class_name             = "infra-monitoring"
             container {
               name    = "cleanup"
               image   = local.ingress_nginx_options.ingress_nginx_pod_cleanup_image
@@ -1175,7 +1205,7 @@ resource "kubernetes_cron_job_v1" "ingress_nginx_pod_cleanup" {
       }
     }
   }
-  depends_on = [kubernetes_role_binding_v1.ingress_nginx_pod_cleanup, kubernetes_manifest.infrastructure_priority_classes]
+  depends_on = [kubernetes_role_binding_v1.ingress_nginx_pod_cleanup, kubernetes_priority_class_v1.infrastructure]
 }
 
 resource "kubernetes_manifest" "ingress_nginx_namespace" {

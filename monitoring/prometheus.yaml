@@ -801,7 +801,7 @@ spec:
         checksum/metallb-metrics: ${metallb_metrics_config_hash}
 %{ endif ~}
     spec:
-      priorityClassName: infra-observability
+      priorityClassName: infra-monitoring
       terminationGracePeriodSeconds: 120
       serviceAccountName: prometheus
       securityContext:
@@ -962,7 +962,7 @@ spec:
             app.kubernetes.io/managed-by: infrastructure
             pve-k8s-talos/section: monitoring
         spec:
-          priorityClassName: infra-observability
+          priorityClassName: infra-monitoring
           serviceAccountName: prometheus-wal-check-and-recovery
           restartPolicy: Never
           securityContext:

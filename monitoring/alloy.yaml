@@ -166,7 +166,7 @@ spec:
         prometheus.io/path: /metrics
         checksum/config: ${alloy_config_hash}
     spec:
-      priorityClassName: infra-observability
+      priorityClassName: infra-monitoring
       serviceAccountName: alloy-logs
       terminationGracePeriodSeconds: 30
       containers:

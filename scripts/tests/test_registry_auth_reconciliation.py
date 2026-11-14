@@ -97,6 +97,10 @@ class FakeReconciler(MODULE.Reconciler):
                 return {"spec": {"running": True, "healthy": self.healthy, "unknown": False}}
         else:
             op = args[args.index("--request-timeout=20s") + 1:]
+            if op[:2] == ["get", "priorityclasses"]:
+                return {"items": getattr(self, "priority_classes", [
+                    {"metadata": {"name": "infra-monitoring"}, "value": 600000},
+                ])}
             if op[:2] == ["get", "node"]:
                 return copy.deepcopy(self.node_data)
             if op[:2] == ["get", "deployments,statefulsets,daemonsets"]:
@@ -297,13 +301,32 @@ class ReconcileTest(unittest.TestCase):
         self.assertEqual(spec["imagePullSecrets"], [])
         self.assertFalse(spec["automountServiceAccountToken"])
         self.assertNotIn("imagePullSecrets", self.r.account)
-        self.assertEqual(spec["priorityClassName"], "infra-observability")
+        self.assertEqual(spec["priorityClassName"], "infra-monitoring")
         self.assertEqual(spec["tolerations"], [{"operator": "Exists"}])
         container = spec["containers"][0]
         self.assertEqual(container["imagePullPolicy"], "Always")
         self.assertEqual(container["resources"]["requests"]["memory"], container["resources"]["limits"]["memory"])
         for resource in ["requests", "limits"]:
             self.assertIn("cpu", container["resources"][resource])
+
+    def test_registry_probe_supports_the_first_hierarchy_migration(self):
+        self.r.priority_classes = [
+            {"metadata": {"name": "infra-critical"}, "value": 900000000},
+            {"metadata": {"name": "infra-observability"}, "value": 700000000},
+        ]
+        self.r.pull_probe()
+        self.assertEqual(self.r.probe["spec"]["priorityClassName"], "infra-observability")
+
+    def test_registry_probe_prefers_monitoring_and_never_uses_headroom(self):
+        self.r.priority_classes = [
+            {"metadata": {"name": "infra-headroom"}, "value": 1},
+            {"metadata": {"name": "infra-monitoring"}, "value": 600000},
+        ]
+        self.assertEqual(self.r.diagnostic_priority_class(), "infra-monitoring")
+        self.r.priority_classes = self.r.priority_classes[:1]
+        with self.assertRaisesRegex(MODULE.ReconcileError, "No infrastructure PriorityClass"):
+            self.r.pull_probe()
+        self.assertNotIn("create-Pod", self.r.calls)
 
     def test_admission_injected_secret_cannot_produce_a_false_success(self):
         self.r.inject_secret = True

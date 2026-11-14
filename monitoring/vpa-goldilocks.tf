@@ -223,7 +223,7 @@ locals {
   }
   goldilocks_components = local.enable_goldilocks_value ? {
     controller = {
-      priority    = "infra-high"
+      priority = "infra-monitoring"
       path        = "/healthz"
       args        = ["controller", "-v2", "--on-by-default=${var.vpa_goldilocks.all_namespaces}", "--metrics-port=8080"]
       cpu_request = local.goldilocks_effective_resources.controller_cpu_request
@@ -233,7 +233,7 @@ locals {
       vpa_verbs   = ["get", "list", "create", "delete", "update"]
     }
     dashboard = {
-      priority = "infra-observability"
+      priority = "infra-monitoring"
       path     = "/health"
       # Disable the optional external cost integration, including its signup UI.
       args        = ["dashboard", "-v2", "--on-by-default=${var.vpa_goldilocks.all_namespaces}", "--enable-cost=false"]
@@ -325,7 +325,7 @@ resource "helm_release" "vpa" {
   timeout    = 600
   values = [yamlencode({
     fullnameOverride  = "vpa"
-    priorityClassName = "infra-observability"
+    priorityClassName = "infra-monitoring"
     # Preserve Helm's release ownership label while adding repository grouping.
     podLabels = {
       "app.kubernetes.io/part-of" = "vpa"

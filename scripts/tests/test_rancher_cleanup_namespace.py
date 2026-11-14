@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 @unittest.skipUnless(shutil.which("tofu"), "OpenTofu is required")
 class RancherCleanupNamespaceTest(unittest.TestCase):
-    def catalog(self, version):
+    def catalog(self, version, cleanup_only=True):
         source = (ROOT / "platform/main.tf").read_text()
         start = source.index("  rancher_managed_resource_patches_v212 =")
         end = source.index("  rancher_managed_probe_exceptions =", start)
@@ -24,12 +24,21 @@ class RancherCleanupNamespaceTest(unittest.TestCase):
             )
             subprocess.run(["tofu", "init", "-backend=false", "-input=false", "-no-color"],
                            cwd=directory, check=True, capture_output=True, text=True)
+            selection = ' if p.resource == "cronjob" && p.name == "rke2-machineconfig-cleanup-cronjob"' if cleanup_only else ''
             result = subprocess.run(
                 ["tofu", "console", "-no-color"], cwd=directory, check=True,
-                input='jsonencode({for k, p in local.rancher_managed_resource_patches : k => {namespace = p.namespace, name = p.name, patch = jsondecode(p.patch)} if p.resource == "cronjob" && p.name == "rke2-machineconfig-cleanup-cronjob"})\n',
+                input='jsonencode({for k, p in local.rancher_managed_resource_patches : k => {namespace = p.namespace, name = p.name, patch = jsondecode(p.patch)}' + selection + '})\n',
                 capture_output=True, text=True,
             )
         return json.loads(json.loads(result.stdout))
+
+    def test_managed_rancher_pods_use_observability_across_supported_catalogs(self):
+        for version in ("2.12", "2.14", "2.15"):
+            for name, entry in self.catalog(version, cleanup_only=False).items():
+                with self.subTest(version=version, workload=name):
+                    spec = entry["patch"]["spec"]
+                    template = spec["jobTemplate"]["spec"]["template"] if "jobTemplate" in spec else spec["template"]
+                    self.assertEqual(template["spec"]["priorityClassName"], "infra-monitoring")
 
     def test_rancher_215_patches_cleanup_in_local_workspace(self):
         jobs = self.catalog("2.15")

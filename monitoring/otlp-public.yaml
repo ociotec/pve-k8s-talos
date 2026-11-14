@@ -118,7 +118,7 @@ spec:
         prometheus.io/port: "8888"
         prometheus.io/path: /metrics
     spec:
-      priorityClassName: infra-observability
+      priorityClassName: infra-monitoring
       securityContext:
         runAsNonRoot: true
         seccompProfile:

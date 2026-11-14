@@ -426,6 +426,7 @@ locals {
               }
             }
             spec = {
+              priorityClassName = "infra-monitoring"
               containers = [{
                 name = "manager"
                 resources = {
@@ -463,6 +464,7 @@ locals {
               }
             }
             spec = {
+              priorityClassName = "infra-monitoring"
               containers = [{
                 name = "fleet-controller"
                 resources = {
@@ -502,6 +504,7 @@ locals {
                   }
                 }
                 spec = {
+                  priorityClassName = "infra-monitoring"
                   containers = [{
                     name = "cleanup"
                     resources = {
@@ -541,6 +544,7 @@ locals {
               }
             }
             spec = {
+              priorityClassName = "infra-monitoring"
               containers = [{
                 name = "gitjob"
                 resources = {
@@ -578,6 +582,7 @@ locals {
               }
             }
             spec = {
+              priorityClassName = "infra-monitoring"
               containers = [{
                 name = "helmops"
                 resources = {
@@ -619,6 +624,7 @@ locals {
               }
             }
             spec = {
+              priorityClassName = "infra-monitoring"
               containers = [{
                 name = "rancher-webhook"
                 resources = {
@@ -643,6 +649,11 @@ locals {
       resource  = "deployment"
       name      = "api-extension"
       patch = jsonencode({
+        spec = {
+          template = {
+            spec     = { priorityClassName = "infra-monitoring" }
+          }
+        }
         metadata = {
           annotations = {
             "policy.pve-k8s-talos.io/allow-missing-resources" = "true"
@@ -673,6 +684,7 @@ locals {
                   }
                 }
                 spec = {
+                  priorityClassName = "infra-monitoring"
                   containers = [{
                     name = "rke2-machineconfig-cleanup-pod"
                     resources = {
@@ -717,6 +729,7 @@ locals {
                 }
               }
               spec = {
+                priorityClassName = "infra-monitoring"
                 containers = [
                   {
                     name = "fleet-agentmanagement"
@@ -805,7 +818,7 @@ locals {
             template = {
               metadata = { labels = { "app.kubernetes.io/part-of" = "rancher" } }
               spec = {
-                priorityClassName = "infra-high"
+                priorityClassName = "infra-monitoring"
                 containers = [merge(
                   jsondecode(local.rancher_managed_resource_patches_base["cattle-system/rancher-webhook"].patch).spec.template.spec.containers[0],
                   {
@@ -830,7 +843,7 @@ locals {
             template = {
               metadata = { labels = { "app.kubernetes.io/part-of" = "rancher" } }
               spec = {
-                priorityClassName = "infra-high"
+                priorityClassName = "infra-monitoring"
                 containers = [{
                   name = "fleet-agent"
                   resources = {
@@ -853,7 +866,7 @@ locals {
             template = {
               metadata = { labels = { "app.kubernetes.io/part-of" = "rancher" } }
               spec = {
-                priorityClassName = "infra-high"
+                priorityClassName = "infra-monitoring"
                 containers = [{
                   name = "manager"
                   resources = {
@@ -876,7 +889,7 @@ locals {
             template = {
               metadata = { labels = { "app.kubernetes.io/part-of" = "rancher" } }
               spec = {
-                priorityClassName = "infra-high"
+                priorityClassName = "infra-monitoring"
                 containers = [{
                   name = "manager"
                   resources = {
@@ -1013,7 +1026,11 @@ resource "kubernetes_manifest" "platform_namespaces" {
 }
 
 resource "kubernetes_manifest" "platform_other" {
-  for_each = { for i, m in local.platform_other : i => m }
+  # Filter after indexing so retiring the legacy class does not renumber other resources.
+  for_each = {
+    for i, m in local.platform_other : i => m
+    if !(try(m.kind, "") == "PriorityClass" && try(m.metadata.name, "") == "rancher-critical")
+  }
   manifest = each.value
   computed_fields = [
     "globalDefault",

@@ -52,7 +52,7 @@ spec:
         prometheus.io/port: "9187"
         prometheus.io/path: /metrics
     spec:
-      priorityClassName: infra-observability
+      priorityClassName: infra-monitoring
       containers:
         - name: postgres
           image: postgres:${grafana_postgres_image_tag}
@@ -262,7 +262,7 @@ spec:
         checksum/datasources: ${sha256(grafana_datasources_yaml)}
         prometheus.io/path: /metrics
     spec:
-      priorityClassName: infra-observability
+      priorityClassName: infra-monitoring
       securityContext:
         runAsUser: 472
         runAsGroup: 472
@@ -522,7 +522,7 @@ spec:
       labels:
         app: grafana-dashboard-sync
     spec:
-      priorityClassName: infra-observability
+      priorityClassName: infra-monitoring
       restartPolicy: OnFailure
       securityContext:
         runAsNonRoot: true

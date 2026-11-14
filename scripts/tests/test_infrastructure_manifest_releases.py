@@ -16,6 +16,30 @@ SPEC.loader.exec_module(RELEASES)
 
 
 class InfrastructureReleaseTest(unittest.TestCase):
+    def test_release_priority_does_not_restore_legacy_or_upstream_classes(self):
+        for section, filename, expected in (
+            ("k8s-net", "k8s-net/metrics-server.yaml", "infra-k8s"),
+            ("rook", "rook/manifests/operator.yaml", "infra-ceph"),
+            ("rook", "rook/manifests/csi-addons/setup-controller.yaml", "infra-ceph"),
+        ):
+            with self.subTest(component=filename):
+                original = next(d for d in RELEASES.yaml.safe_load_all((ROOT / filename).read_text())
+                                if d and d.get("kind") == "Deployment")
+                original["spec"]["template"]["spec"]["priorityClassName"] = "infra-high"
+                updated = RELEASES.copy.deepcopy(original)
+                updated["spec"]["template"]["spec"]["priorityClassName"] = "system-node-critical"
+                RELEASES.workload_policy([updated], [original], section)
+                self.assertEqual(updated["spec"]["template"]["spec"]["priorityClassName"], expected)
+
+    def test_new_csi_operator_assigns_both_driver_roles_to_storage_priority(self):
+        document = {"kind": "OperatorConfig", "spec": {"driverSpecDefaults": {
+            "nodePlugin": {}, "controllerPlugin": {},
+        }}}
+        RELEASES.modern_rook([document], [{"kind": "ConfigMap", "data": {}}], "0.14.0")
+        defaults = document["spec"]["driverSpecDefaults"]
+        for role in ("nodePlugin", "controllerPlugin"):
+            self.assertEqual(defaults[role]["priorityClassName"], "infra-ceph")
+
     def test_release_webhook_does_not_manage_null_server_timestamp(self):
         document = {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingWebhookConfiguration",
                     "metadata": {"name": "example", "creationTimestamp": None}, "webhooks": []}

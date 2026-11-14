@@ -16,7 +16,7 @@ spec:
         app: prometheus-oauth2-proxy
         app.kubernetes.io/part-of: prometheus
     spec:
-      priorityClassName: infra-observability
+      priorityClassName: infra-monitoring
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532

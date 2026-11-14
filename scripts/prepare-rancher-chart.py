@@ -87,7 +87,7 @@ def patch_members(archive):
                     "            requests: {cpu: 100m, memory: 128Mi}\n"
                     "            limits: {cpu: 500m, memory: 128Mi}\n" + anchor)
                 text = text.replace("      restartPolicy: Never\n",
-                    "      restartPolicy: Never\n      priorityClassName: infra-observability\n")
+                    "      restartPolicy: Never\n      priorityClassName: infra-monitoring\n")
                 data = text.encode()
             patched.append((member.name, data))
     required = {"rancher/templates/secret.yaml", "rancher/templates/pre-upgrade-hook-job.yaml"}

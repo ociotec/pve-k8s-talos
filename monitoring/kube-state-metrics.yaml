@@ -148,7 +148,7 @@ spec:
         app: kube-state-metrics
         app.kubernetes.io/part-of: kube-state-metrics
     spec:
-      priorityClassName: infra-observability
+      priorityClassName: infra-monitoring
       serviceAccountName: kube-state-metrics
       containers:
         - name: kube-state-metrics

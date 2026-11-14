@@ -129,7 +129,7 @@ spec:
         prometheus.io/path: /metrics
         checksum/config: ${alloy_events_config_hash}
     spec:
-      priorityClassName: infra-observability
+      priorityClassName: infra-monitoring
       serviceAccountName: alloy-events
       terminationGracePeriodSeconds: 30
       securityContext:
