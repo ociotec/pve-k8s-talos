@@ -16,7 +16,8 @@ def node(name='worker'):
 class FakeKubernetes:
     def __init__(self,nodes):self.nodes={n['metadata']['name']:copy.deepcopy(n) for n in nodes};self.patches=[];self.commands=[]
     def verify_controller(self):pass
-    def get(self,args):return copy.deepcopy(self.nodes.get(args[1]))
+    def get(self,args):
+        return {'items': copy.deepcopy(list(self.nodes.values()))} if args == ['nodes'] else copy.deepcopy(self.nodes.get(args[1]))
     def patch(self,n,values):
         name=n['metadata']['name'];self.patches.append((name,values))
         for k,v in values.items():
@@ -38,6 +39,8 @@ class RacingKubernetes(M.Kubernetes):
         self.reads = 0
 
     def get(self, args):
+        if args == ['nodes']:
+            return {'items': [copy.deepcopy(self.current)]}
         self.reads += 1
         return copy.deepcopy(self.current)
 
@@ -64,6 +67,80 @@ class RacingKubernetes(M.Kubernetes):
         return ''
 
 class MaintenanceTest(unittest.TestCase):
+    def test_preflight_leaves_all_nodes_and_local_state_untouched(self):
+        k = FakeKubernetes([node('a'), node('b')])
+        before = copy.deepcopy(k.nodes)
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp)/'state.json'
+            M.preflight(k, state, 'owner', ['a', 'b'])
+            self.assertFalse(state.exists())
+        self.assertEqual(k.nodes, before)
+        self.assertEqual(k.patches, [])
+
+    def test_release_first_node_before_acquiring_second(self):
+        k = FakeKubernetes([node('a'), node('b')])
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp)/'state.json'
+            with self.assertRaisesRegex(ValueError, 'exactly one'):
+                M.begin(k, state, 'owner', ['a', 'b'], 600)
+            self.assertFalse(k.patches)
+            M.begin(k, state, 'owner', ['a'], 600)
+            self.assertEqual(k.nodes['b']['metadata']['annotations'], {})
+            with self.assertRaises(ValueError):
+                M.begin(k, state, 'owner', ['b'], 600)
+            M.finish(k, state, 'owner', ['a'])
+            M.begin(k, state, 'owner', ['b'], 600)
+            self.assertEqual(k.nodes['a']['metadata']['annotations'], {})
+            self.assertEqual(list(json.loads(state.read_text())['nodes']), ['b'])
+
+    def test_peer_incident_stops_renewal_and_next_intervention(self):
+        for incident in ('unready', 'cordon', 'fencing', 'maintenance'):
+            with self.subTest(incident=incident), tempfile.TemporaryDirectory() as tmp:
+                k = FakeKubernetes([node('a'), node('b')])
+                state = Path(tmp)/'state.json'
+                M.begin(k, state, 'owner', ['a'], 600)
+                peer = k.nodes['b']
+                if incident == 'unready':
+                    peer['status']['conditions'][0]['status'] = 'Unknown'
+                elif incident == 'cordon':
+                    peer['spec']['unschedulable'] = True
+                elif incident == 'fencing':
+                    peer['metadata']['annotations'][M.STATE] = 'fencing'
+                else:
+                    peer['metadata']['annotations'].update({M.OWNER: 'other', M.UNTIL:
+                        (M.timestamp() + dt.timedelta(minutes=5)).isoformat()})
+                before = copy.deepcopy(k.nodes)
+                with self.assertRaises(ValueError):
+                    M.renew(k, state, 'owner', 600)
+                self.assertEqual(k.nodes, before)
+                M.finish(k, state, 'owner', ['a'])
+                with self.assertRaises(ValueError):
+                    M.begin(k, state, 'owner', ['b'], 600)
+                self.assertEqual(k.nodes['b'], before['b'])
+
+    def test_registry_quarantine_keeps_peer_remediation_enabled(self):
+        k = FakeKubernetes([node('a'), node('b')])
+        for n in k.nodes.values():
+            n['spec']['unschedulable'] = True
+            n['metadata']['annotations'][M.REGISTRY_MAINTENANCE] = 'true'
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp)/'state.json'
+            M.begin(k, state, 'owner', ['a'], 600)
+            M.renew(k, state, 'owner', 600)
+            self.assertNotIn(M.UNTIL, k.nodes['b']['metadata']['annotations'])
+            self.assertNotIn(M.OWNER, k.nodes['b']['metadata']['annotations'])
+
+    def test_failed_recovery_cannot_release_the_selected_lease(self):
+        k = FakeKubernetes([node()])
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp)/'state.json'
+            M.begin(k, state, 'owner', ['worker'], 600)
+            k.nodes['worker']['status']['conditions'][0]['status'] = 'Unknown'
+            with self.assertRaisesRegex(ValueError, 'not recovered'):
+                M.finish(k, state, 'owner', ['worker'])
+            self.assertTrue(state.exists())
+            self.assertIn(M.UNTIL, k.nodes['worker']['metadata']['annotations'])
+
     def test_all_nodes_checked_before_any_are_marked(self):
         a=node('a');b=node('b');b['metadata']['annotations'][M.STATE]='fencing';k=FakeKubernetes([a,b])
         with tempfile.TemporaryDirectory() as tmp,self.assertRaisesRegex(ValueError,'recovery'):

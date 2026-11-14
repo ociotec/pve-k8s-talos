@@ -1788,7 +1788,7 @@ stage_secondary_network_worker_configs() {
           fi
           if [[ "${apply_mode}" == "no-reboot" ]]; then
             message "Applying Talos config on ${worker_name} without a reboot..."
-            talos_recovery_node="${worker_name}"
+            begin_node_maintenance "${worker_name}" || return 1
             if ! talosctl --talosconfig "${cluster_talosconfig_path}" \
               -n "${worker_ip}" apply-config --mode no-reboot \
               --file "${machineconfig_path}" 1>/dev/null; then
@@ -1803,7 +1803,7 @@ stage_secondary_network_worker_configs() {
               return 1
             fi
             wait_for_worker_reservation_recovery "${worker_name}" || return 1
-            talos_recovery_node=""
+            finish_node_maintenance "${worker_name}" || return 1
             continue
           fi
         fi
@@ -1883,14 +1883,19 @@ reconcile_secondary_network_workers() {
 
     boot_id_before="$(talos_boot_id "${worker_ip}" || true)"
     if [[ -z "${boot_id_before}" ]]; then
-      error "Failed to read boot ID from ${worker_name} before reset." >&2
+      error "Failed to read boot ID from ${worker_name} before graceful reboot." >&2
       exit 1
     fi
 
-    reset_vm_via_proxmox "${pve_node_name}" "${vm_id}"
+    begin_node_maintenance "${worker_name}" || return 1
+    kubectl --kubeconfig "${cluster_kubeconfig_path}" drain "${worker_name}" \
+      --ignore-daemonsets --delete-emptydir-data --timeout=600s || return 1
+    renew_node_maintenance || return 1
+    talosctl --talosconfig "${cluster_talosconfig_path}" -n "${worker_ip}" reboot --wait=false >/dev/null || return 1
 
     start="$(date +%s)"
     while true; do
+      renew_node_maintenance || return 1
       boot_id_after="$(talos_boot_id "${worker_ip}" || true)"
       if [[ -n "${boot_id_after}" && "${boot_id_after}" != "${boot_id_before}" ]]; then
         break
@@ -1901,7 +1906,7 @@ reconcile_secondary_network_workers() {
         break
       fi
       if (( $(date +%s) - start >= 600 )); then
-        error "Timed out waiting for ${worker_name} to reboot after staged secondary-network reset." >&2
+        error "Timed out waiting for ${worker_name} after its graceful secondary-network reboot." >&2
         exit 1
       fi
       sleep 5
@@ -1909,6 +1914,7 @@ reconcile_secondary_network_workers() {
 
     start="$(date +%s)"
     while node_has_staged_machineconfig "${worker_ip}"; do
+      renew_node_maintenance || return 1
       if (( $(date +%s) - start >= 600 )); then
         error "Timed out waiting for ${worker_name} to promote staged machineconfig." >&2
         exit 1
@@ -1918,6 +1924,7 @@ reconcile_secondary_network_workers() {
 
     start="$(date +%s)"
     while true; do
+      renew_node_maintenance || return 1
       if node_has_secondary_ip_active "${worker_ip}" "${worker_ip2}" && node_primary_default_route_ok "${worker_ip}"; then
         break
       fi
@@ -1929,6 +1936,9 @@ reconcile_secondary_network_workers() {
     done
 
     wait_for_node_ready "${worker_name}" 600
+    kubectl --kubeconfig "${cluster_kubeconfig_path}" uncordon "${worker_name}" >/dev/null || return 1
+    wait_for_worker_reservation_recovery "${worker_name}" || return 1
+    finish_node_maintenance "${worker_name}" || return 1
     message "${worker_name} recovered with ${worker_ip2} active on the secondary interface."
   done
 }
@@ -1969,10 +1979,11 @@ handle_deploy_exit() {
   if node_resize_pending; then
     error "Node resize is unfinished; preserving maintenance state and workload baseline. Resume this deployment from the same PC."
     [[ "${exit_code}" -ne 0 ]] || exit_code=1
-  elif [[ "${exit_code}" -ne 0 && -n "${talos_recovery_node:-}" \
-    && -n "${node_maintenance_state:-}" && -f "${node_maintenance_state}" ]]; then
-    kubectl --kubeconfig "${cluster_kubeconfig_path}" cordon "${talos_recovery_node}" >/dev/null \
-      || error "Failed to cordon the node after its recovery failure." >&2
+  elif [[ "${exit_code}" -ne 0 && -n "${node_maintenance_state:-}" && -f "${node_maintenance_state}" ]]; then
+    if [[ -n "${talos_recovery_node:-}" ]]; then
+      kubectl --kubeconfig "${cluster_kubeconfig_path}" cordon "${talos_recovery_node}" >/dev/null \
+        || error "Failed to cordon the node after its recovery failure." >&2
+    fi
     error "Talos node recovery failed; preserving its cordon, workload baseline and bounded maintenance lease. Recover the node before retrying."
   elif [[ -n "${node_maintenance_state:-}" && -f "${node_maintenance_state}" ]]; then
     python3 "${script_dir}/node-maintenance.py" finish --kubeconfig "${cluster_kubeconfig_path}" \
@@ -3630,6 +3641,7 @@ reconcile_talos_registry_auth() {
   for line in "${workers[@]}" "${controlplanes[@]}" "${primary[@]}"; do
     IFS='|' read -r node_name node_ip node_role <<<"${line}"
     wait_for_all_kubernetes_nodes_ready 600 || return 1
+    begin_node_maintenance "${node_name}" || return 1
     python3 "${script_dir}/reconcile-registry-auth.py" \
       --talosconfig "${cluster_talosconfig_path}" \
       --kubeconfig "${cluster_kubeconfig_path}" \
@@ -3638,8 +3650,41 @@ reconcile_talos_registry_auth() {
       wait_for_controlplane_etcd_ready "${node_name}" "${node_ip}" 600 || return 1
     fi
     wait_for_all_kubernetes_nodes_ready 600 || return 1
+    finish_node_maintenance "${node_name}" || return 1
   done
   rm -f "${workload_baseline}"
+}
+
+begin_node_maintenance() {
+  local node_name="$1"
+  if [[ -n "${node_maintenance_state:-}" ]]; then
+    python3 "${script_dir}/node-maintenance.py" begin --kubeconfig "${cluster_kubeconfig_path}" \
+      --state "${node_maintenance_state}" --owner "${node_maintenance_owner}" --node "${node_name}" || return 1
+  fi
+  talos_recovery_node="${node_name}"
+  node_maintenance_renewed_at="$(date +%s)"
+}
+
+renew_node_maintenance() {
+  if [[ -n "${node_maintenance_state:-}" ]] \
+    && (( $(date +%s) - ${node_maintenance_renewed_at:-0} >= 60 )); then
+    python3 "${script_dir}/node-maintenance.py" renew --kubeconfig "${cluster_kubeconfig_path}" \
+      --state "${node_maintenance_state}" --owner "${node_maintenance_owner}" || return 1
+    node_maintenance_renewed_at="$(date +%s)"
+  fi
+}
+
+finish_node_maintenance() {
+  local node_name="$1"
+  if [[ -n "${node_maintenance_state:-}" ]]; then
+    if [[ ! -f "${node_maintenance_state}" ]]; then
+      error "Node maintenance state disappeared before recovery completed." >&2
+      return 1
+    fi
+    python3 "${script_dir}/node-maintenance.py" finish --kubeconfig "${cluster_kubeconfig_path}" \
+      --state "${node_maintenance_state}" --owner "${node_maintenance_owner}" --node "${node_name}" || return 1
+  fi
+  talos_recovery_node=""
 }
 
 wait_for_worker_reservation_recovery() {
@@ -3762,7 +3807,7 @@ reconcile_staged_talos_nodes() {
         --state "${node_maintenance_state}" --owner "${node_maintenance_owner}"
     fi
     apply_mode="$(node_machineconfig_apply_mode "${node_ip}" "${machineconfig_path}")" || return 1
-    talos_recovery_node="${node_name}"
+    begin_node_maintenance "${node_name}" || return 1
     if [[ "${apply_mode}" == "no-reboot" ]]; then
       message "Applying Talos config on ${node_name} without a reboot..."
       talosctl --talosconfig "${cluster_talosconfig_path}" -n "${node_ip}" \
@@ -3827,7 +3872,7 @@ reconcile_staged_talos_nodes() {
       python3 "${script_dir}/check-image-unpack-durability.py" --talosconfig "${cluster_talosconfig_path}" \
         --node-address "${node_ip}" --node-name "${node_name}"
     fi
-    talos_recovery_node=""
+    finish_node_maintenance "${node_name}" || return 1
     message "${node_name} recovered with the desired Talos machine configuration."
   done
 }
@@ -3992,6 +4037,7 @@ reconcile_talos_discovery_service_steady_state() {
       return 1
     fi
 
+    begin_node_maintenance "${node_name}" || return 1
     run talosctl --talosconfig "${cluster_talosconfig_path}" \
       -n "${node_ip}" \
       apply-config \
@@ -4011,6 +4057,12 @@ reconcile_talos_discovery_service_steady_state() {
       fi
       sleep 2
     done
+    wait_for_all_kubernetes_nodes_ready 600 || return 1
+    if [[ -n "${root_workload_baseline:-}" ]]; then
+      python3 "${script_dir}/check-workload-health.py" --kubeconfig "${cluster_kubeconfig_path}" \
+        --baseline "${root_workload_baseline}" "${workload_health_args[@]}" || return 1
+    fi
+    finish_node_maintenance "${node_name}" || return 1
   done
 
   if (( changed == 0 )); then
@@ -4154,13 +4206,17 @@ reboot_nodes_with_pending_kubelet_max_pods() {
     local node_ip="${pending_ips[idx]}"
     local verify_start
 
+    begin_node_maintenance "${node_name}" || return 1
+    kubectl --kubeconfig "${cluster_kubeconfig_path}" drain "${node_name}" \
+      --ignore-daemonsets --delete-emptydir-data --timeout=600s || return 1
+    renew_node_maintenance || return 1
     if ! talosctl -n "${node_ip}" reboot; then
       error "Failed to trigger reboot on ${node_name} (${node_ip})." >&2
-      continue
+      return 1
     fi
     if ! kubectl wait --for=condition=Ready "node/${node_name}" --timeout=20m 1>/dev/null; then
       error "Node ${node_name} did not become Ready within timeout after reboot." >&2
-      continue
+      return 1
     fi
 
     verify_start="$(date +%s)"
@@ -4172,10 +4228,23 @@ reboot_nodes_with_pending_kubelet_max_pods() {
       fi
       if (( $(date +%s) - verify_start >= 300 )); then
         error "Node ${node_name} is Ready but still reports MAX_PODS=${current_max_pods:-unknown} (expected ${desired_max_pods})." >&2
-        break
+        return 1
       fi
       sleep 5
     done
+    kubectl --kubeconfig "${cluster_kubeconfig_path}" uncordon "${node_name}" >/dev/null || return 1
+    wait_for_all_kubernetes_nodes_ready 600 || return 1
+    if grep -Eq '^[[:space:]]*type:[[:space:]]*worker[[:space:]]*$' \
+      "${cluster_root_workspace}/machineconfig-${node_name}.yaml"; then
+      wait_for_worker_reservation_recovery "${node_name}" || return 1
+    else
+      wait_for_controlplane_etcd_ready "${node_name}" "${node_ip}" 600 || return 1
+    fi
+    if [[ -n "${root_workload_baseline:-}" ]]; then
+      python3 "${script_dir}/check-workload-health.py" --kubeconfig "${cluster_kubeconfig_path}" \
+        --baseline "${root_workload_baseline}" "${workload_health_args[@]}" || return 1
+    fi
+    finish_node_maintenance "${node_name}" || return 1
   done
 }
 
@@ -4350,7 +4419,7 @@ else
     while IFS='|' read -r maintenance_node maintenance_ip; do
       node_maintenance_args+=(--node "${maintenance_node}")
     done < <(cluster_node_name_ip_pairs)
-    python3 "${script_dir}/node-maintenance.py" begin --kubeconfig "${cluster_kubeconfig_path}" \
+    python3 "${script_dir}/node-maintenance.py" preflight --kubeconfig "${cluster_kubeconfig_path}" \
       --state "${node_maintenance_state}" --owner "${node_maintenance_owner}" "${node_maintenance_args[@]}"
     root_workload_baseline="${cluster_git_dir}/pve-k8s-talos-node-workloads.json"
     prepare_root_workload_baseline
@@ -4451,9 +4520,13 @@ else
   if [[ -n "${node_maintenance_state:-}" && -f "${node_maintenance_state}" ]]; then
     python3 "${script_dir}/node-maintenance.py" finish --kubeconfig "${cluster_kubeconfig_path}" \
       --state "${node_maintenance_state}" --owner "${node_maintenance_owner}"
-    if [[ ! -f "${node_maintenance_state}" && -n "${root_workload_baseline:-}" ]]; then
-      rm -f "${root_workload_baseline}"
+    if [[ -f "${node_maintenance_state}" ]]; then
+      error "Node maintenance is unfinished; refusing to record a successful Talos deployment." >&2
+      exit 1
     fi
+  fi
+  if [[ ! -f "${node_maintenance_state:-}" && -n "${root_workload_baseline:-}" ]]; then
+    rm -f "${root_workload_baseline}"
   fi
   message "k8s cluster is up and running. Current nodes:"
   "${script_dir}/render-k8s-nodes.sh" --kubeconfig "${active_kubeconfig_path}"

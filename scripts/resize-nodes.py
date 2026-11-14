@@ -211,11 +211,25 @@ class Resizer:
         return wanted
 
     def renew_maintenance(self):
+        if not Path(self.args.maintenance_state).exists():
+            return  # Planning and workload checks do not suspend remediation.
         if self.maintenance_renewed_at is None or time.monotonic() - self.maintenance_renewed_at >= 60:
             self.command(['python3', str(Path(__file__).with_name('node-maintenance.py')), 'renew',
                           '--kubeconfig', self.args.kubeconfig, '--state', self.args.maintenance_state,
                           '--owner', self.args.maintenance_owner])
             self.maintenance_renewed_at = time.monotonic()
+
+    def begin_maintenance(self, name):
+        self.command(['python3', str(Path(__file__).with_name('node-maintenance.py')), 'begin',
+                      '--kubeconfig', self.args.kubeconfig, '--state', self.args.maintenance_state,
+                      '--owner', self.args.maintenance_owner, '--node', name])
+        self.maintenance_renewed_at = None
+
+    def finish_maintenance(self, name):
+        self.command(['python3', str(Path(__file__).with_name('node-maintenance.py')), 'finish',
+                      '--kubeconfig', self.args.kubeconfig, '--state', self.args.maintenance_state,
+                      '--owner', self.args.maintenance_owner, '--node', name])
+        self.maintenance_renewed_at = None
 
     def workloads(self):
         self.renew_maintenance()
@@ -305,6 +319,7 @@ class Resizer:
         self.select_endpoint(excluded=name)
         self.renew_maintenance()
         entry = json.loads(self.journal.read_text()) if self.journal.exists() else None
+        resuming = bool(entry)
         if not entry:
             self.node_health()
             self.workloads()
@@ -317,9 +332,12 @@ class Resizer:
             if active != persistent:
                 raise ResizeError(f'{name}: unrelated staged Talos configuration must be resolved first.')
             entry = {'node': name, 'desired': self.desired(name), 'boot_id': node['status']['nodeInfo']['bootID'], 'phase': 'prepared'}
+            self.begin_maintenance(name)
             self.save(entry)
         if entry['node'] != name or entry['desired'] != self.desired(name):
             raise ResizeError('Pending resize journal does not match the current configuration.')
+        if resuming:
+            self.begin_maintenance(name)
         self.node_health(excluded=name)
         if entry['phase'] == 'prepared':
             self.message(f'{name}: draining (PDBs enforced).')
@@ -354,6 +372,7 @@ class Resizer:
         self.release(name)
         self.workloads()
         self.node_health()
+        self.finish_maintenance(name)
         self.journal.unlink()
         self.message(f'{name}: recovered; safe to proceed to the next node.')
 

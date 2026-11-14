@@ -69,6 +69,9 @@ class WorkerOrderTest(unittest.TestCase):
                             "machine:\n  type: " + ("controlplane" if role == "cp" else "worker") + "\n")
                 harness = r'''
 set -euo pipefail
+begin_node_maintenance() { :; }
+finish_node_maintenance() { :; }
+renew_node_maintenance() { :; }
 cluster_out_dir="$FIXTURES"
 cluster_root_workspace="$FIXTURES"
 cluster_talosconfig_path=unused
@@ -120,6 +123,9 @@ class WorkerConfigTest(unittest.TestCase):
             Path(directory, "worker.yaml").write_text("machine: {}\n")
             harness = r'''
 set -euo pipefail
+begin_node_maintenance() { :; }
+finish_node_maintenance() { :; }
+renew_node_maintenance() { :; }
 cluster_talosconfig_path=unused
 error() { echo "$*" >&2; }
 message() { :; }
@@ -211,6 +217,59 @@ talosctl() {
                 result, calls = self.run_worker(**setting)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertNotIn("staged", calls)
+
+
+class PendingPodCapacityTest(unittest.TestCase):
+    def reconcile(self, failure=''):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ('worker-01', 'worker-02'):
+                root.joinpath(f'machineconfig-{name}.yaml').write_text('machine:\n  type: worker\n')
+            harness = r'''
+set -euo pipefail
+cluster_kubeconfig_path=unused
+cluster_root_workspace="$FIXTURES"
+talos_max_pods() { echo 250; }
+message() { :; }
+error() { echo "$*" >&2; }
+date() { local n=0; [[ ! -f "$FIXTURES/clock" ]] || read -r n < "$FIXTURES/clock"; echo "$((n+301))" > "$FIXTURES/clock"; echo "$n"; }
+begin_node_maintenance() { echo "begin $1" >> "$FIXTURES/calls"; }
+finish_node_maintenance() { echo "finish $1" >> "$FIXTURES/calls"; }
+renew_node_maintenance() { :; }
+wait_for_all_kubernetes_nodes_ready() { :; }
+wait_for_worker_reservation_recovery() { echo "stable $1" >> "$FIXTURES/calls"; }
+kubectl() {
+  if [[ "$*" == 'get nodes '* ]]; then
+    printf 'worker-01|192.0.2.10|110\nworker-02|192.0.2.11|110\n'
+  elif [[ "$*" == 'get node '* ]]; then
+    if [[ "$FAILURE" == capacity ]]; then echo 110; else echo 250; fi
+  else
+    echo "$*" >> "$FIXTURES/calls"
+    [[ "$FAILURE" != drain || "$*" != *'drain '* ]]
+  fi
+}
+talosctl() { echo "$*" >> "$FIXTURES/calls"; [[ "$FAILURE" != reboot ]]; }
+'''
+            result = subprocess.run(['bash', '-c', harness + function('reboot_nodes_with_pending_kubelet_max_pods')
+                                     + '\nreboot_nodes_with_pending_kubelet_max_pods unused'],
+                                    env={**os.environ, 'FIXTURES': directory, 'FAILURE': failure},
+                                    capture_output=True, text=True)
+            return result, root.joinpath('calls').read_text().splitlines()
+
+    def test_legacy_reboots_release_one_node_before_starting_another(self):
+        result, calls = self.reconcile()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertLess(calls.index('begin worker-01'), next(i for i, c in enumerate(calls) if 'drain worker-01' in c))
+        self.assertLess(calls.index('stable worker-01'), calls.index('finish worker-01'))
+        self.assertLess(calls.index('finish worker-01'), calls.index('begin worker-02'))
+
+    def test_failure_retains_first_node_and_never_touches_the_next(self):
+        for failure in ('drain', 'reboot', 'capacity'):
+            with self.subTest(failure=failure):
+                result, calls = self.reconcile(failure)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn('finish worker-01', calls)
+                self.assertFalse(any('worker-02' in c or '192.0.2.11' in c for c in calls))
 
 
 class CompatibilityCheckTest(unittest.TestCase):
@@ -307,6 +366,17 @@ class StagedConfigReconciliationTest(unittest.TestCase):
                 root.joinpath(f'machineconfig-{name}.yaml').write_text('machine:\n  type: worker\n')
             harness = r'''
 set -euo pipefail
+begin_node_maintenance() {
+  [[ ! -f "$FIXTURES/lease" ]] || return 1
+  echo "$1" > "$FIXTURES/lease"
+  echo "begin $1" >> "$FIXTURES/calls"
+}
+finish_node_maintenance() {
+  [[ "$(cat "$FIXTURES/lease")" == "$1" ]] || return 1
+  echo "finish $1" >> "$FIXTURES/calls"
+  rm "$FIXTURES/lease"
+}
+renew_node_maintenance() { :; }
 cluster_out_dir="$FIXTURES"
 cluster_root_workspace="$FIXTURES"
 cluster_kubeconfig_path=unused
@@ -349,7 +419,9 @@ talosctl() {
         self.assertFalse(any(' reboot ' in c or ' drain ' in c for c in calls))
         first = calls.index('stable worker-01')
         second = next(i for i, c in enumerate(calls) if '192.0.2.11' in c)
-        self.assertLess(first, second)
+        self.assertLess(first, calls.index('finish worker-01'))
+        self.assertLess(calls.index('finish worker-01'), calls.index('begin worker-02'))
+        self.assertLess(calls.index('begin worker-02'), second)
         self.assertTrue(all('--mode no-reboot' in c for c in calls if 'apply-config' in c))
 
     def test_reboot_changes_drain_and_recover_each_worker(self):
@@ -368,6 +440,8 @@ talosctl() {
             result, calls = self.sequence(mode=mode, failure='worker-01')
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse(any('192.0.2.11' in c or 'worker-02' in c for c in calls))
+            self.assertIn('begin worker-01', calls)
+            self.assertNotIn('finish worker-01', calls)
 
     def run_reconcile(self, persistent="active configuration", api_result="0"):
         with tempfile.TemporaryDirectory() as directory:
@@ -375,6 +449,9 @@ talosctl() {
             Path(directory, "machineconfig-worker.yaml").write_text("machine:\n  type: worker\n")
             harness = r'''
 set -euo pipefail
+begin_node_maintenance() { :; }
+finish_node_maintenance() { :; }
+renew_node_maintenance() { :; }
 cluster_out_dir="$FIXTURES"
 cluster_root_workspace="$FIXTURES"
 cluster_talosconfig_path=unused

@@ -562,6 +562,9 @@ class DeployOrderTest(unittest.TestCase):
                 Path(directory, "machineconfig-" + name + ".yaml").write_text("machine:\n  type: " + role + "\n")
             harness = r'''
 set -euo pipefail
+begin_node_maintenance() { :; }
+finish_node_maintenance() { :; }
+renew_node_maintenance() { :; }
 script_dir=unused
 cluster_root_workspace="$FIXTURES"
 cluster_talosconfig_path=unused

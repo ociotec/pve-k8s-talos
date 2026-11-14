@@ -1,6 +1,28 @@
 # Automatic worker resource reservations
 
-Status: Implemented; deployment validation pending
+Status: Reservations and per-node maintenance deployed in development. Sequential
+leases verified; maintenance during changed configuration or VM sizing awaits a
+live rollout.
+
+## Delivery status
+
+| Item | Status |
+| --- | --- |
+| Automatic formulas, preserved defaults and optional sample overrides | Implemented |
+| Talos integration and sequential worker recovery gates | Deployed and validated in development |
+| Initial rollout | Four workers updated sequentially without VM reboots; reservations, Allocatable and workload recovery verified |
+| Maintenance suppression scoped to the active node | Deployed in development; four workers and three control planes observed sequentially, with at most one active lease |
+| Maintenance during changed configuration, reboot or VM resize | Automated tests passed; live validation pending |
+| Source and runtime-state consolidation | Pending |
+| Medium-environment rollout and historical sizing review | Pending |
+
+The initial rollout used a deployment-wide maintenance lease. A follow-up
+development deployment verified per-node lease acquisition and release during
+registry reconciliation, with no overlaps or remaining leases. All seven nodes
+remained Ready and boot IDs were unchanged. Existing configuration already
+matched the desired state, so this run did not exercise config activation,
+drain, reboot or VM resize. Short leases can fall between monitoring scrapes;
+direct Kubernetes observation confirmed the sequence.
 
 Protect Talos and Kubernetes node services by calculating worker reservations
 from declared VM memory and configured pod density. Existing deployments adopt
@@ -167,6 +189,25 @@ select hot activation or graceful reboot. Before the next worker changes, verify
 configuration, reservations, Allocatable and workload health for 30 stable seconds.
 Keep one workload baseline for the whole run. Failures stop the sequence and
 preserve the affected node's maintenance protection and recovery baseline.
+
+```text
+Read-only cluster preflight
+          |
+Begin maintenance for node N only
+          |
+Apply -> recover -> verify stability
+          |
+Release maintenance for node N
+          |
+Next node
+```
+
+Other nodes retain automatic remediation throughout. A peer failure or ongoing
+remediation blocks lease acquisition or renewal and prevents the next planned
+intervention. Failure retains only the affected node's bounded lease and local
+recovery state. Scheduling quarantine for pending registry credentials is a
+separate guard and does not disable peer remediation.
+
 Hot activation lets Talos restart affected services without draining pods or
 rebooting the VM. A required reboot uses drain, PDB checks and graceful Talos
 reboot. VM hardware changes retain the existing sequential resize procedure.

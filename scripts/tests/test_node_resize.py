@@ -41,11 +41,17 @@ def worker_plan(count=2):
 def arguments(workspace):
     return argparse.Namespace(workspace=workspace, kubeconfig='unused', talosconfig='unused',
                               stable_seconds=0, timeout=1, workload_baseline='baseline.json',
-                              maintenance_state='maintenance.json', maintenance_owner='deployment')
+                              maintenance_state=str(Path(workspace) / 'maintenance.json'), maintenance_owner='deployment')
 
 
 class OfflineResizer(M.Resizer):
     def renew_maintenance(self):
+        pass
+
+    def begin_maintenance(self, name):
+        pass
+
+    def finish_maintenance(self, name):
         pass
 
     def workloads(self):
@@ -252,6 +258,7 @@ class Decisions(unittest.TestCase):
     def test_maintenance_is_renewed_during_long_sequences(self):
         with tempfile.TemporaryDirectory() as tmp:
             r = M.Resizer(arguments(tmp))
+            Path(r.args.maintenance_state).write_text('{}')
             calls = []
             r.command = lambda command: calls.append(command)
             for now in (100, 120, 180):
@@ -262,6 +269,7 @@ class Decisions(unittest.TestCase):
     def test_maintenance_failure_aborts_before_any_infrastructure_operations(self):
         with tempfile.TemporaryDirectory() as tmp:
             r = M.Resizer(arguments(tmp))
+            Path(r.args.maintenance_state).write_text('{}')
             def fail(command):
                 self.assertIn('renew', command)
                 raise M.ResizeError('maintenance ownership changed')
@@ -281,6 +289,9 @@ class WorkerFlow(OfflineResizer):
                        for n in self.data['variables']['vms']['value'] if n.startswith('wk-')}
         self.stopped = set()
 
+    begin_maintenance = M.Resizer.begin_maintenance
+    finish_maintenance = M.Resizer.finish_maintenance
+
     def message(self, text): pass
     def select_endpoint(self, excluded=None): self.endpoint = '192.0.2.1'
     def node_health(self, excluded=None): return list(self.guests.values()), []
@@ -288,6 +299,8 @@ class WorkerFlow(OfflineResizer):
     def wait(self, check, description, stable=0): check()
 
     def command(self, command, timeout=60):
+        if command[0] == 'python3' and command[1].endswith('node-maintenance.py'):
+            self.events.append((command[2], command[command.index('--node') + 1]))
         for action in ('drain', 'uncordon'):
             if action in command:
                 name = command[command.index(action) + 1]
@@ -339,10 +352,12 @@ class WorkerSequence(unittest.TestCase):
             r = WorkerFlow(arguments(tmp))
             r.data['variables']['constants']['value']['talos'] = {}  # No CP resource patches required.
             r.run()
-            self.assertEqual(r.events[:5], [('drain', 'wk-1'), ('shutdown', 'wk-1'), ('apply', 'wk-1'),
+            self.assertEqual(r.events[:6], [('begin', 'wk-1'), ('drain', 'wk-1'), ('shutdown', 'wk-1'), ('apply', 'wk-1'),
                                             ('uncordon', 'wk-1'), ('services', 'wk-1')])
             self.assertLess(r.events.index(('services', 'wk-1')), r.events.index(('drain', 'wk-2')))
-            self.assertIn(('services', 'wk-2'), r.events)
+            self.assertLess(r.events.index(('services', 'wk-1')), r.events.index(('finish', 'wk-1')))
+            self.assertLess(r.events.index(('finish', 'wk-1')), r.events.index(('begin', 'wk-2')))
+            self.assertIn(('finish', 'wk-2'), r.events)
             self.assertFalse(r.journal.exists())
 
     def test_failure_never_touches_the_next_worker(self):
@@ -351,6 +366,8 @@ class WorkerSequence(unittest.TestCase):
                 r = WorkerFlow(arguments(tmp), failure=failure)
                 with self.assertRaises(M.ResizeError): r.run()
                 self.assertTrue(r.journal.exists())
+                self.assertIn(('begin', 'wk-1'), r.events)
+                self.assertNotIn(('finish', 'wk-1'), r.events)
                 self.assertFalse(any(name == 'wk-2' for _, name in r.events))
                 if failure == 'drain': self.assertFalse(any(action == 'shutdown' for action, _ in r.events))
                 if failure in ('capacity', 'memory'): self.assertFalse(any(action == 'uncordon' for action, _ in r.events))
@@ -363,7 +380,7 @@ class WorkerSequence(unittest.TestCase):
             r.events.clear()
             r.data['resource_changes'][0]['change']['before']['started'] = False
             r.run()
-            self.assertEqual(r.events[0], ('apply', 'wk-1'))
+            self.assertEqual(r.events[:2], [('begin', 'wk-1'), ('apply', 'wk-1')])
             self.assertLess(r.events.index(('services', 'wk-1')), r.events.index(('drain', 'wk-2')))
             self.assertFalse(r.journal.exists())
 
@@ -384,7 +401,9 @@ class WorkerSequence(unittest.TestCase):
             for name in ('cp-2', 'cp-3'): del data['variables']['vms']['value'][name]
             r = WorkerFlow(arguments(tmp), data=data)
             r.run()
-            self.assertIn(('services', 'wk-2'), r.events)
+            self.assertLess(r.events.index(('services', 'wk-1')), r.events.index(('finish', 'wk-1')))
+            self.assertLess(r.events.index(('finish', 'wk-1')), r.events.index(('begin', 'wk-2')))
+            self.assertIn(('finish', 'wk-2'), r.events)
 
     def test_mixed_resize_keeps_control_plane_leader_last_before_workers(self):
         class Ordered(WorkerFlow):
@@ -462,10 +481,10 @@ python3() {
                 if journal: (d / journal).write_text('{}')
                 result = self.run_shell(d, '(exit 1) || handle_deploy_exit')
                 self.assertEqual(result.returncode, 1, result.stderr)
-                self.assertEqual((d / 'maintenance.json').exists(), bool(journal))
-                self.assertEqual((d / 'baseline.json').exists(), bool(journal))
+                self.assertTrue((d / 'maintenance.json').exists())
+                self.assertTrue((d / 'baseline.json').exists())
                 calls = (d / 'calls').read_text()
-                self.assertEqual(' finish ' in calls, not bool(journal))
+                self.assertNotIn(' finish ', calls)
                 self.assertIn('persist failed', calls)
 
     def test_failed_talos_recovery_does_not_release_maintenance_or_cordon(self):

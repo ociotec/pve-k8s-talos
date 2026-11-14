@@ -262,6 +262,14 @@ beyond a configured threshold. Detection includes these circuit breakers:
 - Pause during declared maintenance.
 - Rate-limit repeated remediation attempts.
 
+Planned Talos maintenance uses a read-only cluster preflight, then acquires a
+bounded lease for only the node being changed. It releases that lease after
+recovery before selecting the next node. Other workers retain automatic
+remediation. An unhealthy peer, active recovery or conflicting maintenance
+blocks acquisition or renewal; a failed intervention retains its lease and
+recovery state until recovery or expiry. Registry scheduling quarantine does
+not suppress automatic remediation on peer nodes.
+
 The detector should watch Kubernetes node state directly. Monitoring alerts are
 useful for visibility but should not be the control signal.
 
