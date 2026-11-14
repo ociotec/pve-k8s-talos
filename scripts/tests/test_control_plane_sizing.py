@@ -31,7 +31,7 @@ def fleet(workers=3, cp_count=3, cp_cpu=4, cp_memory=8192, worker_cpu=4, worker_
     }
     vms = {f'cp-{i}': {'node_name': 'host', 'vm_id': 100+i, 'ip': f'192.0.2.{i+1}', 'type': 'cp'} for i in range(cp_count)}
     vms.update({f'wk-{i}': {'node_name': 'host', 'vm_id': 200+i, 'ip': f'198.51.100.{i+1}', 'type': 'wk'} for i in range(workers)})
-    return {'constants': {'talos': {}}, 'vms': vms, 'resources': resources}
+    return {'constants': {'talos': {'version': 'v1.13.0'}}, 'vms': vms, 'resources': resources}
 
 
 @unittest.skipUnless(shutil.which('tofu'), 'OpenTofu is required')
@@ -263,7 +263,7 @@ class ControlPlaneSizingTest(unittest.TestCase):
     def test_actual_root_preconditions_reject_capacity_and_invalid_forced_input(self):
         workspace = self.cluster / 'out/root'
         workspace.mkdir(parents=True)
-        for name in ['vms_variables.tf', 'control-plane-sizing.tf']:
+        for name in ['vms_variables.tf', 'control-plane-sizing.tf', 'worker-reservations.tf']:
             (workspace / name).symlink_to(ROOT / name)
         lifecycle = (ROOT / 'vms_pve.tf').read_text().split('  lifecycle {', 1)[1].split('\n  name ', 1)[0]
         (workspace / 'gate.tf').write_text('resource "terraform_data" "gate" {\n  lifecycle {' + lifecycle + '\n}\n')
@@ -290,7 +290,7 @@ class ControlPlaneSizingTest(unittest.TestCase):
         repository = self.cluster / version
         for name in ['scripts', 'templates', 'patches']:
             shutil.copytree(ROOT / name, repository / name, ignore=shutil.ignore_patterns('__pycache__'))
-        for name in ['main.tf', 'providers.tf', 'vms_pve.tf', 'vms_variables.tf', 'control-plane-sizing.tf', '.terraform.lock.hcl']:
+        for name in ['main.tf', 'providers.tf', 'vms_pve.tf', 'vms_variables.tf', 'control-plane-sizing.tf', 'worker-reservations.tf', '.terraform.lock.hcl']:
             shutil.copy(ROOT / name, repository / name)
         cluster = repository / 'clusters/check'
         cluster.mkdir(parents=True)

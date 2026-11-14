@@ -419,6 +419,7 @@ state_sync_finalized=false
 error() { echo "$*" >&2; }
 report_current_section_failure() { :; }
 persist_cluster_runtime_state() { echo "persist $*" >> "$FIXTURES/calls"; }
+kubectl() { echo "$*" >> "$FIXTURES/calls"; }
 python3() {
   echo "$*" >> "$FIXTURES/calls"
   if [[ "$*" == *' finish '* ]]; then rm "$node_maintenance_state"; fi
@@ -466,6 +467,20 @@ python3() {
                 calls = (d / 'calls').read_text()
                 self.assertEqual(' finish ' in calls, not bool(journal))
                 self.assertIn('persist failed', calls)
+
+    def test_failed_talos_recovery_does_not_release_maintenance_or_cordon(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / 'baseline.json').write_text('{}')
+            (d / 'maintenance.json').write_text('{}')
+            result = self.run_shell(d, 'talos_recovery_node=worker\n(exit 1) || handle_deploy_exit')
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertTrue((d / 'maintenance.json').exists())
+            self.assertTrue((d / 'baseline.json').exists())
+            calls = (d / 'calls').read_text()
+            self.assertNotIn(' finish ', calls)
+            self.assertIn('cordon worker', calls)
+            self.assertIn('persist failed', calls)
 
 
 if __name__=='__main__':unittest.main()

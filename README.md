@@ -312,6 +312,32 @@ To apply only the Talos/Kubernetes changes after reviewing the calculated sizing
 direnv exec . ../../scripts/deploy.sh --talos-only
 ```
 
+### Automatic worker host reservations
+
+Workers automatically reserve CPU and memory for Talos and kubelet/runtime using
+VM memory and effective `talos.max_pods`. No constants changes are required.
+The formulas, optional controls and rollout criteria are in
+[Automatic worker resource reservations](docs/worker-resource-reservations.md).
+Control-plane reservations and application requests/limits are unchanged.
+
+From `clusters/<cluster>`, inspect the provider-free calculation with:
+
+```bash
+direnv exec . python3 ../../scripts/worker-reservations.py
+```
+
+Deploy reservations with the normal Talos/Kubernetes phase:
+
+```bash
+direnv exec . ../../scripts/deploy.sh --talos-only
+```
+
+This reconciles all pending Talos and VM changes. Talos dry runs determine whether
+configuration can activate without reboot. Workers recover sequentially; each
+must publish the expected reservations and Allocatable and remain healthy with
+its workloads for 30 seconds before the next worker changes. A failure stops the
+sequence and preserves maintenance protection for recovery.
+
 ### Resize existing nodes
 
 Use `scripts/deploy.sh` when increasing control-plane or worker VM CPU or RAM.
@@ -416,7 +442,11 @@ When `discovery_service_bootstrap_only` is omitted, it defaults to `"true"` if `
 
 When the public discovery service is disabled, the generated root workspace applies an early `system:talos-nodes` RBAC patch that grants Talos node identities `get`, `list`, and `watch` on Kubernetes `Node` resources. This keeps Talos' Kubernetes-backed discovery usable on modern Kubernetes releases where `system:node:*` identities are otherwise restricted from listing all nodes. The patch is applied immediately after the root workspace obtains `kubeconfig`, before the Talos cluster health gate.
 
-Workers with an active secondary network apply compatible Talos configuration changes without a reboot when their network configuration is unchanged. Network changes, existing staged configurations, and changes Talos identifies as requiring a reboot retain sequential reboot reconciliation. Failed or unrecognized compatibility checks stop deployment.
+Talos configuration activates one node at a time. A successful Talos dry run
+selects hot activation or a drained, graceful reboot, including for previously
+staged configurations. Workers must pass reservation, Allocatable and workload
+stability checks before the next active change. Failed or unrecognized
+compatibility checks stop deployment.
 
 For dedicated external Ceph connectivity, follow the
 [worker network migration workflow](docs/agent-workflows/migrate-worker-ceph-network.md).
@@ -489,11 +519,11 @@ That example renders Talos YAML using `skipFallback: true`, `overridePath: true`
 On existing clusters, `deploy.sh --talos-only` verifies registry authentication
 with a temporary kubelet pod (`imagePullPolicy: Always`, no pull secrets).
 On Talos 1.13 and earlier, the checker reads `cri/conf.d/01-registries.part`.
-Static CRI credentials need a node reboot when newer than the running process;
-if this pending change was applied outside the staged configuration workflow,
-the registry checker stops before draining unless `--reboot-for-registry-auth`
-is explicit. Normal staged root activation already performs its planned rolling
-reboots before the independent registry check.
+Static CRI credentials need a node reboot when newer than the running process.
+If credentials remain pending after Talos activation, including after a hot
+apply, the independent registry checker stops before draining unless
+`--reboot-for-registry-auth` is explicit. Nodes that followed the graceful reboot
+path already load the updated credentials during that reboot.
 
 Starting with Talos **1.14.0**, registry settings are merged in memory into
 `cri/conf.d/cri.toml`; the separate registry fragment is no longer published.

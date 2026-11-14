@@ -73,6 +73,16 @@ constants = {
     # Optional kubelet max pods per node. It cannot exceed the usable IPs in the node PodCIDR.
     # Leave empty to keep Kubernetes default (110).
     "max_pods" = ""
+    # Worker host budgets are automatic; optional formula controls only.
+    # These are totals, not additions to Talos defaults. See docs/worker-resource-reservations.md.
+    # "worker_system_reserved_cpu" = "250m"
+    # "worker_system_reserved_memory_min" = "512Mi"
+    # "worker_system_reserved_memory_percent" = "1"
+    # "worker_kube_reserved_cpu_per_pod_millicores" = "2"
+    # "worker_kube_reserved_memory_per_pod_mib" = "5"
+    # "worker_eviction_memory_min" = "512Mi"
+    # "worker_eviction_memory_percent" = "1"
+    # "worker_eviction_memory_max" = "2Gi"
     # Optional Talos registry mirror settings. The generator renders these under
     # machine.registries using the global defaults below for every mirror.
     # Example:

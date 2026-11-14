@@ -83,6 +83,8 @@ cluster_node_name_ip_pairs() {
 }
 node_has_staged_machineconfig() { [[ ! -f "$FIXTURES/$1.active" ]]; }
 node_machineconfig_matches_file() { return 0; }
+node_machineconfig_apply_mode() { echo staged; }
+wait_for_worker_reservation_recovery() { :; }
 wait_for_all_kubernetes_nodes_ready() { :; }
 wait_for_node_ready() { :; }
 wait_for_controlplane_etcd_ready() { :; }
@@ -149,6 +151,7 @@ wait_for_node_ready() {
   echo ready >> "$FIXTURES/calls"
   [[ "$READY_RESULT" == 0 ]] || exit 1
 }
+wait_for_worker_reservation_recovery() { echo stable >> "$FIXTURES/calls"; }
 talosctl() {
   case "$*" in
     *'--mode no-reboot'*)
@@ -178,7 +181,7 @@ talosctl() {
     def test_compatible_change_is_applied_and_verified_without_staging(self):
         result, calls = self.run_worker()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(calls, ["dry-run", "no-reboot", "verify", "ready"])
+        self.assertEqual(calls, ["dry-run", "no-reboot", "verify", "ready", "stable"])
 
     def test_matching_config_is_untouched(self):
         result, calls = self.run_worker(MATCHES="1")
@@ -253,6 +256,9 @@ talosctl() { printf '%s\n' "$RESPONSE"; return "$CODE"; }
             self.assertNotIn("private-test-value", failed.stdout + failed.stderr)
         self.assertNotEqual(self.run_mode("unexpected output").returncode, 0)
         self.assertNotEqual(self.run_mode("connection unavailable", code=124).returncode, 0)
+        unchanged = self.run_mode("No changes.")
+        self.assertEqual(unchanged.returncode, 0, unchanged.stderr)
+        self.assertEqual(unchanged.stdout.strip(), 'no-reboot')
 
     def test_network_comparison_excludes_registry_but_preserves_network_and_extra_documents(self):
         config = "version: v1alpha1\nmachine:\n  network:\n    hostname: worker\n    interfaces:\n      - interface: eth1\n        addresses: [198.51.100.10/24]\n  registries:\n    config: {}\ncluster: {}\n"
@@ -293,6 +299,76 @@ talosctl() {
 
 
 class StagedConfigReconciliationTest(unittest.TestCase):
+    def sequence(self, mode='no-reboot', failure=''):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            root.joinpath('.talos-bootstrap-complete').touch()
+            for name in ['worker-01', 'worker-02']:
+                root.joinpath(f'machineconfig-{name}.yaml').write_text('machine:\n  type: worker\n')
+            harness = r'''
+set -euo pipefail
+cluster_out_dir="$FIXTURES"
+cluster_root_workspace="$FIXTURES"
+cluster_kubeconfig_path=unused
+cluster_talosconfig_path=unused
+error() { echo "$*" >&2; }
+message() { :; }
+require_cmd() { :; }
+first_controlplane_ip() { echo 192.0.2.1; }
+cluster_node_name_ip_pairs() { printf 'worker-01|192.0.2.10\nworker-02|192.0.2.11\n'; }
+node_has_staged_machineconfig() { [[ ! -f "$FIXTURES/$1.active" ]]; }
+node_machineconfig_matches_file() { :; }
+node_machineconfig_apply_mode() { echo "$MODE"; }
+wait_for_all_kubernetes_nodes_ready() { :; }
+wait_for_node_ready() { echo "ready $1" >> "$FIXTURES/calls"; }
+wait_for_machineconfig_match() { :; }
+tf_map_string_value() { echo false; }
+wait_for_worker_reservation_recovery() {
+  echo "stable $1" >> "$FIXTURES/calls"
+  [[ "$FAILURE" != "$1" ]]
+}
+kubectl() { echo "$*" >> "$FIXTURES/calls"; }
+talosctl() {
+  local node=''
+  local args="$*"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in -n) node="$2"; shift 2 ;; *) shift ;; esac
+  done
+  echo "$args" >> "$FIXTURES/calls"
+  touch "$FIXTURES/$node.active"
+}
+'''
+            result = subprocess.run(['bash', '-c', harness + function('reconcile_staged_talos_nodes') + '\nreconcile_staged_talos_nodes'],
+                                    env={**os.environ, 'FIXTURES': directory, 'MODE': mode, 'FAILURE': failure},
+                                    capture_output=True, text=True)
+            return result, root.joinpath('calls').read_text().splitlines()
+
+    def test_hot_changes_wait_for_first_worker_before_touching_second(self):
+        result, calls = self.sequence()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any(' reboot ' in c or ' drain ' in c for c in calls))
+        first = calls.index('stable worker-01')
+        second = next(i for i, c in enumerate(calls) if '192.0.2.11' in c)
+        self.assertLess(first, second)
+        self.assertTrue(all('--mode no-reboot' in c for c in calls if 'apply-config' in c))
+
+    def test_reboot_changes_drain_and_recover_each_worker(self):
+        result, calls = self.sequence(mode='staged')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for name, ip in [('worker-01', '192.0.2.10'), ('worker-02', '192.0.2.11')]:
+            drain = next(i for i, c in enumerate(calls) if f'drain {name}' in c)
+            reboot = next(i for i, c in enumerate(calls) if ip in c and 'reboot' in c)
+            stable = calls.index(f'stable {name}')
+            self.assertLess(drain, reboot)
+            self.assertLess(reboot, stable)
+        self.assertLess(calls.index('stable worker-01'), next(i for i, c in enumerate(calls) if 'drain worker-02' in c))
+
+    def test_failed_first_worker_prevents_any_second_worker_change(self):
+        for mode in ['no-reboot', 'staged']:
+            result, calls = self.sequence(mode=mode, failure='worker-01')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(any('192.0.2.11' in c or 'worker-02' in c for c in calls))
+
     def run_reconcile(self, persistent="active configuration", api_result="0"):
         with tempfile.TemporaryDirectory() as directory:
             Path(directory, ".talos-bootstrap-complete").touch()
@@ -309,6 +385,7 @@ error() { echo "$*" >&2; }
 message() { :; }
 first_controlplane_ip() { echo 192.0.2.1; }
 cluster_node_name_ip_pairs() { echo 'worker|192.0.2.10'; }
+node_machineconfig_apply_mode() { echo staged; }
 timeout() { shift 2; "$@"; }
 wait_for_all_kubernetes_nodes_ready() { :; }
 talosctl() {

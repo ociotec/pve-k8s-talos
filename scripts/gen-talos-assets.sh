@@ -152,6 +152,7 @@ link_into_workspace "${repo_root}/providers.tf" "${cluster_root_workspace}/provi
 link_into_workspace "${repo_root}/vms_pve.tf" "${cluster_root_workspace}/vms_pve.tf"
 link_into_workspace "${repo_root}/vms_variables.tf" "${cluster_root_workspace}/vms_variables.tf"
 link_into_workspace "${repo_root}/control-plane-sizing.tf" "${cluster_root_workspace}/control-plane-sizing.tf"
+link_into_workspace "${repo_root}/worker-reservations.tf" "${cluster_root_workspace}/worker-reservations.tf"
 link_into_workspace "${cluster_constants_path}" "${cluster_root_workspace}/constants.auto.tfvars"
 link_into_workspace "${cluster_vms_path}" "${cluster_root_workspace}/vms.auto.tfvars"
 link_into_workspace "${cluster_resources_path}" "${cluster_root_workspace}/resources.auto.tfvars"
@@ -1953,6 +1954,9 @@ for path in "${patch_dir}"/hostname-*.yaml; do
     echo "removed ${path}"
   fi
 done
+
+python3 "${script_dir}/worker-reservations.py" --cluster-dir "${cluster_dir}" \
+  --prepare-patches "${patch_dir}"
 
 python3 "${script_dir}/prepare-talos-patches.py" \
   --version "${talos_version}" --patch-dir "${patch_dir}" \

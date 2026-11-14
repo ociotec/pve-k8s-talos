@@ -374,6 +374,7 @@ if [[ "${services_only}" != "true" && "${destroy_only}" != "true" && "${bootstra
     control_plane_sizing_args+=(--force-control-plane-capacity)
   fi
   python3 "${script_dir}/control-plane-sizing.py" "${control_plane_sizing_args[@]}"
+  python3 "${script_dir}/worker-reservations.py" --cluster-dir "${cluster_dir}"
 fi
 
 deployment_status_enabled=false
@@ -1647,7 +1648,8 @@ node_machineconfig_apply_mode() {
     error "Talos dry-run failed on ${node_ip} (exit ${result}); private details: ${dry_run_output}." >&2
     return 1
   fi
-  if grep -Fxq 'Applied configuration without a reboot (skipped in dry-run).' "${dry_run_output}"; then
+  if grep -Fxq 'Applied configuration without a reboot (skipped in dry-run).' "${dry_run_output}" \
+    || grep -Fxq 'No changes.' "${dry_run_output}"; then
     mode="no-reboot"
   elif grep -Fxq 'Applied configuration with a reboot (skipped in dry-run).' "${dry_run_output}"; then
     mode="staged"
@@ -1786,6 +1788,7 @@ stage_secondary_network_worker_configs() {
           fi
           if [[ "${apply_mode}" == "no-reboot" ]]; then
             message "Applying Talos config on ${worker_name} without a reboot..."
+            talos_recovery_node="${worker_name}"
             if ! talosctl --talosconfig "${cluster_talosconfig_path}" \
               -n "${worker_ip}" apply-config --mode no-reboot \
               --file "${machineconfig_path}" 1>/dev/null; then
@@ -1799,6 +1802,8 @@ stage_secondary_network_worker_configs() {
               error "${worker_name} lost its secondary IP or primary default route after applying Talos config." >&2
               return 1
             fi
+            wait_for_worker_reservation_recovery "${worker_name}" || return 1
+            talos_recovery_node=""
             continue
           fi
         fi
@@ -1964,6 +1969,11 @@ handle_deploy_exit() {
   if node_resize_pending; then
     error "Node resize is unfinished; preserving maintenance state and workload baseline. Resume this deployment from the same PC."
     [[ "${exit_code}" -ne 0 ]] || exit_code=1
+  elif [[ "${exit_code}" -ne 0 && -n "${talos_recovery_node:-}" \
+    && -n "${node_maintenance_state:-}" && -f "${node_maintenance_state}" ]]; then
+    kubectl --kubeconfig "${cluster_kubeconfig_path}" cordon "${talos_recovery_node}" >/dev/null \
+      || error "Failed to cordon the node after its recovery failure." >&2
+    error "Talos node recovery failed; preserving its cordon, workload baseline and bounded maintenance lease. Recover the node before retrying."
   elif [[ -n "${node_maintenance_state:-}" && -f "${node_maintenance_state}" ]]; then
     python3 "${script_dir}/node-maintenance.py" finish --kubeconfig "${cluster_kubeconfig_path}" \
       --state "${node_maintenance_state}" --owner "${node_maintenance_owner}"
@@ -3632,6 +3642,19 @@ reconcile_talos_registry_auth() {
   rm -f "${workload_baseline}"
 }
 
+wait_for_worker_reservation_recovery() {
+  local worker_name="$1"
+  local recovery_args=(--cluster-dir "${cluster_dir}" --verify-live --worker "${worker_name}" --stable-seconds 30
+    --kubeconfig "${cluster_kubeconfig_path}" --talosconfig "${cluster_talosconfig_path}")
+  if [[ -n "${root_workload_baseline:-}" ]]; then
+    recovery_args+=(--workload-baseline "${root_workload_baseline}")
+  fi
+  if [[ -n "${node_maintenance_state:-}" && -f "${node_maintenance_state}" ]]; then
+    recovery_args+=(--maintenance-state "${node_maintenance_state}" --maintenance-owner "${node_maintenance_owner}")
+  fi
+  python3 "${script_dir}/worker-reservations.py" "${recovery_args[@]}" "${workload_health_args[@]}"
+}
+
 reconcile_staged_talos_nodes() {
   local node_lines=()
   local unsorted_node_lines=()
@@ -3648,6 +3671,7 @@ reconcile_staged_talos_nodes() {
   local activation_timeout_seconds=900
   local staged_result
   local maintenance_renewed_at
+  local apply_mode
 
   if [[ ! -f "${cluster_out_dir}/.talos-bootstrap-complete" ]]; then
     return 0
@@ -3737,50 +3761,65 @@ reconcile_staged_talos_nodes() {
       python3 "${script_dir}/node-maintenance.py" renew --kubeconfig "${cluster_kubeconfig_path}" \
         --state "${node_maintenance_state}" --owner "${node_maintenance_owner}"
     fi
-    # Honour disruption budgets and avoid cutting application writes in flight.
-    kubectl --kubeconfig "${cluster_kubeconfig_path}" drain "${node_name}" \
-      --ignore-daemonsets --delete-emptydir-data --timeout=600s
+    apply_mode="$(node_machineconfig_apply_mode "${node_ip}" "${machineconfig_path}")" || return 1
+    talos_recovery_node="${node_name}"
+    if [[ "${apply_mode}" == "no-reboot" ]]; then
+      message "Applying Talos config on ${node_name} without a reboot..."
+      talosctl --talosconfig "${cluster_talosconfig_path}" -n "${node_ip}" \
+        apply-config --mode no-reboot --file "${machineconfig_path}" >/dev/null
+      wait_for_machineconfig_match "${node_name}" "${node_ip}" "${machineconfig_path}" 180
+    else
+      # Honour disruption budgets and avoid cutting application writes in flight.
+      kubectl --kubeconfig "${cluster_kubeconfig_path}" drain "${node_name}" \
+        --ignore-daemonsets --delete-emptydir-data --timeout=600s
 
-    if [[ -n "${node_maintenance_state:-}" && -f "${node_maintenance_state}" ]]; then
-      python3 "${script_dir}/node-maintenance.py" renew --kubeconfig "${cluster_kubeconfig_path}" \
-        --state "${node_maintenance_state}" --owner "${node_maintenance_owner}"
-    fi
-    maintenance_renewed_at="$(date +%s)"
-
-    message "Rebooting ${node_name} to activate its staged Talos config..."
-    talosctl --talosconfig "${cluster_talosconfig_path}" \
-      -n "${node_ip}" \
-      reboot \
-      --wait=false >/dev/null
-
-    start="$(date +%s)"
-    while true; do
-      if [[ -n "${node_maintenance_state:-}" && -f "${node_maintenance_state}" ]] \
-        && (( $(date +%s) - maintenance_renewed_at >= 60 )); then
+      if [[ -n "${node_maintenance_state:-}" && -f "${node_maintenance_state}" ]]; then
         python3 "${script_dir}/node-maintenance.py" renew --kubeconfig "${cluster_kubeconfig_path}" \
           --state "${node_maintenance_state}" --owner "${node_maintenance_owner}"
-        maintenance_renewed_at="$(date +%s)"
       fi
-      if ! node_has_staged_machineconfig "${node_ip}" \
-        && node_machineconfig_matches_file "${node_ip}" "${machineconfig_path}"; then
-        break
-      fi
-      if (( $(date +%s) - start >= activation_timeout_seconds )); then
-        error "Timed out waiting for ${node_name} to reboot and activate its staged Talos config." >&2
-        return 1
-      fi
-      sleep 5
-    done
+      maintenance_renewed_at="$(date +%s)"
+
+      message "Rebooting ${node_name} to activate its staged Talos config..."
+      talosctl --talosconfig "${cluster_talosconfig_path}" \
+        -n "${node_ip}" \
+        reboot \
+        --wait=false >/dev/null
+
+      start="$(date +%s)"
+      while true; do
+        if [[ -n "${node_maintenance_state:-}" && -f "${node_maintenance_state}" ]] \
+          && (( $(date +%s) - maintenance_renewed_at >= 60 )); then
+          python3 "${script_dir}/node-maintenance.py" renew --kubeconfig "${cluster_kubeconfig_path}" \
+            --state "${node_maintenance_state}" --owner "${node_maintenance_owner}"
+          maintenance_renewed_at="$(date +%s)"
+        fi
+        if ! node_has_staged_machineconfig "${node_ip}" \
+          && node_machineconfig_matches_file "${node_ip}" "${machineconfig_path}"; then
+          break
+        fi
+        if (( $(date +%s) - start >= activation_timeout_seconds )); then
+          error "Timed out waiting for ${node_name} to reboot and activate its staged Talos config." >&2
+          return 1
+        fi
+        sleep 5
+      done
+    fi
 
     wait_for_node_ready "${node_name}" 600
-    kubectl --kubeconfig "${cluster_kubeconfig_path}" uncordon "${node_name}" >/dev/null
+    if [[ "${apply_mode}" != "no-reboot" ]]; then
+      kubectl --kubeconfig "${cluster_kubeconfig_path}" uncordon "${node_name}" >/dev/null
+    fi
     if [[ "${node_role}" == "controlplane" ]]; then
       wait_for_controlplane_etcd_ready "${node_name}" "${node_ip}" 600
     fi
-    wait_for_all_kubernetes_nodes_ready 600
-    if [[ -n "${root_workload_baseline:-}" ]]; then
-      python3 "${script_dir}/check-workload-health.py" --kubeconfig "${cluster_kubeconfig_path}" \
-        --baseline "${root_workload_baseline}" "${workload_health_args[@]}"
+    if [[ "${node_role}" == "worker" ]]; then
+      wait_for_worker_reservation_recovery "${node_name}" || return 1
+    else
+      wait_for_all_kubernetes_nodes_ready 600
+      if [[ -n "${root_workload_baseline:-}" ]]; then
+        python3 "${script_dir}/check-workload-health.py" --kubeconfig "${cluster_kubeconfig_path}" \
+          --baseline "${root_workload_baseline}" "${workload_health_args[@]}"
+      fi
     fi
     wait_for_machineconfig_match \
       "${node_name}" "${node_ip}" "${machineconfig_path}" 180
@@ -3788,6 +3827,7 @@ reconcile_staged_talos_nodes() {
       python3 "${script_dir}/check-image-unpack-durability.py" --talosconfig "${cluster_talosconfig_path}" \
         --node-address "${node_ip}" --node-name "${node_name}"
     fi
+    talos_recovery_node=""
     message "${node_name} recovered with the desired Talos machine configuration."
   done
 }
@@ -4292,6 +4332,12 @@ else
   # Keep both initial bootstrap applies automatic, even after the first one
   # creates the marker. Subsequent deployments activate changes sequentially.
   export TF_VAR_defer_node_config_activation="${talos_bootstrap_marker_was_present}"
+  run_gen_talos_assets
+  if [[ "${talos_bootstrap_marker_was_present}" == "true" ]]; then
+    python3 "${script_dir}/worker-reservations.py" --cluster-dir "${cluster_dir}" --check-live \
+      --patch-dir "${cluster_root_patches_dir}" --state "${cluster_root_workspace}/terraform.tfstate" \
+      --kubeconfig "${cluster_kubeconfig_path}" --talosconfig "${cluster_talosconfig_path}"
+  fi
   if [[ "${talos_bootstrap_marker_was_present}" == "true" ]]; then
     python3 "${script_dir}/reconcile-kubernetes-components.py" --kubeconfig "${cluster_kubeconfig_path}" \
       --version "$(talos_kubernetes_version "${cluster_constants_path}")" --check-transition
@@ -4309,7 +4355,6 @@ else
     root_workload_baseline="${cluster_git_dir}/pve-k8s-talos-node-workloads.json"
     prepare_root_workload_baseline
   fi
-  run_gen_talos_assets
   run_tofu_init "${cluster_root_workspace}"
   migrate_legacy_talos_bootstrap_marker_state "${cluster_root_workspace}"
   mapfile -t root_apply_extra_args < <(root_apply_args)
@@ -4394,6 +4439,8 @@ else
   stage_secondary_network_worker_configs
   reconcile_staged_talos_nodes
   reconcile_secondary_network_workers
+  python3 "${script_dir}/worker-reservations.py" --cluster-dir "${cluster_dir}" --verify-live \
+    --kubeconfig "${cluster_kubeconfig_path}" --talosconfig "${cluster_talosconfig_path}"
   reconcile_talos_discovery_service_steady_state
   wait_for_kubernetes_version_convergence "${cluster_constants_path}"
   tofu -chdir="${cluster_root_workspace}" output -json kube_proxy_configuration |

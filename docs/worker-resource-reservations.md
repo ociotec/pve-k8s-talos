@@ -1,6 +1,6 @@
 # Automatic worker resource reservations
 
-Status: Specification
+Status: Implemented; deployment validation pending
 
 Protect Talos and Kubernetes node services by calculating worker reservations
 from declared VM memory and configured pod density. Existing deployments adopt
@@ -147,11 +147,11 @@ Generate and validate
         |
 Inspect live configuration and projected capacity
         |
-One worker in a small environment
+First worker in a small environment
         |
-Verify effective configuration, Ready and Allocatable
+Verify configuration, Ready, Allocatable and workload stability
         |
-Remaining workers -> medium environment
+Next worker, only after recovery -> medium environment
         |
 Review historical usage -> revise shared coefficients if needed
 ```
@@ -159,6 +159,17 @@ Review historical usage -> revise shared coefficients if needed
 Activation requires the normal, explicitly authorized deployment path. The
 implementation must support a controlled first-worker rollout before changing
 the remaining workers; generation alone must not apply configuration.
+
+Use the existing `scripts/deploy.sh --talos-only` phase; no reservation-specific
+deployment option is required. It reconciles pending Talos and VM changes through
+the normal staged configuration and sequential recovery paths. Talos dry runs
+select hot activation or graceful reboot. Before the next worker changes, verify
+configuration, reservations, Allocatable and workload health for 30 stable seconds.
+Keep one workload baseline for the whole run. Failures stop the sequence and
+preserve the affected node's maintenance protection and recovery baseline.
+Hot activation lets Talos restart affected services without draining pods or
+rebooting the VM. A required reboot uses drain, PDB checks and graceful Talos
+reboot. VM hardware changes retain the existing sequential resize procedure.
 
 Verify formula boundaries, heterogeneous profiles, 110/250/500 pod settings,
 canonical quantities, conflicting patches and preserved defaults. Follow the

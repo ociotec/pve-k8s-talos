@@ -12,6 +12,10 @@ resource "proxmox_virtual_environment_vm" "create_pve_vms" {
 
   lifecycle {
     precondition {
+      condition     = var.bootstrap_secondary_network || (length(local.worker_reservations.invalid) == 0 && local.worker_reservations.fits)
+      error_message = "Invalid worker reservation settings or insufficient worker capacity. Review output worker_reservations and scripts/worker-reservations.py."
+    }
+    precondition {
       condition     = length(local.cp_invalid_settings) == 0
       error_message = "Invalid control-plane sizing settings: ${join(", ", local.cp_invalid_settings)}. max_pods must be an integer from 1 to 65535; control_plane_recommended_headroom_percent must be an integer from 0 to 99. Empty values select defaults."
     }
