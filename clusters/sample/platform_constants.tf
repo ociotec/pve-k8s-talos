@@ -33,6 +33,8 @@ locals {
   # Existing clusters default to legacy. Helm requires a separately reviewed migration.
   rancher_deployment_mode = "legacy"
   rancher_chart_version   = "2.15.2"
+  # Disabled by default. Enable only to provision clusters through Rancher (Turtles/CAPI).
+  # rancher_provisioning_enabled = true
   # Destructive one-time reset of legacy Rancher data; applications/PVCs are retained.
   rancher_helm_reinstall_legacy = false
   rancher_private_ca                = true

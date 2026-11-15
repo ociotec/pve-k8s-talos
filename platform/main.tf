@@ -87,6 +87,20 @@ locals {
     "(?m)^\\s*rancher_debug\\s*=\\s*(true|false)\\s*(?:#.*)?$",
     file("${path.module}/constants.tf")
   )[0]), false)
+  # Existing clusters use Rancher as a viewer; provisioning is an explicit opt-in.
+  rancher_provisioning_enabled_value = try(tobool(regex(
+    "(?m)^\\s*rancher_provisioning_enabled\\s*=\\s*(true|false)\\s*(?:#.*)?$",
+    file("${path.module}/constants.tf")
+  )[0]), false)
+  rancher_provisioning_features = merge({
+    provisioningv2 = local.rancher_provisioning_enabled_value
+    rke2           = local.rancher_provisioning_enabled_value
+    }, local.rancher_version_is_v214plus || local.rancher_version_major_minor == "2.13" ? {
+    turtles = local.rancher_provisioning_enabled_value
+    } : {}, local.rancher_version_is_v214plus ? {} : {
+    embedded-cluster-api = local.rancher_provisioning_enabled_value
+  })
+  rancher_features_value    = join(",", [for name, enabled in local.rancher_provisioning_features : "${name}=${enabled}"])
   rancher_cpu_request_value = try(local.rancher_cpu_request, "200m")
   rancher_cpu_limit_value   = try(local.rancher_cpu_limit, "1")
   # Go requires an integer: round fractional Kubernetes CPU limits up to a core.
@@ -252,6 +266,7 @@ locals {
       rancher_version                = tostring(local.rancher_version_value)
       rancher_https_target_port      = local.rancher_version_is_v214plus ? 443 : 444
       rancher_debug                  = local.rancher_debug_value
+      rancher_features               = local.rancher_features_value
       rancher_cpu_request            = local.rancher_cpu_request_value
       rancher_cpu_limit              = local.rancher_cpu_limit_value
       rancher_mem_request            = local.rancher_mem_request_value
@@ -651,7 +666,7 @@ locals {
       patch = jsonencode({
         spec = {
           template = {
-            spec     = { priorityClassName = "infra-monitoring" }
+            spec = { priorityClassName = "infra-monitoring" }
           }
         }
         metadata = {
@@ -788,7 +803,7 @@ locals {
 
   # 2.15 replaces the legacy provisioning controller with Turtles and no
   # longer installs the separate imperative API extension Deployment locally.
-  rancher_managed_resource_patches = local.rancher_version_major_minor == "2.15" ? merge(
+  rancher_managed_resource_patches_with_provisioning = local.rancher_version_major_minor == "2.15" ? merge(
     { for key, patch in local.rancher_managed_resource_patches_base : key => patch
       if !contains([
         "cattle-provisioning-capi-system/capi-controller-manager",
@@ -824,7 +839,7 @@ locals {
                   {
                     # Same verified endpoint as the official startup/liveness probes.
                     readinessProbe = {
-                      httpGet = { path = "/healthz", port = "https", scheme = "HTTPS" }
+                      httpGet       = { path = "/healthz", port = "https", scheme = "HTTPS" }
                       periodSeconds = 5, timeoutSeconds = 1, successThreshold = 1, failureThreshold = 3
                     }
                 })]
@@ -904,6 +919,17 @@ locals {
       }
     }
   ) : local.rancher_managed_resource_patches_base
+
+  rancher_managed_resource_patches = {
+    for key, patch in local.rancher_managed_resource_patches_with_provisioning : key => patch
+    if local.rancher_provisioning_enabled_value || !contains([
+      "cattle-provisioning-capi-system/capi-controller-manager",
+      "cattle-capi-system/capi-controller-manager",
+      "cattle-turtles-system/rancher-turtles-controller-manager",
+      "fleet-default/rke2-machineconfig-cleanup-cronjob",
+      "fleet-local/rke2-machineconfig-cleanup-cronjob",
+    ], key)
+  }
 
   rancher_managed_probe_exceptions = merge({
     "cattle-fleet-system/fleet-controller" = {
@@ -1239,6 +1265,7 @@ resource "kubernetes_deployment_v1" "rancher" {
 
   depends_on = [
     terraform_data.rancher_mode_guard,
+    null_resource.rancher_provisioning_prepare,
     kubernetes_manifest.platform_namespaces,
     kubernetes_secret_v1.rancher_bootstrap,
     kubernetes_secret_v1.rancher_ca,

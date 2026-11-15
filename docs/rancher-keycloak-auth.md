@@ -69,6 +69,29 @@ Use:
 
 ### Rancher deployment modes
 
+Rancher defaults to browsing the existing cluster. Cluster provisioning is
+disabled without adding constants to existing clusters. To opt in, uncomment
+`rancher_provisioning_enabled = true` in the sample platform constants and copy
+that setting to the target cluster. This single switch controls Turtles, CAPI
+and the related provisioning controllers, resource patches and readiness checks.
+Fleet, Rancher authentication and the Rancher webhook remain enabled.
+
+```text
+Default: viewer                 Opt-in: provisioning
+Rancher + webhook + Fleet        Rancher + webhook + Fleet
+                                + Turtles + CAPI + provisioning
+```
+
+Applying the default restarts Rancher with provisioning disabled. Rancher
+uninstalls Turtles using its lifecycle hooks; readiness waits for Turtles and
+the CAPI controllers to disappear. Before changing stored feature overrides,
+the apply rejects downstream Rancher clusters and existing core CAPI resources
+or provisioning cluster specifications. Review such installations separately.
+The repository does not purge CAPI CRDs or their custom resources, remove
+finalizers, or reset Rancher data. Existing explicit feature values are reconciled
+because they take precedence over environment defaults. No worker restart or
+application drain is requested.
+
 Rancher supports a temporary per-cluster deployment choice:
 
 ```hcl

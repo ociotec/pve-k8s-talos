@@ -180,6 +180,8 @@ spec:
         - "--https-listen-port=443"
         - "--add-local=true"
         env:
+        - name: CATTLE_FEATURES
+          value: "${rancher_features}"
         - name: CATTLE_NAMESPACE
           value: cattle-system
         - name: CATTLE_PEER_SERVICE

@@ -90,6 +90,7 @@ resource "helm_release" "rancher" {
     kubernetes_secret_v1.rancher_ca,
     kubernetes_secret_v1.rancher_bootstrap,
     null_resource.rancher_webhook_prepare,
+    null_resource.rancher_provisioning_prepare,
   ]
 }
 
@@ -111,6 +112,7 @@ locals {
       limits   = { cpu = local.rancher_cpu_limit_value, memory = local.rancher_mem_limit_value }
     }
     extraEnv = [
+      { name = "CATTLE_FEATURES", value = local.rancher_features_value },
       { name = "GOMEMLIMIT", value = local.rancher_go_mem_limit },
       { name = "GOMAXPROCS", value = local.rancher_go_max_procs },
       {
@@ -175,14 +177,29 @@ locals {
       for patch in values(local.rancher_managed_resource_patches) :
       "${patch.namespace}/${patch.name}" if patch.resource == "deployment"
     ])
-    releases = ["cattle-system/rancher", "cattle-system/rancher-webhook",
+    releases = concat(["cattle-system/rancher", "cattle-system/rancher-webhook",
       "cattle-fleet-system/fleet", "cattle-fleet-system/fleet-crd",
-    "cattle-fleet-local-system/fleet-agent-local", "cattle-turtles-system/rancher-turtles"]
+      "cattle-fleet-local-system/fleet-agent-local"],
+    local.rancher_provisioning_enabled_value ? ["cattle-turtles-system/rancher-turtles"] : [])
+    provisioning_disabled = !local.rancher_provisioning_enabled_value
   }
 }
 
+resource "null_resource" "rancher_provisioning_prepare" {
+  count = local.rancher_enabled && !var.skip_platform ? 1 : 0
+  triggers = {
+    features   = local.rancher_features_value
+    script_sha = filesha256("${path.module}/rancher_readiness.py")
+    version    = local.rancher_version_value
+  }
+  provisioner "local-exec" {
+    command = "KUBECONFIG=${abspath("${path.module}/${var.kubeconfig_path}")} python3 ${path.module}/rancher_readiness.py prepare-provisioning --features '${jsonencode(local.rancher_provisioning_features)}'"
+  }
+  depends_on = [terraform_data.rancher_mode_guard]
+}
+
 resource "local_file" "rancher_readiness_checks" {
-  count    = local.rancher_helm_enabled ? 1 : 0
+  count           = local.rancher_helm_enabled ? 1 : 0
   filename        = "${path.module}/.generated-rancher-readiness.json"
   content         = jsonencode(local.rancher_readiness_checks)
   file_permission = "0644"

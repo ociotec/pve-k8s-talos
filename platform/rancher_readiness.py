@@ -147,14 +147,74 @@ def prepare_webhook(patch, timeout=600):
     wait(pending, "webhook availability before Helm", timeout=timeout, stable=2)
 
 
-def systems_pending(deployments, releases, replicas=None, stalled_since=None):
+def required_inventory(resource):
+    obj = kubectl("get", resource, "-A", "-o", "json")
+    if obj is None:
+        raise RuntimeError("Cannot inspect " + resource + "; provisioning settings were not changed")
+    return obj["items"]
+
+
+def prepare_provisioning(features):
+    """Reject active provisioning before changing any stored feature overrides."""
+    crds = {obj["metadata"]["name"]: obj for obj in required_inventory("customresourcedefinitions")}
+    if not features["provisioningv2"]:
+        if "clusters.management.cattle.io" in crds:
+            if any(obj["metadata"]["name"] != "local"
+                   for obj in required_inventory("clusters.management.cattle.io")):
+                raise RuntimeError("Rancher has downstream clusters; review them before disabling provisioning")
+        # Check every installed core CAPI kind, including scaled-to-zero objects.
+        for name, crd in crds.items():
+            if crd["spec"]["group"] == "cluster.x-k8s.io" and required_inventory(name):
+                raise RuntimeError("CAPI resources exist in " + name + "; provisioning settings were not changed")
+        if "clusters.provisioning.cattle.io" in crds:
+            for obj in required_inventory("clusters.provisioning.cattle.io"):
+                spec = obj.get("spec") or {}
+                if (obj["metadata"]["name"] != "local" or spec.get("rkeConfig") is not None
+                        or spec.get("clusterAPIConfig") is not None):
+                    raise RuntimeError("Rancher provisioning resources exist; review them before disabling provisioning")
+    if "features.management.cattle.io" not in crds:
+        return  # Fresh install: CATTLE_FEATURES supplies the initial values.
+    existing = {obj["metadata"]["name"]: obj for obj in required_inventory("features.management.cattle.io")}
+    # Explicit API values override CATTLE_FEATURES. Preserve unrelated features.
+    for name, enabled in features.items():
+        locked = existing.get(name, {}).get("status", {}).get("lockedValue")
+        if locked is not None and locked != enabled:
+            raise RuntimeError("Rancher feature " + name + " is locked; review before changing provisioning")
+        if name not in existing or existing[name].get("spec", {}).get("value") in (None, enabled):
+            continue
+    for name, enabled in features.items():
+        if name not in existing or existing[name].get("spec", {}).get("value") in (None, enabled):
+            continue
+        result = kubectl("patch", "features.management.cattle.io", name, "--type=merge",
+                         "-p", json.dumps({"spec": {"value": enabled}}), "-o", "json")
+        if result is None:
+            raise RuntimeError("Cannot update Rancher feature " + name)
+
+
+def provisioning_removal_pending():
+    namespaces = kubectl("get", "namespaces", "-o", "json")
+    deployments = kubectl("get", "deployments", "-A", "-o", "json")
+    if namespaces is None or deployments is None:
+        return "provisioning removal inventory unavailable"
+    if any(obj["metadata"]["name"] == "cattle-turtles-system" for obj in namespaces["items"]):
+        return "Turtles namespace removal is not complete"
+    if any(obj["metadata"]["namespace"] in {"cattle-capi-system", "cattle-provisioning-capi-system"}
+           for obj in deployments["items"]):
+        return "CAPI controller removal is not complete"
+    return None
+
+
+def systems_pending(deployments, releases, replicas=None, stalled_since=None, provisioning_disabled=False):
     repos = kubectl("get", "clusterrepos.catalog.cattle.io", "-o", "json")
     if repos is None:
         return "catalog API unavailable"
     downloaded = {r["metadata"]["name"] for r in repos["items"] if any(
         c.get("type") == "Downloaded" and c.get("status") == "True"
         for c in (r.get("status") or {}).get("conditions") or [])}
-    missing = {"rancher-charts", "rancher-partner-charts", "rancher-rke2-charts"} - downloaded
+    required = {"rancher-charts", "rancher-partner-charts"}
+    if not provisioning_disabled:
+        required.add("rancher-rke2-charts")
+    missing = required - downloaded
     if missing:
         return "catalogs: " + ", ".join(sorted(missing))
     # Explicit filters work with Helm 3 and 4; Helm 4 removed --all.
@@ -168,6 +228,16 @@ def systems_pending(deployments, releases, replicas=None, stalled_since=None):
         return "Helm release query unavailable"
     inventory = {r["namespace"] + "/" + r["name"]: r for r in json.loads(result.stdout)}
     statuses = {name: release["status"] for name, release in inventory.items()}
+    if provisioning_disabled:
+        retired = "cattle-turtles-system/rancher-turtles"
+        status = statuses.get(retired)
+        if status and status != "uninstalled":
+            if stalled_since is not None:
+                check_stalled_operations({retired: status}, stalled_since)
+            return "Turtles removal: " + status
+        pending_removal = provisioning_removal_pending()
+        if pending_removal:
+            return pending_removal
     pending = [name + "=" + statuses.get(name, "missing")
                for name in releases if statuses.get(name) != "deployed"]
     if pending:
@@ -200,7 +270,8 @@ def openapi_pending():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phase", choices=["systems", "openapi", "prepare-webhook"])
+    parser.add_argument("phase", choices=["systems", "openapi", "prepare-webhook", "prepare-provisioning"])
+    parser.add_argument("--features", type=json.loads)
     parser.add_argument("--checks-file", type=Path)
     parser.add_argument("--patch-file", type=Path)
     parser.add_argument("--timeout", type=int, default=1800)
@@ -209,6 +280,8 @@ def main():
         parser.error("systems requires --checks-file")
     if args.phase == "prepare-webhook" and not args.patch_file:
         parser.error("prepare-webhook requires --patch-file")
+    if args.phase == "prepare-provisioning" and not args.features:
+        parser.error("prepare-provisioning requires --features")
     stalled_since = {}
     def check():
         try:
@@ -217,6 +290,10 @@ def main():
         except subprocess.TimeoutExpired:
             return "readiness query timed out"
     try:
+        if args.phase == "prepare-provisioning":
+            prepare_provisioning(args.features)
+            print("Rancher provisioning settings prepared.")
+            return 0
         if args.phase == "prepare-webhook":
             prepare_webhook(json.loads(args.patch_file.read_text()), timeout=args.timeout)
             print("Rancher webhook prepared before Helm.")

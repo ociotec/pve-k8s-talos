@@ -161,6 +161,90 @@ class RancherLocalAdminTest(unittest.TestCase):
             self.assertEqual(command.call_count, 2)
 
 
+class RancherProvisioningTest(unittest.TestCase):
+    features = {"provisioningv2": False, "rke2": False, "turtles": False}
+
+    def inventory(self, extra=None):
+        objects = {
+            "clusters.management.cattle.io": [{"metadata": {"name": "local"}}],
+            "clusters.cluster.x-k8s.io": [],
+            "clusters.provisioning.cattle.io": [{"metadata": {"name": "local"}, "spec": {}}],
+            "features.management.cattle.io": [
+                {"metadata": {"name": "turtles"}, "spec": {"value": True}},
+                {"metadata": {"name": "fleet"}, "spec": {"value": True}}],
+        }
+        objects.update(extra or {})
+        objects["customresourcedefinitions"] = [
+            {"metadata": {"name": name}, "spec": {"group": name.split(".", 1)[1]}}
+            for name in objects]
+        return objects
+
+    def query(self, inventory, mutations):
+        def run(*args):
+            if args[0] == "get":
+                return {"items": inventory[args[1]]}
+            mutations.append(args)
+            return {"spec": {"value": False}}
+        return run
+
+    def test_unused_installation_updates_only_conflicting_feature_overrides(self):
+        changes = []
+        with patch.object(READY, "kubectl", side_effect=self.query(self.inventory(), changes)):
+            READY.prepare_provisioning(self.features)
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(changes[0][2], "turtles")
+        self.assertEqual(json.loads(changes[0][5]), {"spec": {"value": False}})
+
+    def test_inventory_failure_never_changes_features(self):
+        with patch.object(READY, "kubectl", return_value=None) as query:
+            with self.assertRaisesRegex(RuntimeError, "Cannot inspect"):
+                READY.prepare_provisioning(self.features)
+        self.assertTrue(all(call.args[0] == "get" for call in query.call_args_list))
+
+    def test_active_or_scaled_to_zero_resources_block_all_mutation(self):
+        cases = [
+            {"clusters.management.cattle.io": [{"metadata": {"name": "downstream"}}]},
+            {"clusters.cluster.x-k8s.io": [{"metadata": {"name": "managed"}}]},
+            {"machinedeployments.cluster.x-k8s.io": [{"spec": {"replicas": 0}}]},
+            {"clusters.provisioning.cattle.io": [{"metadata": {"name": "local"}, "spec": {"rkeConfig": {}}}]},
+            {"features.management.cattle.io": [{"metadata": {"name": "turtles"},
+                "spec": {"value": None}, "status": {"lockedValue": True}}]},
+        ]
+        for extra in cases:
+            with self.subTest(extra=extra):
+                changes = []
+                with patch.object(READY, "kubectl", side_effect=self.query(self.inventory(extra), changes)):
+                    with self.assertRaises(RuntimeError):
+                        READY.prepare_provisioning(self.features)
+                self.assertEqual(changes, [])
+
+    def test_fresh_install_uses_environment_defaults(self):
+        with patch.object(READY, "kubectl", return_value={"items": []}) as query:
+            READY.prepare_provisioning(self.features)
+        query.assert_called_once()
+
+    def test_opt_in_can_restore_explicitly_disabled_features(self):
+        changes = []
+        inventory = self.inventory({"features.management.cattle.io": [
+            {"metadata": {"name": "turtles"}, "spec": {"value": False}}]})
+        with patch.object(READY, "kubectl", side_effect=self.query(inventory, changes)):
+            READY.prepare_provisioning({name: True for name in self.features})
+        self.assertEqual(json.loads(changes[0][5]), {"spec": {"value": True}})
+
+    def test_removal_requires_namespace_and_capi_controllers_to_disappear(self):
+        for namespaces, deployments, expected in [
+            ([{"metadata": {"name": "cattle-turtles-system"}}], [], "namespace"),
+            ([], [{"metadata": {"namespace": "cattle-capi-system"}}], "controller"),
+            ([], [], None),
+        ]:
+            with patch.object(READY, "kubectl", side_effect=[{"items": namespaces}, {"items": deployments}]):
+                pending = READY.provisioning_removal_pending()
+            if expected:
+                self.assertIn(expected, pending)
+            else:
+                self.assertIsNone(pending)
+
+
 class RancherReadinessTest(unittest.TestCase):
     def test_admission_check_requires_the_secret_webhook_and_never_stores_a_secret(self):
         with patch.object(READY, "kubectl", return_value=None), patch.object(READY.subprocess, "run") as run:
@@ -294,6 +378,20 @@ class RancherReadinessTest(unittest.TestCase):
         self.assertIn("pending-install", self.pending(release_status="pending-install"))
         self.assertIsNone(self.pending())
 
+    def test_disabled_provisioning_still_waits_for_turtles_uninstall(self):
+        repos, _, helm = self.inventory()
+        releases = json.loads(helm.stdout) + [{"name": "rancher-turtles", "namespace": "cattle-turtles-system",
+                                              "status": "uninstalling"}]
+        helm.stdout = json.dumps(releases)
+        with patch.object(READY, "kubectl", return_value=repos), patch.object(READY.subprocess, "run", return_value=helm):
+            self.assertEqual(READY.systems_pending([], [], provisioning_disabled=True), "Turtles removal: uninstalling")
+
+    def test_disabled_provisioning_needs_no_rke2_catalog_but_keeps_admission_gate(self):
+        repos, workloads, helm = self.inventory()
+        repos["items"] = repos["items"][:2]
+        with patch.object(READY, "kubectl", side_effect=[repos, workloads]), patch.object(READY.subprocess, "run", return_value=helm), patch.object(READY, "provisioning_removal_pending", return_value=None), patch.object(READY, "admission_pending", return_value="Secret admission unavailable"):
+            self.assertEqual(READY.systems_pending(["system/webhook"], ["system/webhook"], provisioning_disabled=True), "Secret admission unavailable")
+
     def test_rollout_must_include_every_updated_replica_and_observed_generation(self):
         for changes in [{"observed": 1}, {"replicas": 3}, {"updated": 1}, {"available": 1}]:
             with self.subTest(changes=changes):
@@ -330,6 +428,7 @@ class RancherVersionIntegrationTest(unittest.TestCase):
                                 text=True, capture_output=True, check=True)
         self.assertIn('"[root] null_resource.rancher_managed_resource_patches (expand)" -> "[root] null_resource.rancher_system_ready (expand)"', result.stdout)
         self.assertIn('"[root] helm_release.rancher (expand)" -> "[root] null_resource.rancher_webhook_prepare (expand)"', result.stdout)
+        self.assertIn('"[root] helm_release.rancher (expand)" -> "[root] null_resource.rancher_provisioning_prepare (expand)"', result.stdout)
 
     def test_webhook_chart_settings_match_the_final_patch(self):
         result = subprocess.run(["tofu", "-chdir=" + os.environ["RANCHER_TEST_WORKSPACE"], "console", "-no-color"],
@@ -347,13 +446,20 @@ class RancherVersionIntegrationTest(unittest.TestCase):
         self.assertEqual(container["readinessProbe"]["httpGet"],
                          {"path": "/healthz", "port": "https", "scheme": "HTTPS"})
 
-    def test_actual_module_selects_turtles_without_retired_controllers(self):
+    def test_actual_module_keeps_features_patches_and_readiness_consistent(self):
         result = subprocess.run(["tofu", "-chdir=" + os.environ["RANCHER_TEST_WORKSPACE"], "console", "-no-color"],
-            input="jsonencode(keys(local.rancher_managed_resource_patches))\n",
+            input="jsonencode({enabled=local.rancher_provisioning_enabled_value, features=local.rancher_provisioning_features, patches=keys(local.rancher_managed_resource_patches), checks=local.rancher_readiness_checks, env=local.rancher_helm_values.extraEnv})\n",
             text=True, capture_output=True, check=True)
-        keys = json.loads(json.loads(result.stdout.strip()))
-        self.assertIn("cattle-turtles-system/rancher-turtles-controller-manager", keys)
-        self.assertIn("cattle-capi-system/capi-controller-manager", keys)
+        config = json.loads(json.loads(result.stdout.strip()))
+        keys, enabled = config["patches"], config["enabled"]
+        self.assertEqual(config["features"], {name: enabled for name in ["turtles", "provisioningv2", "rke2"]})
+        self.assertEqual("cattle-turtles-system/rancher-turtles-controller-manager" in keys, enabled)
+        self.assertEqual("cattle-capi-system/capi-controller-manager" in keys, enabled)
+        self.assertEqual("fleet-local/rke2-machineconfig-cleanup-cronjob" in keys, enabled)
+        self.assertEqual("cattle-turtles-system/rancher-turtles" in config["checks"]["releases"], enabled)
+        self.assertEqual(config["checks"]["provisioning_disabled"], not enabled)
+        features = next(env["value"] for env in config["env"] if env["name"] == "CATTLE_FEATURES")
+        self.assertIn("turtles=" + str(enabled).lower(), features)
         self.assertIn("cattle-fleet-local-system/fleet-agent", keys)
         self.assertNotIn("cattle-provisioning-capi-system/capi-controller-manager", keys)
         self.assertNotIn("cattle-system/api-extension", keys)
