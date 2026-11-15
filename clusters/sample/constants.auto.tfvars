@@ -121,5 +121,11 @@ constants = {
   }
   "k8s" = {
     "labels" = {}
+    # Optional headroom overrides. These are alternative examples, not defaults.
+    # "headroom_enabled" = false
+    # "headroom_cpu_percent" = 5
+    # "headroom_memory_percent" = 15
+    # "headroom_cpu_min_millicores" = 5
+    # "headroom_memory_min_mib" = 16
   }
 }

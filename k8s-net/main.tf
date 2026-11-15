@@ -116,7 +116,7 @@ locals {
     }
     infra-headroom = {
       value       = 700000
-      description = "Reserved priority for future shared memory headroom; no reservation workload is deployed."
+      description = "Shared worker CPU and memory scheduling headroom above monitoring and ordinary application workloads."
     }
     infra-monitoring = {
       value       = 600000

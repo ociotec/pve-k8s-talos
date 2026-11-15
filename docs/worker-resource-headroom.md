@@ -1,7 +1,8 @@
 # Worker CPU and memory headroom
 
-Status: Specified; implementation pending. Finalize rounding before implementation.
-No reservation workload is deployed by this specification.
+Status: Implemented. Residual and percentage reservations, idempotence, controlled
+preemption and incremental memory growth beyond requests validated. Dedicated CPU
+growth beyond requests and historical sizing review remain pending.
 
 ## Goal
 
@@ -86,23 +87,25 @@ percentage result or derive one resource budget from the other.
 
 Keep input variables, percentages, minimums and rounding controls independent.
 CPU limits must be at least the calculated request and the CPU operating limit
-floor. Memory limits equal calculated memory requests. Review rounding separately
-for CPU and memory and emit canonical Kubernetes quantities.
+floor, and stay strictly above the request to retain Burstable QoS. This avoids
+exclusive CPU assignment under CPU Manager static. Memory limits equal calculated
+memory requests. Round CPU upward to whole
+millicores and memory upward to whole MiB, then emit canonical Kubernetes quantities.
 
 Support heterogeneous workers and reject invalid inputs or a reservation that
 leaves no usable scheduling capacity. Zero percentages must still produce the
 pause container's operating resources, with all required requests and limits.
 Small nonzero percentages must never produce values below those minimums.
 
-A DaemonSet has a shared pod resource template. When calculated reservations
-differ between workers, the implementation must account for both resource values
-explicitly, for example through disjoint sizing groups. Use one combined headroom
-pod per eligible worker, not a separate pod for each resource. Never overlap
-reservation pods during group or profile changes.
+Each worker has a stable, independently sized DaemonSet targeting its node name
+through required affinity. Control planes are excluded. One combined pause pod
+reserves both resources. Required pod anti-affinity prevents simultaneous headroom
+placement on the same worker; rolling updates do not surge.
 
 Keep formulas, coefficients, bounds, rounding and defaults authoritative in the
-implementation. This document does not duplicate them. Once implemented, link
-the calculation source here.
+[implementation](../k8s-net/worker-headroom.tf). This document does not duplicate
+them. The [deployment gate](../scripts/worker-headroom.py) consumes the saved plan
+and state outputs rather than maintaining a second sizing formula.
 
 Document only significant overrides as commented examples under `k8s` in
 `clusters/sample/constants.auto.tfvars`. Examples must use clearly identified
@@ -181,9 +184,8 @@ normal deployment and state synchronization paths for activation and rollback.
 
 ## Acceptance
 
-- Finalize resource-specific rounding before implementation. CPU and memory
-  controls remain independent, with no duplicated defaults in this specification
-  or sample.
+- CPU and memory sizing and rounding remain independent, with no duplicated
+  defaults in this specification or sample.
 - Every eligible worker has exactly one Running, Ready headroom pod with the
   expected CPU and memory requests. Zero percentages retain operating minimums;
   disabling the component removes headroom pods entirely.

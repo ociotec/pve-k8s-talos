@@ -138,7 +138,9 @@ Then edit the files inside `clusters/<cluster>/`, using `clusters/sample/` as th
     Garage, Keycloak/PostgreSQL, and Redpanda brokers use `infra-services`.
     Monitoring, Rancher/Fleet, operational UIs, Kyverno reports, VPA/Goldilocks,
     and toolbox pods use `infra-monitoring`.
-  - `infra-headroom` is created without a workload: it reserves no CPU or memory.
+  - Worker headroom uses `infra-headroom`; shared defaults retain only minimal
+    pause resources. Optional percentages and opt-out are configured under `k8s`
+    in `constants.auto.tfvars`. See [worker headroom](docs/worker-resource-headroom.md).
     Ordinary pods without an explicit priority normally use 0; benchmarks use
     `infra-benchmark` (-100000) with `preemptionPolicy: Never`.
   - New class names update pod templates without rollout-marker annotations.

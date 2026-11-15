@@ -144,7 +144,7 @@ It complements `README.md` and focuses on execution behavior, change safety, and
   - `infra-services` (800000) for core cluster services whose absence breaks dependent workloads, such as identity data plane and Kafka brokers.
   - `infra-k8s` (1000000) for networking, ingress, certificates, metrics-server, admission, and node remediation.
   - `infra-ceph` (900000) for Rook, Ceph, CSI, and storage fencing controllers; exclude toolbox/debug pods.
-  - `infra-headroom` (700000) is reserved for future shared headroom; do not assign ordinary infrastructure workloads to it.
+  - `infra-headroom` (700000) is reserved for shared worker CPU/memory headroom; do not assign ordinary infrastructure workloads to it.
   - `infra-monitoring` (600000) for Rancher/Fleet, reporting, recommendations, monitoring, logging, dashboards, operational UIs, oauth2-proxy sidecars, and toolbox/debug service pods.
 - Benchmark workloads use `infra-benchmark` (-100000), created by `benchmark/main.tf`, with `preemptionPolicy: Never`.
 - Automatic Helm lifecycle hooks must use the priority appropriate to their service. Pods created only by `helm test` are excluded from priority coverage.

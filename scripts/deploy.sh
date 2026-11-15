@@ -2642,6 +2642,8 @@ prepare_k8s_net_workspace() {
     link_into_workspace "${repo_root}/k8s-net/.terraform" "${workspace}/.terraform"
   fi
   link_into_workspace "${repo_root}/k8s-net/main.tf" "${workspace}/main.tf"
+  link_into_workspace "${repo_root}/k8s-net/worker-headroom.tf" "${workspace}/worker-headroom.tf"
+  link_into_workspace "${cluster_constants_path}" "${workspace}/constants.auto.tfvars"
   link_into_workspace "${repo_root}/k8s-net/metallb-metrics.tf" "${workspace}/metallb-metrics.tf"
   python3 "${script_dir}/prepare-infrastructure-manifests.py" \
     --section k8s-net --constants "${cluster_k8s_net_constants_path}" --output "${workspace}"
@@ -4579,10 +4581,22 @@ else
   fi
   message "Checking MetalLB controller and webhook availability..."
   wait_for_metallb_available
-  tofu -chdir="${cluster_k8s_net_workspace}" apply -auto-approve \
+  # Use the exact reviewed sizing from the saved plan; never recompute budgets
+  # independently in the report or reconcile VM/Talos resources here.
+  headroom_plan="$(mktemp "${cluster_git_dir}/worker-headroom-plan.XXXXXX")"
+  headroom_baseline="$(mktemp "${cluster_git_dir}/worker-headroom-baseline.XXXXXX")"
+  run tofu -chdir="${cluster_k8s_net_workspace}" plan -input=false -out="${headroom_plan}" \
     -var="skip_ceph=${skip_ceph}" \
     -var="cluster_name=${cluster_name}" \
-    -var="proxmox_pool=${node_remediation_pool}" 1>/dev/null
+    -var="proxmox_pool=${node_remediation_pool}"
+  python3 "${script_dir}/worker-headroom.py" preflight \
+    --workspace "${cluster_k8s_net_workspace}" --kubeconfig "${cluster_kubeconfig_path}" \
+    --plan "${headroom_plan}" --baseline "${headroom_baseline}"
+  run tofu -chdir="${cluster_k8s_net_workspace}" apply -auto-approve "${headroom_plan}"
+  python3 "${script_dir}/worker-headroom.py" verify \
+    --workspace "${cluster_k8s_net_workspace}" --kubeconfig "${cluster_kubeconfig_path}" \
+    --baseline "${headroom_baseline}"
+  rm -f "${headroom_plan}" "${headroom_baseline}"
   validate_node_remediation_dedicated_proxmox_access
   reconcile_ingress_nginx_admission_jobs
 

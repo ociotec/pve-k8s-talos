@@ -8,7 +8,7 @@ Native system-*      unchanged
 infra-k8s              1000000
 infra-ceph              900000
 infra-services          800000
-infra-headroom          700000  (class only; no workload)
+infra-headroom          700000  (shared worker CPU/memory headroom)
 infra-monitoring        600000
 Unclassified pods           0
 infra-benchmark        -100000  (no preemption)
