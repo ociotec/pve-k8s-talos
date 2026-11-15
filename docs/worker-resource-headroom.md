@@ -1,7 +1,7 @@
 # Worker CPU and memory headroom
 
-Status: Draft. Review sizing formulas before implementation. No reservation
-workload is deployed by this specification.
+Status: Specified; implementation pending. Finalize rounding before implementation.
+No reservation workload is deployed by this specification.
 
 ## Goal
 
@@ -33,13 +33,15 @@ resource have no additional growth allowance for that resource.
 
 - Target workers only; exclude control planes.
 - Adopt shared defaults without adding constants to every existing cluster.
-- Support independent cluster opt-outs for CPU and memory, and disabling both.
-  Keep memory headroom excluded from the designated CI/CD environment; its CPU
-  policy is a separate decision. Express exclusions through cluster configuration,
+- Support independent CPU and memory percentages and an explicit whole-component
+  opt-out. Zero percentages retain the operating minimums; disabling the component
+  removes its pods entirely. Express exclusions through cluster configuration,
   never shared name checks.
 - Keep application requests, limits and priorities unchanged.
-- Integrate into the existing `k8s-net` section and deployment flow; no new section
-  or worker restart is required.
+- Configure overrides under `k8s` in `constants.auto.tfvars` and deploy through
+  the existing `k8s-net` section using `--services-only`; no new section is needed.
+- A headroom-only deployment must not reconcile VM or Talos configuration, enter
+  node maintenance, drain workers, or restart node/control-plane services.
 
 ## Reservation workload
 
@@ -53,10 +55,16 @@ Higher priority    Kubernetes / storage / essential services
 Lower priority    Monitoring / ordinary applications / benchmarks
 ```
 
-Use the existing `infra-headroom` PriorityClass. Configure it to prevent headroom
-pods from preempting other pods; its current preemption behavior must be updated
-as part of implementation. Higher-priority workloads may still preempt headroom.
-Do not move ordinary infrastructure into this class.
+Use the existing `infra-headroom` PriorityClass with `PreemptLowerPriority`.
+The scheduler may preempt lower-priority application and infrastructure pods to
+establish or enlarge the reservation. It cannot preempt equal- or higher-priority
+pods. Higher-priority workloads may in turn preempt headroom. Do not move ordinary
+infrastructure into this class.
+
+Ensure the PriorityClass exists before creating headroom workloads, including
+on a new cluster. Keep `infra-headroom` owned by `k8s-net/main.tf` and establish
+an explicit dependency from the DaemonSet to that existing class. No class
+ownership transfer or additional workspace is required.
 
 Define CPU and memory requests and limits, with equal memory request and limit,
 using shared implementation defaults. The CPU request represents intentional
@@ -70,17 +78,21 @@ DaemonSet readiness to detect failures.
 
 ## Sizing and configuration
 
-Calculate CPU and memory reservations automatically through separate formulas,
-each with its own input variables, coefficients, bounds, rounding and overrides.
-Do not derive one resource budget from the other or couple their tuning controls.
-Review the relevance of declared vCPUs, memory, pod density and existing node
-reservations separately for each calculation. Select the formulas in the pending
-sizing review; do not assume both resources need the same proportional margin.
+Calculate CPU and memory requests separately from each worker's Kubernetes
+Allocatable, after host reservations and the memory eviction margin. For each
+resource, use the larger of its configured operating minimum and its independently
+configured percentage of Allocatable. Do not add the minimum on top of the
+percentage result or derive one resource budget from the other.
+
+Keep input variables, percentages, minimums and rounding controls independent.
+CPU limits must be at least the calculated request and the CPU operating limit
+floor. Memory limits equal calculated memory requests. Review rounding separately
+for CPU and memory and emit canonical Kubernetes quantities.
 
 Support heterogeneous workers and reject invalid inputs or a reservation that
-leaves no usable scheduling capacity for an enabled resource. Account for the
-pause container's minimal operating resources when either headroom budget is
-disabled; disabling a budget must not remove required requests or limits.
+leaves no usable scheduling capacity. Zero percentages must still produce the
+pause container's operating resources, with all required requests and limits.
+Small nonzero percentages must never produce values below those minimums.
 
 A DaemonSet has a shared pod resource template. When calculated reservations
 differ between workers, the implementation must account for both resource values
@@ -92,27 +104,24 @@ Keep formulas, coefficients, bounds, rounding and defaults authoritative in the
 implementation. This document does not duplicate them. Once implemented, link
 the calculation source here.
 
-Document only significant overrides as commented examples in the relevant
-sample constants file. Examples must use clearly identified alternative values,
-not copies of defaults. Existing cluster constants need no edits unless opting
-out or overriding shared behavior.
+Document only significant overrides as commented examples under `k8s` in
+`clusters/sample/constants.auto.tfvars`. Examples must use clearly identified
+alternative values, not copies of defaults. Existing cluster constants need no
+edits unless opting out or overriding shared behavior. Shared defaults establish
+only residual operating requests until additional percentage headroom is enabled.
 
 ## Capacity and activation
 
 ```text
 Read-only per-worker fit report
           |
-Enough CPU and memory for workloads + headroom?
+Validate reservation and report potential displacement
           |
-     +----+----+
-    yes       no
-     |         `-- Report deficit; increase capacity or reduce workloads
-     v
-Explicitly authorized pilot
+Explicitly authorized Kubernetes-only apply
           |
-Verify coverage, requests, priorities and workload stability
+Scheduler places headroom, preempting lower-priority pods if needed
           |
-Broader explicitly authorized rollout
+Verify coverage and report affected / Pending workloads
 ```
 
 Check CPU and memory fit separately per worker against live Allocatable and
@@ -122,14 +131,26 @@ for each resource. Spare CPU cannot compensate for a memory deficit, or vice
 versa; cluster-wide spare capacity cannot compensate for a worker deficit.
 Explain other scheduling blockers such as taints, selectors and pod-count limits.
 
-Insufficient capacity fails preflight before activation. Scheduling remains the
-final authority: if capacity changes after preflight, the headroom pod stays
-Pending without preempting workloads, and deployment validation reports incomplete
-coverage. Do not silently reduce the calculated reservation to make it fit.
+Reject invalid or impossible reservation settings before activation. Report
+existing request deficits and estimate which priority groups may be displaced;
+a deficit recoverable through lower-priority preemption must not block activation.
+Scheduling remains the final authority. If equal- or higher-priority requests or
+other constraints prevent placement, headroom can remain Pending and deployment
+validation must report incomplete coverage. Do not silently reduce the reservation
+or lower workload requests to make it fit.
 
-Existing pods are not automatically rebalanced. Do not drain workers or restart
-applications to activate this feature. Changes to headroom size must avoid
-overlapping reservation pods and expose incomplete coverage during replacement.
+Preempted workloads may restart elsewhere or remain Pending. PodDisruptionBudgets
+are not a strict protection against scheduler preemption. These interruptions are
+an accepted consequence of establishing the reservation, not an instruction to
+drain workers or explicitly roll out unrelated workloads.
+
+Changes to reservation size replace only the affected headroom pods and may
+trigger scheduler preemption. Avoid overlapping reservation pods and expose
+incomplete coverage during replacement. Unchanged configuration must be a no-op.
+
+Keep headroom resources separate from VM/Talos reconciliation and reuse the normal
+deployment authorization and state synchronization paths. Applying headroom alone
+must not certify unrelated VM/Talos changes as deployed.
 
 ## Guarantees and limits
 
@@ -150,8 +171,9 @@ or memory isolation.
 
 Higher-priority scheduling may consume the margin by displacing the pause pod.
 Report missing or Pending headroom as reduced coverage rather than claiming the
-worker remains protected. Capacity must accommodate the intended workloads and
-headroom together; preemption is not a substitute for sizing.
+worker remains protected. To run all intended workloads alongside headroom,
+capacity must accommodate both; otherwise increase capacity or reduce workloads.
+Successful headroom placement alone does not prove application capacity is adequate.
 
 Removing or disabling the feature deletes only its reservation workloads and
 releases their scheduling requests. Retain the shared PriorityClass. Reuse the
@@ -159,24 +181,28 @@ normal deployment and state synchronization paths for activation and rollback.
 
 ## Acceptance
 
-- Review both formulas before implementation begins. CPU and memory controls
-  remain independent, with no duplicated defaults in this specification or sample.
+- Finalize resource-specific rounding before implementation. CPU and memory
+  controls remain independent, with no duplicated defaults in this specification
+  or sample.
 - Every eligible worker has exactly one Running, Ready headroom pod with the
-  expected CPU and memory requests. A disabled resource retains only the pause
-  container's operating budget; workers excluded from both have no headroom pod.
-- Actual priority and non-preempting behavior match the design. No workload is
-  preempted by a headroom pod, including on a full worker.
+  expected CPU and memory requests. Zero percentages retain operating minimums;
+  disabling the component removes headroom pods entirely.
+- Actual priority and preemption behavior match the design. Headroom can displace
+  lower-priority workloads, but cannot preempt equal- or higher-priority pods.
 - Heterogeneous sizes, small workers, node additions, profile changes and opt-out
   preserve coverage and never create duplicate reservations.
-- Fit failures are actionable; capacity races leave Pending reservations and a
-  failed coverage check, without silently changing the requested budget.
+- Capacity and scheduling failures are actionable. Incomplete coverage fails
+  validation without silently changing the requested budget. Report workloads
+  displaced or left Pending even when headroom placement succeeds.
 - Controlled tests independently demonstrate CPU bursts and memory growth within
   workload limits, while new placements are constrained by the corresponding
-  reservation requests. Verify CPU-only, memory-only and combined operation.
-- The pilot records before/after scheduling capacity, pod identities and restarts,
+  reservation requests. Verify residual-only, CPU-only, memory-only and combined
+  operation, including percentage results below the operating minimums.
+- Validation records before/after scheduling capacity, pod identities and restarts,
   requested headroom and actual pause consumption, CPU saturation, throttling,
-  service latency, memory pressure events and OOMs. Investigate regressions before
-  expanding the rollout.
+  service latency, preemption, memory pressure events and OOMs.
+- Headroom-only changes never apply VM/Talos changes or restart node/control-plane
+  services. They may replace pause pods and cause lower-priority preemption only.
 - Reapplying unchanged configuration does not restart workloads. Disabling the
   feature restores scheduling capacity without changing host reservations.
 - Review historical usage after a representative observation period before
