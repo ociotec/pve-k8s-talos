@@ -314,15 +314,14 @@ resource "terraform_data" "vpa_goldilocks_configuration" {
 }
 
 resource "helm_release" "vpa" {
-  count      = local.enable_vpa_value ? 1 : 0
-  name       = "vpa"
-  namespace  = "monitoring"
-  repository = "https://charts.fairwinds.com/stable"
-  chart      = "vpa"
-  version    = "5.1.0"
-  wait       = true
-  atomic     = true
-  timeout    = 600
+  count     = local.enable_vpa_value ? 1 : 0
+  name      = "vpa"
+  namespace = "monitoring"
+  chart     = local.helm_chart_downloads.vpa.path
+  version   = local.helm_chart_downloads.vpa.version
+  wait      = true
+  atomic    = true
+  timeout   = 600
   values = [yamlencode({
     fullnameOverride  = "vpa"
     priorityClassName = "infra-monitoring"

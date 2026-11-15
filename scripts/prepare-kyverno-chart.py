@@ -9,7 +9,8 @@ from pathlib import Path
 import re
 import sys
 import tarfile
-import urllib.request
+
+from chart_downloads import fetch_bytes
 
 
 CHART_DIGESTS = {
@@ -62,8 +63,7 @@ def prepare_chart(version, output):
     archive = cache.read_bytes() if cache.is_file() else b""
     digest = CHART_DIGESTS[version]
     if hashlib.sha256(archive).hexdigest() != digest:
-        with urllib.request.urlopen(f"https://kyverno.github.io/kyverno/kyverno-{version}.tgz", timeout=60) as response:
-            archive = response.read()
+        archive = fetch_bytes(f"https://kyverno.github.io/kyverno/kyverno-{version}.tgz")
         if hashlib.sha256(archive).hexdigest() != digest:
             raise ValueError("Kyverno chart checksum does not match the pinned official digest")
         cache.parent.mkdir(parents=True, exist_ok=True)

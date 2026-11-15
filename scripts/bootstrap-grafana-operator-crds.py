@@ -8,6 +8,8 @@ import subprocess
 import sys
 import tempfile
 
+from chart_downloads import retry_download
+
 
 def run(args, payload=None):
     result = subprocess.run(args, input=payload, capture_output=True, text=True, timeout=180)
@@ -36,13 +38,18 @@ def objects_from_stream(text):
     return objects
 
 
-def render_chart(version, execute=run):
+def render_chart(version, execute=run, chart=None):
     # Helm 4 may emit OCI pull metadata on stdout. Read manifest files instead
     # so progress output can never be submitted to the Kubernetes API.
     with tempfile.TemporaryDirectory(prefix='grafana-operator-crds-') as directory:
-        execute(['helm', 'template', 'grafana-operator', 'oci://ghcr.io/grafana/helm-charts/grafana-operator',
-                 '--version', version, '--namespace', 'monitoring', '--include-crds',
-                 '--set', 'crds.immutable=false', '--output-dir', directory])
+        command = ['helm', 'template', 'grafana-operator',
+                   str(chart) if chart else 'oci://ghcr.io/grafana/helm-charts/grafana-operator',
+                   '--version', version, '--namespace', 'monitoring', '--include-crds',
+                   '--set', 'crds.immutable=false', '--output-dir', directory]
+        if chart:
+            execute(command)
+        else:
+            retry_download(lambda: execute(command), 'Grafana Operator')
         rendered = '\n---\n'.join(path.read_text() for path in sorted(Path(directory).rglob('*.yaml')))
     if not rendered.strip():
         raise ValueError('The pinned Grafana Operator chart produced no manifest files.')
@@ -88,6 +95,7 @@ def main():
     parser.add_argument('--constants', required=True)
     parser.add_argument('--kubeconfig', required=True)
     parser.add_argument('--check-only', action='store_true')
+    parser.add_argument('--chart-dir', type=Path, help='Use the already prepared local chart cache')
     args = parser.parse_args()
     text = Path(args.constants).read_text()
     if not re.search(r'^\s*grafana_operator_enabled\s*=\s*true\s*$', text, re.M):
@@ -97,7 +105,10 @@ def main():
     if not re.fullmatch(r'\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?', version):
         raise ValueError('An explicit Grafana Operator chart version is required.')
     kube = ['kubectl', '--kubeconfig', args.kubeconfig, '--request-timeout=30s']
-    rendered = render_chart(version)
+    chart = args.chart_dir / f'grafana-operator-{version}.tgz' if args.chart_dir else None
+    if chart and not chart.is_file():
+        raise ValueError('The configured Grafana Operator chart has not been prepared.')
+    rendered = render_chart(version, chart=chart)
     # Let the existing Kubernetes client decode YAML; no new Python YAML dependency.
     items = objects_from_stream(run(kube + ['create', '--dry-run=client', '--validate=false', '-f', '-', '-o', 'json'], rendered))
     crds = [obj for obj in items if obj.get('kind') == 'CustomResourceDefinition']

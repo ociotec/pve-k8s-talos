@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -16,6 +17,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / 'scripts'))
 SPEC = importlib.util.spec_from_file_location("kyverno_chart", ROOT / "scripts/prepare-kyverno-chart.py")
 CHART = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CHART)
@@ -68,10 +70,10 @@ class HookPreparationTest(unittest.TestCase):
         data = archive(self.fixture())
         with tempfile.TemporaryDirectory() as directory, patch.dict(CHART.CHART_DIGESTS, {"3.7.0": hashlib.sha256(data).hexdigest()}):
             output = Path(directory) / "chart.tgz"
-            with patch.object(CHART.urllib.request, "urlopen", return_value=io.BytesIO(data)):
+            with patch.object(CHART, "fetch_bytes", return_value=data):
                 CHART.prepare_chart("3.7.0", output)
             before = output.read_bytes(), output.stat().st_mtime_ns
-            with patch.object(CHART.urllib.request, "urlopen", side_effect=AssertionError("Cache should be reused")):
+            with patch.object(CHART, "fetch_bytes", side_effect=AssertionError("Cache should be reused")):
                 CHART.prepare_chart("3.7.0", output)
             self.assertEqual((output.read_bytes(), output.stat().st_mtime_ns), before)
 
@@ -79,7 +81,7 @@ class HookPreparationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "chart.tgz"
             output.write_bytes(b"previous")
-            with patch.object(CHART.urllib.request, "urlopen", return_value=io.BytesIO(b"unverified")):
+            with patch.object(CHART, "fetch_bytes", return_value=b"unverified"):
                 with self.assertRaisesRegex(ValueError, "checksum"):
                     CHART.prepare_chart("3.7.0", output)
             self.assertEqual(output.read_bytes(), b"previous")
@@ -91,7 +93,7 @@ class HookPreparationTest(unittest.TestCase):
             constants.write_text("locals {\n enable_kyverno_audit = false\n enable_kyverno_enforce = false\n}\n")
             output = Path(directory) / "chart.tgz"
             with patch.object(CHART.sys, "argv", ["prepare", "--constants", str(constants), "--output", str(output)]), \
-                    patch.object(CHART.urllib.request, "urlopen", side_effect=AssertionError("Kyverno is disabled")):
+                    patch.object(CHART, "fetch_bytes", side_effect=AssertionError("Kyverno is disabled")):
                 self.assertEqual(CHART.main(), 0)
             self.assertFalse(output.exists())
 
@@ -113,7 +115,7 @@ class RenderedHooksTest(unittest.TestCase):
                 source = Path(os.environ["KYVERNO_TEST_CHARTS_DIR"]) / f"kyverno-{version}.tgz"
                 self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), digest)
                 output = Path(directory) / "prepared.tgz"
-                with patch.object(CHART.urllib.request, "urlopen", return_value=io.BytesIO(source.read_bytes())):
+                with patch.object(CHART, "fetch_bytes", return_value=source.read_bytes()):
                     CHART.prepare_chart(version, output)
 
                 def render(path):

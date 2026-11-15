@@ -1789,14 +1789,13 @@ resource "kubernetes_secret_v1" "policy_reporter_oauth" {
 resource "helm_release" "policy_reporter" {
   count = local.enable_policy_reporter_value ? 1 : 0
 
-  name       = "policy-reporter"
-  namespace  = "monitoring"
-  repository = "oci://ghcr.io/kyverno/charts"
-  chart      = "policy-reporter"
-  version    = local.policy_reporter_chart_version_value
-  wait       = true
-  timeout    = 600
-  atomic     = true
+  name      = "policy-reporter"
+  namespace = "monitoring"
+  chart     = local.helm_chart_downloads.policy-reporter.path
+  version   = local.helm_chart_downloads.policy-reporter.version
+  wait      = true
+  timeout   = 600
+  atomic    = true
 
   values = [yamlencode(merge({
     priorityClassName = "infra-monitoring"
@@ -1863,13 +1862,12 @@ resource "helm_release" "policy_reporter" {
 resource "helm_release" "grafana" {
   count = local.grafana_helm_enabled_value ? 1 : 0
 
-  name       = "grafana"
-  namespace  = "monitoring"
-  repository = "oci://ghcr.io/grafana-community/helm-charts"
-  chart      = "grafana"
-  version    = local.grafana_helm_chart_version_value
-  wait       = true
-  timeout    = 600
+  name      = "grafana"
+  namespace = "monitoring"
+  chart     = local.helm_chart_downloads.grafana.path
+  version   = local.helm_chart_downloads.grafana.version
+  wait      = true
+  timeout   = 600
 
   # During the one-time migration Helm adopts the existing Service after the
   # deployment script removes the legacy Deployment with its immutable selector.
@@ -2134,14 +2132,13 @@ resource "helm_release" "grafana" {
 resource "helm_release" "grafana_operator" {
   count = local.grafana_operator_enabled_value ? 1 : 0
 
-  name       = "grafana-operator"
-  namespace  = "monitoring"
-  repository = "oci://ghcr.io/grafana/helm-charts"
-  chart      = "grafana-operator"
-  version    = local.grafana_operator_chart_version_value
-  wait       = true
-  timeout    = 600
-  atomic     = true
+  name      = "grafana-operator"
+  namespace = "monitoring"
+  chart     = local.helm_chart_downloads.grafana-operator.path
+  version   = local.helm_chart_downloads.grafana-operator.version
+  wait      = true
+  timeout   = 600
+  atomic    = true
 
   values = [yamlencode({
     namespaceScope     = false

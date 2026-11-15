@@ -10,7 +10,8 @@ from pathlib import Path
 import re
 import sys
 import tarfile
-import urllib.request
+
+from chart_downloads import fetch_bytes
 
 
 CHART_DIGESTS = {
@@ -100,7 +101,7 @@ def prepare_chart(version, output):
     if version not in CHART_DIGESTS:
         raise ValueError("Unsupported Rancher chart version; review and pin its digest before use")
     url = f"https://releases.rancher.com/server-charts/stable/rancher-{version}.tgz"
-    archive = urllib.request.urlopen(url, timeout=60).read()
+    archive = fetch_bytes(url)
     if hashlib.sha256(archive).hexdigest() != CHART_DIGESTS[version]:
         raise ValueError("Rancher chart checksum does not match the pinned official digest")
     buffer = io.BytesIO()

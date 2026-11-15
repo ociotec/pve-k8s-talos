@@ -2672,6 +2672,7 @@ prepare_monitoring_workspace() {
     link_into_workspace "${repo_root}/monitoring/.terraform" "${workspace}/.terraform"
   fi
   link_into_workspace "${repo_root}/monitoring/main.tf" "${workspace}/main.tf"
+  link_into_workspace "${repo_root}/monitoring/helm-charts.tf" "${workspace}/helm-charts.tf"
   link_into_workspace "${repo_root}/monitoring/metallb-metrics.tf" "${workspace}/metallb-metrics.tf"
   link_into_workspace "${repo_root}/monitoring/intercluster.tf" "${workspace}/intercluster.tf"
   link_into_workspace "${repo_root}/monitoring/query-api.conf" "${workspace}/query-api.conf"
@@ -4552,11 +4553,16 @@ else
   node_remediation_pool="$(tf_map_string_value "${cluster_constants_path}" vm pool)"
   message "Deploying k8s networking and ingress (k8s-net)..."
   run_tofu_init "${cluster_k8s_net_workspace}"
+  run tofu -chdir="${cluster_k8s_net_workspace}" validate
+  python3 "${script_dir}/migrate-metallb-daemonset-state.py" \
+    --workspace "${cluster_k8s_net_workspace}" --kubeconfig "${cluster_kubeconfig_path}" \
+    --cluster-dir "${cluster_dir}" --execute
   run tofu -chdir="${cluster_k8s_net_workspace}" apply -auto-approve \
     -target=kubernetes_manifest.cert_manager_crds \
     -target=kubernetes_manifest.metallb_native_crds \
     -target=kubernetes_manifest.metallb_native_namespace \
     -target=kubernetes_manifest.metallb_native \
+    -target=local_file.metallb_native_daemonsets \
     -target=local_file.cert_manager_ca_cert \
     -target=local_file.cert_manager_ca_key \
     -target=helm_release.kyverno \
@@ -4564,6 +4570,13 @@ else
     -var="skip_ceph=${skip_ceph}" \
     -var="cluster_name=${cluster_name}" \
     -var="proxmox_pool=${node_remediation_pool}"
+  # Reconcile on every deployment so manual drift is repaired without keeping
+  # controller-owned DaemonSet annotations in kubernetes_manifest.object.
+  if [[ -s "${cluster_k8s_net_workspace}/.generated-metallb-daemonsets.yaml" ]]; then
+    run kubectl apply --server-side --field-manager=Terraform --force-conflicts \
+      -f "${cluster_k8s_net_workspace}/.generated-metallb-daemonsets.yaml"
+    run kubectl rollout status -f "${cluster_k8s_net_workspace}/.generated-metallb-daemonsets.yaml" --timeout=600s
+  fi
   message "Checking MetalLB controller and webhook availability..."
   wait_for_metallb_available
   tofu -chdir="${cluster_k8s_net_workspace}" apply -auto-approve \
@@ -4762,8 +4775,10 @@ else
   message "Deploying monitoring stack..."
   run_tofu_init "${cluster_monitoring_workspace}"
   run tofu -chdir="${cluster_monitoring_workspace}" validate
+  python3 "${script_dir}/chart_downloads.py" --workspace "${cluster_monitoring_workspace}"
   python3 "${script_dir}/bootstrap-grafana-operator-crds.py" \
-    --constants "${cluster_monitoring_constants_path}" --kubeconfig "${cluster_kubeconfig_path}"
+    --constants "${cluster_monitoring_constants_path}" --kubeconfig "${cluster_kubeconfig_path}" \
+    --chart-dir "${cluster_monitoring_workspace}/.charts"
   migrate_grafana_workload_state_to_helm "${cluster_monitoring_workspace}"
   reset_legacy_loki_storage
   monitoring_loki_config_hash_before=""

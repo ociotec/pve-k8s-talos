@@ -349,6 +349,9 @@ locals {
     for m in local.metallb_native : m
     if try(m.kind, "") != "CustomResourceDefinition" && try(m.kind, "") != "Namespace"
   ]
+  metallb_native_daemonsets = [
+    for m in local.metallb_native_other : m if m.kind == "DaemonSet"
+  ]
   metallb_pool = [
     for doc in split("\n---\n", templatefile("${path.module}/metallb-pool.yaml", {
       metallb_pool_start = local.metallb_pool_start
@@ -928,22 +931,10 @@ resource "kubernetes_manifest" "metallb_native_namespace" {
 }
 
 resource "kubernetes_manifest" "metallb_native" {
-  for_each = { for i, m in local.metallb_native_other : i => m }
-  manifest = each.value
-  computed_fields = [
-    "metadata.annotations",
-    "metadata.annotations[\"deprecated.daemonset.template.generation\"]",
-    "object.metadata.annotations",
-    "object.metadata.annotations[\"deprecated.daemonset.template.generation\"]",
-  ]
-  lifecycle {
-    ignore_changes = [
-      manifest.metadata.annotations,
-      manifest.metadata.annotations["deprecated.daemonset.template.generation"],
-      object.metadata.annotations,
-      object.metadata.annotations["deprecated.daemonset.template.generation"],
-    ]
-  }
+  # Filter after indexing to preserve every other resource's existing address.
+  for_each        = { for i, m in local.metallb_native_other : i => m if m.kind != "DaemonSet" }
+  manifest        = each.value
+  computed_fields = ["metadata.annotations"]
   field_manager {
     force_conflicts = true
   }
@@ -952,6 +943,12 @@ resource "kubernetes_manifest" "metallb_native" {
     kubernetes_secret_v1.metallb_metrics_tls,
     kubernetes_priority_class_v1.infrastructure,
   ]
+}
+
+resource "local_file" "metallb_native_daemonsets" {
+  count    = length(local.metallb_native_daemonsets) > 0 ? 1 : 0
+  filename = "${path.module}/.generated-metallb-daemonsets.yaml"
+  content  = join("\n---\n", [for m in local.metallb_native_daemonsets : yamlencode(m)])
 }
 
 resource "kubernetes_manifest" "metallb_pool" {

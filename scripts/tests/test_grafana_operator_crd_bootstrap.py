@@ -2,15 +2,30 @@ import copy
 import importlib.util
 import json
 from pathlib import Path
+import sys
+import tempfile
 import unittest
 
 PATH=Path(__file__).resolve().parents[1]/'bootstrap-grafana-operator-crds.py'
+sys.path.insert(0, str(PATH.parent))
 spec=importlib.util.spec_from_file_location('operator_crds',PATH);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
 
 def definition():
     return {'apiVersion':'apiextensions.k8s.io/v1','kind':'CustomResourceDefinition','metadata':{'name':'grafanas.grafana.integreatly.org'},'spec':{'names':{'kind':'Grafana'},'versions':[{'name':'v1beta1','served':True}]}}
 
 class CrdBootstrapTest(unittest.TestCase):
+    def test_prepared_chart_renders_without_an_oci_fetch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chart = Path(directory) / 'grafana-operator-5.25.0.tgz'
+            chart.touch()
+            def run(args, payload=None):
+                self.assertEqual(args[3], str(chart))
+                self.assertFalse(any(arg.startswith('oci://') for arg in args))
+                output = Path(args[args.index('--output-dir') + 1]) / 'chart'
+                output.mkdir()
+                (output / 'crd.yaml').write_text(json.dumps(definition()))
+            self.assertEqual(json.loads(module.render_chart('5.25.0', execute=run, chart=chart)), definition())
+
     def test_helm_oci_progress_output_never_becomes_a_manifest(self):
         def run(args, payload=None):
             output = Path(args[args.index('--output-dir') + 1]) / 'grafana-operator' / 'crds'

@@ -611,6 +611,15 @@ writes or Tempo PVC data.
 
 ### Cold monitoring bootstrap and data health
 
+Deployment prepares the configured monitoring Helm charts locally before any
+monitoring apply. Downloads retry transient network and HTTP service errors up to
+four times, waiting 2, 4, and 8 seconds between attempts. Authentication, missing
+chart versions, certificate, and integrity errors stop immediately. Valid cached
+archives are reused with their recorded SHA-256 and chart identity; versions and
+repositories come from the shared module. Kyverno and Rancher downloads use the
+same retry policy and retain their pinned checksum checks. OpenTofu applies and
+Helm upgrades are never retried automatically.
+
 Before monitoring apply, the configured Grafana Operator chart supplies any
 missing CRDs, which are created atomically with the release's Helm ownership.
 Existing CRDs are inspected without modification; foreign ownership is rejected.
@@ -836,12 +845,22 @@ Define your constants in `clusters/<cluster>/k8s_net_constants.tf`: domain, CA o
 The MetalLB pool and ingress service are rendered from templates using those values.
 Do not apply `k8s-net/metallb-pool.yaml` or `k8s-net/ingress-nginx-controller.yaml` directly; OpenTofu renders them with your constants.
 
-To deploy these resources run the following command:
+Deploy from the real cluster directory:
 
 ```bash
-tofu -chdir=k8s-net init
-tofu -chdir=k8s-net apply -auto-approve
+cd clusters/<cluster>
+direnv exec . ../../scripts/deploy.sh --services-only \
+  --skip-ceph --skip-identity --skip-s3-storage --skip-monitoring \
+  --skip-platform --skip-kafka --skip-benchmark
 ```
+
+MetalLB DaemonSets use generated manifests and server-side apply on every
+deployment, followed by rollout checks. This avoids provider failures on
+controller-owned generation annotations while still correcting manual drift.
+For existing clusters, `deploy.sh` verifies the live UID and selector, saves a
+private state backup under the cluster Git directory, and detaches only the
+old DaemonSet manifest state. The live DaemonSet remains in place. Use this
+deployment path for the handoff; a bare module apply does not perform it.
 
 `deploy.sh` applies the stack in this order: `k8s-net -> ceph -> identity -> s3-storage -> monitoring -> platform -> kafka -> benchmark`.
 

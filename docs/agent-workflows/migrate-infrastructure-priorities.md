@@ -32,6 +32,12 @@ infra-benchmark        -100000  (no preemption)
 - Inspect plans: old classes must be forgotten, not destroyed, while new classes
   are created. Preserve existing platform resource indices when filtering the
   retired Rancher class.
+- Existing MetalLB DaemonSets also need the automatic state handoff performed
+  by `deploy.sh`: inspect it with `scripts/migrate-metallb-daemonset-state.py`
+  without `--execute`. It checks the live UID and selector before detaching
+  only the old manifest state, with a private backup. For a pre-deployment plan,
+  simulate that handoff on a private state copy. Never apply a bare plan which
+  deletes the existing DaemonSet; server-side apply keeps the live object.
 
 ## Deployment and cleanup
 
