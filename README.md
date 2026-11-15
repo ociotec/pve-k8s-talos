@@ -4,6 +4,9 @@ Automatic deployment of a k8s Talos cluster on Promox VE virtual machines with O
 
 For contributor and automation-agent working rules (change placement, validation discipline, provider/lockfile policy, and known OpenTofu/Kubernetes provider caveats), see [AGENTS.md](AGENTS.md).
 
+See the [documentation index](docs/README.md) for specifications, architecture,
+operational guides and evaluations.
+
 ## Infrastructure
 
 ### Install requirements
