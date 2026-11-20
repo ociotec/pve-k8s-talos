@@ -984,6 +984,21 @@ Use the same domain as `k8s_net_constants.tf` so TLS and DNS align.
 
 Kubernetes pod-log collection is selected per cluster with `kubernetes_log_collector = "promtail"` or `"alloy"`. Clusters that omit the setting remain on Promtail for backward compatibility; new clusters should use Alloy. The deployment waits for the selected collector to become healthy and successfully send entries to Loki before removing an inactive collector DaemonSet, so Promtail remains available as a cluster-by-cluster rollback path. Grafana provisions only the internal-metrics dashboard for the selected collector. Set `kubernetes_events_enabled = true` only with Alloy to retain Kubernetes Events as structured JSON logs in Loki and provision the Kubernetes Events dashboard.
 
+Loki's native level discovery stores `detected_level` as structured metadata for
+new entries, supporting JSON, logfmt, plain text, and OTLP severity metadata.
+Plain-text detection is heuristic and can match level words in the message.
+Filter new logs with `{service_name="example-service"} | detected_level="warn"`.
+Existing logs remain readable within the unchanged retention period; their levels
+can be extracted at query time, for example:
+
+```logql
+{service_name="example-service"}
+  | regexp `(?i)\b(?P<historical_level>WARN|WARNING)\b`
+  | historical_level!=""
+```
+
+Query-time extraction does not backfill stored metadata.
+
 When `grafana_auth_keycloak_realm` is set in `monitoring_constants.tf`, OpenTofu configures Grafana generic OAuth against the generated Keycloak `grafana` client. Use `grafana_auth_view_groups` for Grafana `Viewer` access and `grafana_auth_edit_groups` for Grafana `Editor` access. Keep the local Grafana admin credentials for server administration and break-glass recovery.
 
 Set `grafana_helm_enabled = true` to manage the Grafana workload with the
