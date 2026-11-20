@@ -13,6 +13,13 @@ variable "vpa_goldilocks" {
     allowed_groups  = optional(list(string), ["k8s-admins", "monitoring-view"])
     oauth2_proxy_image_tag = optional(string, "v7.15.3")
     recommender_image_tag = optional(string, "1.7.1")
+    # Recommendation floors are independent of the recommender's own resources.
+    recommender_min_cpu_millicores = optional(number, 10)
+    recommender_min_memory_mb      = optional(number, 10)
+    # Null preserves the recommender binary's defaults for history processing.
+    recommender_cpu_histogram_decay_half_life    = optional(string)
+    recommender_memory_histogram_decay_half_life = optional(string)
+    recommender_memory_aggregation_interval      = optional(string)
     # Null selects capacity-based sizing from declared worker CPU and RAM.
     recommender_cpu_request = optional(string)
     recommender_cpu_limit   = optional(string)
@@ -27,6 +34,24 @@ variable "vpa_goldilocks" {
     go_mem_limit_percent = optional(number, 80)
   })
   default = {}
+  validation {
+    condition = (
+      var.vpa_goldilocks.recommender_min_cpu_millicores >= 0 &&
+      var.vpa_goldilocks.recommender_min_memory_mb >= 0
+    )
+    error_message = "VPA recommendation floors must be non-negative numbers in millicores and MB."
+  }
+  validation {
+    condition = alltrue([for duration in [
+      var.vpa_goldilocks.recommender_cpu_histogram_decay_half_life,
+      var.vpa_goldilocks.recommender_memory_histogram_decay_half_life,
+      var.vpa_goldilocks.recommender_memory_aggregation_interval,
+      ] : duration == null ? true : (
+      can(regex("^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$", duration)) &&
+      can(regex("[1-9]", duration))
+    )])
+    error_message = "VPA history durations must be positive Go durations, such as 30m, 1h or 1h30m, or null to retain upstream defaults."
+  }
   validation {
     condition     = var.vpa_goldilocks.go_mem_limit_percent > 0 && var.vpa_goldilocks.go_mem_limit_percent < 100
     error_message = "go_mem_limit_percent must be greater than 0 and less than 100."
@@ -336,11 +361,16 @@ resource "helm_release" "vpa" {
     recommender = {
       enabled = true
       image   = { repository = "registry.k8s.io/autoscaling/vpa-recommender", tag = var.vpa_goldilocks.recommender_image_tag }
-      # Lower the upstream recommendation floors for small infrastructure pods.
-      extraArgs = {
-        "pod-recommendation-min-cpu-millicores" = 10
-        "pod-recommendation-min-memory-mb"      = 10
-      }
+      extraArgs = merge({
+        "pod-recommendation-min-cpu-millicores" = var.vpa_goldilocks.recommender_min_cpu_millicores
+        "pod-recommendation-min-memory-mb"      = var.vpa_goldilocks.recommender_min_memory_mb
+        }, {
+        for flag, duration in {
+          "cpu-histogram-decay-half-life"    = var.vpa_goldilocks.recommender_cpu_histogram_decay_half_life
+          "memory-histogram-decay-half-life" = var.vpa_goldilocks.recommender_memory_histogram_decay_half_life
+          "memory-aggregation-interval"      = var.vpa_goldilocks.recommender_memory_aggregation_interval
+        } : flag => duration if duration != null
+      })
       podLabels = {
         "app.kubernetes.io/part-of"    = "vpa"
         "app.kubernetes.io/managed-by" = "infrastructure"

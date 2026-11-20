@@ -22,7 +22,7 @@ The deployment section is `monitoring`, with a Keycloak client configured throug
 `identity` and `identity-config`.
 
 - VPA chart `5.1.0` installs its CRDs and recommender `1.7.1`.
-- The recommender uses fixed platform-wide recommendation floors of 10 millicores
+- The recommender defaults to recommendation floors of 10 millicores
   of CPU and 10 MB of memory per pod, allowing smaller recommendations for
   lightweight infrastructure workloads. These floors do not replace usage-based
   estimates or their safety margins and do not set workload requests or limits.
@@ -80,6 +80,25 @@ vpa_goldilocks = {
   keycloak_realm     = "company"
 }
 ```
+
+Each cluster can override recommendation floors and history processing in its
+`vpa-goldilocks.auto.tfvars`, inside the existing `vpa_goldilocks` object:
+
+```hcl
+  recommender_min_cpu_millicores               = 10
+  recommender_min_memory_mb                    = 10
+  recommender_cpu_histogram_decay_half_life    = "30m"
+  recommender_memory_histogram_decay_half_life = "1h"
+  recommender_memory_aggregation_interval      = "15m"
+```
+
+The floors accept non-negative numbers and default to 10 when omitted or null.
+The three history settings accept positive Go durations such as `30m`, `1h`,
+or `1h30m`; omitted or null settings are not passed to the recommender, preserving
+its upstream defaults. Shorter half-lives make recent samples carry more weight;
+a shorter memory aggregation interval reduces the window used to group memory
+peaks. These settings affect recommendation calculation, not the CPU/memory
+resources reserved for the recommender itself.
 
 By default the hostname is `goldilocks.<cluster-domain>`, with TLS secret
 `goldilocks-tls`. Optional `hostname`, `tls_secret_name` and `allowed_groups`

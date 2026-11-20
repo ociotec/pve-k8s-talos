@@ -179,6 +179,82 @@ run "reject_noncanonical_whole_gib" {
   variables { vpa_goldilocks = { recommender_memory = "1024Mi" } }
   expect_failures = [var.vpa_goldilocks]
 }
+run "recommendation_defaults_preserve_existing_flags" {
+  command = plan
+  assert {
+    condition = yamldecode(output.helm_values).recommender.extraArgs == {
+      pod-recommendation-min-cpu-millicores = 10
+      pod-recommendation-min-memory-mb = 10
+    }
+    error_message = "Existing clusters must retain 10m/10MB floors without adding history flags."
+  }
+}
+run "cluster_recommendation_overrides_reach_helm" {
+  command = plan
+  variables {
+    vpa_goldilocks = {
+      recommender_min_cpu_millicores = 15
+      recommender_min_memory_mb = 100
+      recommender_cpu_histogram_decay_half_life = "30m"
+      recommender_memory_histogram_decay_half_life = "1h"
+      recommender_memory_aggregation_interval = "15m"
+    }
+  }
+  assert {
+    condition = yamldecode(output.helm_values).recommender.extraArgs == {
+      pod-recommendation-min-cpu-millicores = 15
+      pod-recommendation-min-memory-mb = 100
+      cpu-histogram-decay-half-life = "30m"
+      memory-histogram-decay-half-life = "1h"
+      memory-aggregation-interval = "15m"
+    }
+    error_message = "Cluster-specific recommendation settings must reach the Helm values with the correct flags."
+  }
+}
+run "partial_history_override_omits_null_flags" {
+  command = plan
+  variables {
+    vpa_goldilocks = {
+      recommender_min_cpu_millicores = null
+      recommender_min_memory_mb = null
+      recommender_cpu_histogram_decay_half_life = "1h30m"
+      recommender_memory_histogram_decay_half_life = null
+    }
+  }
+  assert {
+    condition = yamldecode(output.helm_values).recommender.extraArgs == {
+      pod-recommendation-min-cpu-millicores = 10
+      pod-recommendation-min-memory-mb = 10
+      cpu-histogram-decay-half-life = "1h30m"
+    }
+    error_message = "Partial overrides must preserve floor defaults and omit unset history flags."
+  }
+}
+run "reject_negative_recommendation_cpu" {
+  command = plan
+  variables { vpa_goldilocks = { recommender_min_cpu_millicores = -1 } }
+  expect_failures = [var.vpa_goldilocks]
+}
+run "reject_negative_recommendation_memory" {
+  command = plan
+  variables { vpa_goldilocks = { recommender_min_memory_mb = -1 } }
+  expect_failures = [var.vpa_goldilocks]
+}
+run "reject_unitless_history_duration" {
+  command = plan
+  variables { vpa_goldilocks = { recommender_cpu_histogram_decay_half_life = "30" } }
+  expect_failures = [var.vpa_goldilocks]
+}
+run "reject_zero_history_duration" {
+  command = plan
+  variables { vpa_goldilocks = { recommender_memory_histogram_decay_half_life = "0h0m" } }
+  expect_failures = [var.vpa_goldilocks]
+}
+run "reject_negative_aggregation_interval" {
+  command = plan
+  variables { vpa_goldilocks = { recommender_memory_aggregation_interval = "-15m" } }
+  expect_failures = [var.vpa_goldilocks]
+}
 '''
         with tempfile.TemporaryDirectory(prefix="vpa-sizing-tests-") as directory:
             Path(directory, "main.tf").write_text(sizing + fixture)

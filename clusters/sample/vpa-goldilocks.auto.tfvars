@@ -10,6 +10,14 @@ vpa_goldilocks = {
   # Defaults to true: analyze current and future namespaces automatically.
   # Set false to analyze only namespaces labeled goldilocks.fairwinds.com/enabled=true.
   all_namespaces = true
+  # Recommendation floors default to 10 millicores of CPU and 10 MB per pod.
+  # recommender_min_cpu_millicores = 10
+  # recommender_min_memory_mb      = 10
+  # History settings are optional; all three upstream defaults are 24h.
+  # Omitted/null values retain upstream defaults.
+  # recommender_cpu_histogram_decay_half_life    = "24h"
+  # recommender_memory_histogram_decay_half_life = "24h"
+  # recommender_memory_aggregation_interval      = "24h"
   # VPA recommender and Goldilocks controller/dashboard CPU and RAM
   # are sized automatically from total planned worker vCPU and RAM, even on an
   # empty cluster. Omit their settings (or set null) to use automatic sizing.
