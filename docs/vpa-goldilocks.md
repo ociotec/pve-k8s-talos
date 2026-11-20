@@ -22,6 +22,10 @@ The deployment section is `monitoring`, with a Keycloak client configured throug
 `identity` and `identity-config`.
 
 - VPA chart `5.1.0` installs its CRDs and recommender `1.7.1`.
+- The recommender uses fixed platform-wide recommendation floors of 10 millicores
+  of CPU and 10 MB of memory per pod, allowing smaller recommendations for
+  lightweight infrastructure workloads. These floors do not replace usage-based
+  estimates or their safety margins and do not set workload requests or limits.
 - The updater and admission controller are disabled. No VPA component changes
   requests or evicts workload pods in this design.
 - Goldilocks `v4.16.2` is managed by typed Kubernetes resources in OpenTofu.

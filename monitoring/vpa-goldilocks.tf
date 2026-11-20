@@ -336,6 +336,11 @@ resource "helm_release" "vpa" {
     recommender = {
       enabled = true
       image   = { repository = "registry.k8s.io/autoscaling/vpa-recommender", tag = var.vpa_goldilocks.recommender_image_tag }
+      # Lower the upstream recommendation floors for small infrastructure pods.
+      extraArgs = {
+        "pod-recommendation-min-cpu-millicores" = 10
+        "pod-recommendation-min-memory-mb"      = 10
+      }
       podLabels = {
         "app.kubernetes.io/part-of"    = "vpa"
         "app.kubernetes.io/managed-by" = "infrastructure"
